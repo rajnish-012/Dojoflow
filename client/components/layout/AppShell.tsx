@@ -65,11 +65,12 @@ export default function AppShell({
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [authorized, setAuthorized] = useState(false);
 
-  const isLoginPage = pathname === "/login";
+  // Public pages
+  const isPublicPage = pathname === "/" || pathname === "/login";
 
   useEffect(() => {
-    // Login page is public
-    if (isLoginPage) {
+    // Home page and login page are public
+    if (isPublicPage) {
       setCheckingAuth(false);
       setAuthorized(true);
       return;
@@ -144,11 +145,11 @@ export default function AppShell({
 
       router.replace("/login");
     }
-  }, [isLoginPage, pathname, router]);
+  }, [isPublicPage, pathname, router]);
 
-  // Login page should never show
+  // Public pages should never show
   // dashboard sidebar/header.
-  if (isLoginPage) {
+  if (isPublicPage) {
     return <>{children}</>;
   }
 
