@@ -1,4 +1,5 @@
 const bcrypt = require("bcryptjs");
+
 const User = require("../models/User");
 const Branch = require("../models/Branch");
 
@@ -8,7 +9,7 @@ const STAFF_ROLES = [
   "COACH",
 ];
 
-/*
+/**
  * Get all staff users
  * Only SUPER_ADMIN can access this.
  */
@@ -38,9 +39,8 @@ const getStaffUsers = async (req, res) => {
   }
 };
 
-/*
+/**
  * Create staff user
- *
  * Only SUPER_ADMIN is allowed to create staff.
  */
 const createStaffUser = async (req, res) => {
@@ -53,7 +53,6 @@ const createStaffUser = async (req, res) => {
       branch,
     } = req.body;
 
-    // Required fields
     if (!name || !email || !password || !role) {
       return res.status(400).json({
         success: false,
@@ -62,7 +61,6 @@ const createStaffUser = async (req, res) => {
       });
     }
 
-    // Validate role
     if (!STAFF_ROLES.includes(role)) {
       return res.status(400).json({
         success: false,
@@ -70,8 +68,6 @@ const createStaffUser = async (req, res) => {
       });
     }
 
-    // Prevent creating another Super Admin
-    // through the UI/API.
     if (role === "SUPER_ADMIN") {
       return res.status(400).json({
         success: false,
@@ -80,7 +76,6 @@ const createStaffUser = async (req, res) => {
       });
     }
 
-    // Branch is required for branch-specific staff
     if (
       (role === "BRANCH_ADMIN" || role === "COACH") &&
       !branch
@@ -92,10 +87,7 @@ const createStaffUser = async (req, res) => {
       });
     }
 
-    // Check existing email
-    const normalizedEmail = email
-      .trim()
-      .toLowerCase();
+    const normalizedEmail = email.trim().toLowerCase();
 
     const existingUser = await User.findOne({
       email: normalizedEmail,
@@ -108,7 +100,6 @@ const createStaffUser = async (req, res) => {
       });
     }
 
-    // Validate branch
     let branchId = null;
 
     if (branch) {
@@ -131,13 +122,11 @@ const createStaffUser = async (req, res) => {
       branchId = branchExists._id;
     }
 
-    // Hash password
     const hashedPassword = await bcrypt.hash(
       password,
       10,
     );
 
-    // Create user
     const user = await User.create({
       name: name.trim(),
       email: normalizedEmail,
@@ -146,9 +135,7 @@ const createStaffUser = async (req, res) => {
       branch: branchId,
     });
 
-    const populatedUser = await User.findById(
-      user._id,
-    )
+    const populatedUser = await User.findById(user._id)
       .populate("branch", "name address phone")
       .select("-password");
 
@@ -167,16 +154,155 @@ const createStaffUser = async (req, res) => {
   }
 };
 
-/*
- * Delete staff user
+/**
+ * Update staff user
+ * Only SUPER_ADMIN can access this.
  *
+ * Password is optional.
+ * If password is empty, old password remains unchanged.
+ */
+const updateStaffUser = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const {
+      name,
+      email,
+      password,
+      role,
+      branch,
+    } = req.body;
+
+    const user = await User.findById(id);
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "Staff user not found",
+      });
+    }
+
+    if (!STAFF_ROLES.includes(user.role)) {
+      return res.status(400).json({
+        success: false,
+        message: "This account is not a staff account",
+      });
+    }
+
+    if (user.role === "SUPER_ADMIN") {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Super Admin account cannot be edited here",
+      });
+    }
+
+    if (!name || !email || !role) {
+      return res.status(400).json({
+        success: false,
+        message: "Name, email and role are required",
+      });
+    }
+
+    if (!["BRANCH_ADMIN", "COACH"].includes(role)) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Only Branch Admin and Coach roles are allowed",
+      });
+    }
+
+    if (
+      (role === "BRANCH_ADMIN" || role === "COACH") &&
+      !branch
+    ) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Branch is required for Branch Admin and Coach",
+      });
+    }
+
+    const normalizedEmail = email.trim().toLowerCase();
+
+    const existingUser = await User.findOne({
+      email: normalizedEmail,
+      _id: { $ne: id },
+    });
+
+    if (existingUser) {
+      return res.status(409).json({
+        success: false,
+        message: "A user with this email already exists",
+      });
+    }
+
+    const branchExists = await Branch.findById(branch);
+
+    if (!branchExists) {
+      return res.status(404).json({
+        success: false,
+        message: "Selected branch not found",
+      });
+    }
+
+    if (!branchExists.isActive) {
+      return res.status(400).json({
+        success: false,
+        message: "Selected branch is inactive",
+      });
+    }
+
+    user.name = name.trim();
+    user.email = normalizedEmail;
+    user.role = role;
+    user.branch = branchExists._id;
+
+    // Update password only when a new password is provided.
+    if (password && password.trim().length > 0) {
+      if (password.trim().length < 6) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Password must contain at least 6 characters",
+        });
+      }
+
+      user.password = await bcrypt.hash(
+        password.trim(),
+        10,
+      );
+    }
+
+    await user.save();
+
+    const updatedUser = await User.findById(user._id)
+      .populate("branch", "name address phone")
+      .select("-password");
+
+    res.status(200).json({
+      success: true,
+      message: "Staff user updated successfully",
+      user: updatedUser,
+    });
+  } catch (error) {
+    console.error("Update staff user error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+    });
+  }
+};
+
+/**
+ * Delete staff user
  * Only SUPER_ADMIN can delete staff.
  */
 const deleteStaffUser = async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Prevent deleting yourself
     if (req.user._id.toString() === id) {
       return res.status(400).json({
         success: false,
@@ -219,5 +345,6 @@ const deleteStaffUser = async (req, res) => {
 module.exports = {
   getStaffUsers,
   createStaffUser,
+  updateStaffUser,
   deleteStaffUser,
 };

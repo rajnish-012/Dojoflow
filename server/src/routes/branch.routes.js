@@ -3,6 +3,7 @@ const express = require("express");
 const {
   getBranches,
   getBranchById,
+  createBranch,
 } = require("../controllers/branch.controller");
 
 const protect = require("../middleware/auth.middleware");
@@ -15,6 +16,14 @@ router.get(
   protect,
   authorize("SUPER_ADMIN", "BRANCH_ADMIN", "COACH"),
   getBranches
+);
+
+// Create branch — only Super Admin
+router.post(
+  "/",
+  protect,
+  authorize("SUPER_ADMIN"),
+  createBranch
 );
 
 router.get(

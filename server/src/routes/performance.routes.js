@@ -2,6 +2,7 @@ const express = require("express");
 
 const {
   getPerformance,
+  getMyPerformance,
   getPerformanceById,
   createPerformance,
 } = require("../controllers/performance.controller");
@@ -11,7 +12,22 @@ const authorize = require("../middleware/role.middleware");
 
 const router = express.Router();
 
-// Get all performance records
+// ======================================================
+// STUDENT'S OWN PERFORMANCE
+// IMPORTANT: /me must come before /:id
+// ======================================================
+
+router.get(
+  "/me",
+  protect,
+  authorize("STUDENT"),
+  getMyPerformance
+);
+
+// ======================================================
+// GET ALL PERFORMANCE RECORDS
+// ======================================================
+
 router.get(
   "/",
   protect,
@@ -19,7 +35,10 @@ router.get(
   getPerformance
 );
 
-// Get performance by ID
+// ======================================================
+// GET PERFORMANCE BY ID
+// ======================================================
+
 router.get(
   "/:id",
   protect,
@@ -27,7 +46,10 @@ router.get(
   getPerformanceById
 );
 
-// Create performance record
+// ======================================================
+// CREATE PERFORMANCE RECORD
+// ======================================================
+
 router.post(
   "/",
   protect,

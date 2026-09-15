@@ -4,7 +4,6 @@ const Performance = require("../models/Performance");
 const Student = require("../models/Student");
 const Branch = require("../models/Branch");
 
-
 // ==============================
 // GET ALL PERFORMANCE RECORDS
 // ==============================
@@ -21,9 +20,9 @@ const getPerformance = async (req, res) => {
       .populate("student", "name age phone currentBelt status")
       .populate("branch", "name address")
       .populate("evaluatedBy", "name email")
-      .sort({ evaluationDate: -1 });
+      .sort({ evaluationDate: -1, createdAt: -1 });
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       count: performance.length,
       performance,
@@ -31,13 +30,56 @@ const getPerformance = async (req, res) => {
   } catch (error) {
     console.error("Get performance error:", error);
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: "Failed to fetch performance records",
+      performance: [],
     });
   }
 };
 
+// ==============================
+// GET LOGGED-IN STUDENT'S PERFORMANCE
+// ==============================
+const getMyPerformance = async (req, res) => {
+  try {
+    // Find the Student document connected to the logged-in User
+    const student = await Student.findOne({
+      user: req.user._id,
+    });
+
+    if (!student) {
+      return res.status(404).json({
+        success: false,
+        message: "Student profile not found",
+        performance: [],
+      });
+    }
+
+    // Find performance records using the Student ID
+    const performance = await Performance.find({
+      student: student._id,
+    })
+      .populate("student", "name age phone currentBelt status")
+      .populate("branch", "name address")
+      .populate("evaluatedBy", "name email")
+      .sort({ evaluationDate: -1, createdAt: -1 });
+
+    return res.status(200).json({
+      success: true,
+      count: performance.length,
+      performance,
+    });
+  } catch (error) {
+    console.error("Get my performance error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch your performance records",
+      performance: [],
+    });
+  }
+};
 
 // ==============================
 // GET PERFORMANCE BY ID
@@ -65,30 +107,34 @@ const getPerformanceById = async (req, res) => {
       });
     }
 
-    if (
-      ["BRANCH_ADMIN", "COACH"].includes(req.user.role) &&
-      performance.branch._id.toString() !== req.user.branch.toString()
-    ) {
-      return res.status(403).json({
-        success: false,
-        message: "You do not have access to this performance record",
-      });
+    // Branch-level access
+    if (["BRANCH_ADMIN", "COACH"].includes(req.user.role)) {
+      if (
+        !performance.branch ||
+        !req.user.branch ||
+        performance.branch._id.toString() !==
+          req.user.branch.toString()
+      ) {
+        return res.status(403).json({
+          success: false,
+          message: "You do not have access to this performance record",
+        });
+      }
     }
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       performance,
     });
   } catch (error) {
     console.error("Get performance by ID error:", error);
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: "Failed to fetch performance record",
     });
   }
 };
-
 
 // ==============================
 // CREATE PERFORMANCE RECORD
@@ -127,7 +173,13 @@ const createPerformance = async (req, res) => {
       });
     }
 
-    if (rating < 1 || rating > 5) {
+    const numericRating = Number(rating);
+
+    if (
+      Number.isNaN(numericRating) ||
+      numericRating < 1 ||
+      numericRating > 5
+    ) {
       return res.status(400).json({
         success: false,
         message: "Rating must be between 1 and 5",
@@ -143,14 +195,19 @@ const createPerformance = async (req, res) => {
       });
     }
 
-    if (
-      ["BRANCH_ADMIN", "COACH"].includes(req.user.role) &&
-      studentRecord.branch.toString() !== req.user.branch.toString()
-    ) {
-      return res.status(403).json({
-        success: false,
-        message: "You do not have access to this student",
-      });
+    // Branch-level access
+    if (["BRANCH_ADMIN", "COACH"].includes(req.user.role)) {
+      if (
+        !req.user.branch ||
+        !studentRecord.branch ||
+        studentRecord.branch.toString() !==
+          req.user.branch.toString()
+      ) {
+        return res.status(403).json({
+          success: false,
+          message: "You do not have access to this student",
+        });
+      }
     }
 
     const branch = await Branch.findById(studentRecord.branch);
@@ -162,16 +219,25 @@ const createPerformance = async (req, res) => {
       });
     }
 
+    const parsedEvaluationDate = new Date(evaluationDate);
+
+    if (Number.isNaN(parsedEvaluationDate.getTime())) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid evaluation date",
+      });
+    }
+
     const performance = await Performance.create({
-      student,
+      student: studentRecord._id,
       branch: studentRecord.branch,
-      planDay,
-      curriculumTitle,
-      skill,
-      rating,
-      remarks,
+      planDay: Number(planDay),
+      curriculumTitle: curriculumTitle.trim(),
+      skill: skill.trim(),
+      rating: numericRating,
+      remarks: remarks ? remarks.trim() : "",
       evaluatedBy: req.user._id,
-      evaluationDate,
+      evaluationDate: parsedEvaluationDate,
     });
 
     const populatedPerformance = await Performance.findById(
@@ -181,7 +247,7 @@ const createPerformance = async (req, res) => {
       .populate("branch", "name address")
       .populate("evaluatedBy", "name email");
 
-    res.status(201).json({
+    return res.status(201).json({
       success: true,
       message: "Performance recorded successfully",
       performance: populatedPerformance,
@@ -189,16 +255,16 @@ const createPerformance = async (req, res) => {
   } catch (error) {
     console.error("Create performance error:", error);
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: "Failed to record performance",
     });
   }
 };
 
-
 module.exports = {
   getPerformance,
+  getMyPerformance,
   getPerformanceById,
   createPerformance,
 };

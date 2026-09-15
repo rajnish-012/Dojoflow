@@ -66,7 +66,54 @@ const getBranchById = async (req, res) => {
   }
 };
 
+// Create a new branch
+const createBranch = async (req, res) => {
+  try {
+    const { name, address, phone } = req.body;
+
+    if (!name || !address) {
+      return res.status(400).json({
+        success: false,
+        message: "Branch name and address are required",
+      });
+    }
+
+    const existingBranch = await Branch.findOne({
+      name: name.trim(),
+    });
+
+    if (existingBranch) {
+      return res.status(400).json({
+        success: false,
+        message: "A branch with this name already exists",
+      });
+    }
+
+    const branch = await Branch.create({
+      name: name.trim(),
+      address: address.trim(),
+      phone: phone ? phone.trim() : "",
+      isActive: true,
+    });
+
+    res.status(201).json({
+      success: true,
+      message: "Branch created successfully",
+      branch,
+    });
+  } catch (error) {
+    console.error("Create branch error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to create branch",
+    });
+  }
+};
+
+
 module.exports = {
   getBranches,
   getBranchById,
+  createBranch,
 };

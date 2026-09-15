@@ -2,6 +2,7 @@ const express = require("express");
 
 const {
   getPlans,
+  getPublicPlans,
   getPlanById,
   createPlan,
   updatePlan,
@@ -12,6 +13,9 @@ const protect = require("../middleware/auth.middleware");
 const authorize = require("../middleware/role.middleware");
 
 const router = express.Router();
+
+// Get active plans for public users
+router.get("/public", getPublicPlans);
 
 // Get all plans
 router.get(

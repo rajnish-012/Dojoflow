@@ -171,6 +171,32 @@ const updatePlan = async (req, res) => {
   }
 };
 
+// Get active plans for public users
+const getPublicPlans = async (req, res) => {
+  try {
+    const plans = await Plan.find({
+      isActive: true,
+    })
+      .select(
+        "name price duration durationUnit classesPerWeek startingBelt progressReports milestones curriculum"
+      )
+      .sort({ createdAt: -1 });
+
+    res.status(200).json({
+      success: true,
+      count: plans.length,
+      plans,
+    });
+  } catch (error) {
+    console.error("Get public plans error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch public plans",
+    });
+  }
+};
+
 // Delete plan
 const deletePlan = async (req, res) => {
   try {
@@ -210,6 +236,7 @@ const deletePlan = async (req, res) => {
 
 module.exports = {
   getPlans,
+  getPublicPlans,
   getPlanById,
   createPlan,
   updatePlan,

@@ -3,6 +3,7 @@ const express = require("express");
 const {
   getStaffUsers,
   createStaffUser,
+  updateStaffUser,
   deleteStaffUser,
 } = require("../controllers/user.controller");
 
@@ -11,12 +12,7 @@ const authorize = require("../middleware/role.middleware");
 
 const router = express.Router();
 
-/*
- * All user-management routes require authentication
- * and SUPER_ADMIN access.
- */
-
-// Get all staff
+// Get all staff users
 router.get(
   "/",
   protect,
@@ -24,7 +20,7 @@ router.get(
   getStaffUsers,
 );
 
-// Create staff
+// Create staff user
 router.post(
   "/",
   protect,
@@ -32,7 +28,15 @@ router.post(
   createStaffUser,
 );
 
-// Delete staff
+// Update staff user
+router.put(
+  "/:id",
+  protect,
+  authorize("SUPER_ADMIN"),
+  updateStaffUser,
+);
+
+// Delete staff user
 router.delete(
   "/:id",
   protect,

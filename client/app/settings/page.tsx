@@ -9,6 +9,7 @@ import {
   GraduationCap,
   Building2,
   X,
+  Pencil,
 } from "lucide-react";
 
 const API_URL = "http://localhost:5000/api";
@@ -38,25 +39,33 @@ type FormData = {
   branch: string;
 };
 
+const emptyForm: FormData = {
+  name: "",
+  email: "",
+  password: "",
+  role: "COACH",
+  branch: "",
+};
+
 export default function StaffManagementPage() {
   const [users, setUsers] = useState<StaffUser[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [updating, setUpdating] = useState(false);
 
   const [error, setError] = useState("");
   const [formError, setFormError] = useState("");
+  const [editError, setEditError] = useState("");
 
   const [showModal, setShowModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
 
-  const [form, setForm] = useState<FormData>({
-    name: "",
-    email: "",
-    password: "",
-    role: "COACH",
-    branch: "",
-  });
+  const [editingUser, setEditingUser] =
+    useState<StaffUser | null>(null);
+
+  const [form, setForm] = useState<FormData>(emptyForm);
 
   useEffect(() => {
     loadData();
@@ -123,15 +132,7 @@ export default function StaffManagementPage() {
 
   function openModal() {
     setFormError("");
-
-    setForm({
-      name: "",
-      email: "",
-      password: "",
-      role: "COACH",
-      branch: "",
-    });
-
+    setForm({ ...emptyForm });
     setShowModal(true);
   }
 
@@ -140,6 +141,35 @@ export default function StaffManagementPage() {
 
     setShowModal(false);
     setFormError("");
+    setForm({ ...emptyForm });
+  }
+
+  function openEditModal(user: StaffUser) {
+    if (user.role === "SUPER_ADMIN") {
+      return;
+    }
+
+    setEditingUser(user);
+
+    setForm({
+      name: user.name || "",
+      email: user.email || "",
+      password: "",
+      role: user.role as "BRANCH_ADMIN" | "COACH",
+      branch: user.branch?._id || "",
+    });
+
+    setEditError("");
+    setShowEditModal(true);
+  }
+
+  function closeEditModal() {
+    if (updating) return;
+
+    setShowEditModal(false);
+    setEditingUser(null);
+    setEditError("");
+    setForm({ ...emptyForm });
   }
 
   function handleChange(
@@ -224,15 +254,7 @@ export default function StaffManagementPage() {
         ...current,
       ]);
 
-      setShowModal(false);
-
-      setForm({
-        name: "",
-        email: "",
-        password: "",
-        role: "COACH",
-        branch: "",
-      });
+      closeModal();
     } catch (err) {
       console.error(err);
 
@@ -243,6 +265,103 @@ export default function StaffManagementPage() {
       );
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleUpdateUser(
+    event: React.FormEvent<HTMLFormElement>,
+  ) {
+    event.preventDefault();
+
+    setEditError("");
+
+    if (!editingUser) {
+      return;
+    }
+
+    if (!form.name.trim()) {
+      setEditError("Please enter the staff member's name.");
+      return;
+    }
+
+    if (!form.email.trim()) {
+      setEditError("Please enter an email address.");
+      return;
+    }
+
+    if (!form.branch) {
+      setEditError(
+        "Please select a branch for this staff member.",
+      );
+      return;
+    }
+
+    if (
+      form.password.trim() &&
+      form.password.trim().length < 6
+    ) {
+      setEditError(
+        "New password must contain at least 6 characters.",
+      );
+      return;
+    }
+
+    try {
+      setUpdating(true);
+
+      const token = localStorage.getItem("token");
+
+      if (!token) {
+        window.location.href = "/login";
+        return;
+      }
+
+      const response = await fetch(
+        `${API_URL}/users/${editingUser._id}`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            name: form.name.trim(),
+            email: form.email.trim(),
+            role: form.role,
+            branch: form.branch,
+            password:
+              form.password.trim() || undefined,
+          }),
+        },
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data.message || "Failed to update staff user",
+        );
+      }
+
+      setUsers((current) =>
+        current.map((user) =>
+          user._id === editingUser._id
+            ? data.user
+            : user,
+        ),
+      );
+
+      closeEditModal();
+    } catch (err) {
+      console.error(err);
+
+      setEditError(
+        err instanceof Error
+          ? err.message
+          : "Failed to update staff user",
+      );
+    } finally {
+      setUpdating(false);
     }
   }
 
@@ -480,7 +599,7 @@ export default function StaffManagementPage() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[800px]">
+            <table className="w-full min-w-[850px]">
               <thead className="border-b border-slate-200 bg-slate-50">
                 <tr>
                   <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -500,7 +619,7 @@ export default function StaffManagementPage() {
                   </th>
 
                   <th className="px-6 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    Action
+                    Actions
                   </th>
                 </tr>
               </thead>
@@ -586,19 +705,32 @@ export default function StaffManagementPage() {
                         </span>
                       </td>
 
-                      {/* Delete */}
+                      {/* Actions */}
                       <td className="px-6 py-4 text-right">
                         {user.role !== "SUPER_ADMIN" && (
-                          <button
-                            type="button"
-                            onClick={() =>
-                              handleDeleteUser(user)
-                            }
-                            className="inline-flex items-center justify-center rounded-lg p-2 text-slate-400 transition hover:bg-red-50 hover:text-red-600"
-                            title="Delete staff user"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
+                          <div className="flex items-center justify-end gap-2">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                openEditModal(user)
+                              }
+                              className="inline-flex items-center justify-center rounded-lg p-2 text-slate-400 transition hover:bg-blue-50 hover:text-blue-600"
+                              title="Edit staff user"
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleDeleteUser(user)
+                              }
+                              className="inline-flex items-center justify-center rounded-lg p-2 text-slate-400 transition hover:bg-red-50 hover:text-red-600"
+                              title="Delete staff user"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </div>
                         )}
                       </td>
                     </tr>
@@ -630,7 +762,7 @@ export default function StaffManagementPage() {
                 type="button"
                 onClick={closeModal}
                 disabled={saving}
-                className="rounded-lg p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
+                className="rounded-lg p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 disabled:opacity-50"
               >
                 <X className="h-5 w-5" />
               </button>
@@ -793,6 +925,186 @@ export default function StaffManagementPage() {
                       <UserPlus className="h-4 w-4" />
                       Create User
                     </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Staff User Modal */}
+      {showEditModal && editingUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white shadow-xl">
+            {/* Modal Header */}
+            <div className="sticky top-0 flex items-center justify-between border-b border-slate-200 bg-white px-6 py-5">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-900">
+                  Edit Staff User
+                </h2>
+
+                <p className="mt-1 text-xs text-slate-500">
+                  Update staff account information.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={closeEditModal}
+                disabled={updating}
+                className="rounded-lg p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 disabled:opacity-50"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <form
+              onSubmit={handleUpdateUser}
+              className="space-y-5 p-6"
+            >
+              {/* Error */}
+              {editError && (
+                <div className="rounded-lg border border-red-200 bg-red-50 p-3">
+                  <p className="text-sm text-red-700">
+                    {editError}
+                  </p>
+                </div>
+              )}
+
+              {/* Name */}
+              <div>
+                <label className="mb-1.5 block text-sm font-medium text-slate-700">
+                  Full Name *
+                </label>
+
+                <input
+                  name="name"
+                  value={form.name}
+                  onChange={handleChange}
+                  placeholder="Rahul Kumar"
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-slate-900"
+                />
+              </div>
+
+              {/* Email */}
+              <div>
+                <label className="mb-1.5 block text-sm font-medium text-slate-700">
+                  Email *
+                </label>
+
+                <input
+                  name="email"
+                  type="email"
+                  value={form.email}
+                  onChange={handleChange}
+                  placeholder="rahul@dojoflow.com"
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-slate-900"
+                />
+              </div>
+
+              {/* New Password */}
+              <div>
+                <label className="mb-1.5 block text-sm font-medium text-slate-700">
+                  New Password{" "}
+                  <span className="text-xs font-normal text-slate-400">
+                    (Optional)
+                  </span>
+                </label>
+
+                <input
+                  name="password"
+                  type="password"
+                  value={form.password}
+                  onChange={handleChange}
+                  placeholder="Leave blank to keep current password"
+                  minLength={6}
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-slate-900"
+                />
+
+                <p className="mt-1.5 text-xs text-slate-400">
+                  Enter a password only if you want to change
+                  the current password.
+                </p>
+              </div>
+
+              {/* Role */}
+              <div>
+                <label className="mb-1.5 block text-sm font-medium text-slate-700">
+                  Role *
+                </label>
+
+                <select
+                  name="role"
+                  value={form.role}
+                  onChange={handleChange}
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-slate-900"
+                >
+                  <option value="COACH">
+                    Coach
+                  </option>
+
+                  <option value="BRANCH_ADMIN">
+                    Branch Admin
+                  </option>
+                </select>
+              </div>
+
+              {/* Branch */}
+              <div>
+                <label className="mb-1.5 block text-sm font-medium text-slate-700">
+                  Branch *
+                </label>
+
+                <select
+                  name="branch"
+                  value={form.branch}
+                  onChange={handleChange}
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-slate-900"
+                >
+                  <option value="">
+                    Select a branch
+                  </option>
+
+                  {branches
+                    .filter(
+                      (branch) =>
+                        branch.isActive !== false,
+                    )
+                    .map((branch) => (
+                      <option
+                        key={branch._id}
+                        value={branch._id}
+                      >
+                        {branch.name}
+                      </option>
+                    ))}
+                </select>
+              </div>
+
+              {/* Footer */}
+              <div className="flex justify-end gap-3 border-t border-slate-200 pt-5">
+                <button
+                  type="button"
+                  onClick={closeEditModal}
+                  disabled={updating}
+                  className="rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="submit"
+                  disabled={updating}
+                  className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {updating ? (
+                    <>
+                      <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+                      Saving...
+                    </>
+                  ) : (
+                    "Save Changes"
                   )}
                 </button>
               </div>

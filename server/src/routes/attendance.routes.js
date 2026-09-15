@@ -2,6 +2,7 @@ const express = require("express");
 
 const {
   getAttendance,
+  getMyAttendance,
   getAttendanceById,
   markAttendance,
 } = require("../controllers/attendance.controller");
@@ -11,7 +12,22 @@ const authorize = require("../middleware/role.middleware");
 
 const router = express.Router();
 
-// Get all attendance
+// ======================================================
+// STUDENT'S OWN ATTENDANCE
+// IMPORTANT: /me must come before /:id
+// ======================================================
+
+router.get(
+  "/me",
+  protect,
+  authorize("STUDENT"),
+  getMyAttendance
+);
+
+// ======================================================
+// GET ALL ATTENDANCE
+// ======================================================
+
 router.get(
   "/",
   protect,
@@ -19,7 +35,10 @@ router.get(
   getAttendance
 );
 
-// Get attendance by ID
+// ======================================================
+// GET ATTENDANCE BY ID
+// ======================================================
+
 router.get(
   "/:id",
   protect,
@@ -27,7 +46,10 @@ router.get(
   getAttendanceById
 );
 
-// Mark attendance
+// ======================================================
+// MARK ATTENDANCE
+// ======================================================
+
 router.post(
   "/",
   protect,

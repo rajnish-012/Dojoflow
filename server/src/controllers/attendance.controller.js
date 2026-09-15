@@ -51,7 +51,7 @@ const getAttendance = async (req, res) => {
       .populate("markedBy", "name email")
       .sort({ date: -1 });
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       count: attendance.length,
       attendance,
@@ -59,9 +59,52 @@ const getAttendance = async (req, res) => {
   } catch (error) {
     console.error("Get attendance error:", error);
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: "Failed to fetch attendance",
+    });
+  }
+};
+
+// ==============================
+// GET LOGGED-IN STUDENT'S ATTENDANCE
+// ==============================
+const getMyAttendance = async (req, res) => {
+  try {
+    // Find the Student document connected to the logged-in User
+    const student = await Student.findOne({
+      user: req.user._id,
+    });
+
+    if (!student) {
+      return res.status(404).json({
+        success: false,
+        message: "Student profile not found",
+        attendance: [],
+      });
+    }
+
+    // Fetch attendance using the Student ID
+    const attendance = await Attendance.find({
+      student: student._id,
+    })
+      .populate("student", "name age phone currentBelt status")
+      .populate("branch", "name address")
+      .populate("markedBy", "name email")
+      .sort({ date: -1, createdAt: -1 });
+
+    return res.status(200).json({
+      success: true,
+      count: attendance.length,
+      attendance,
+    });
+  } catch (error) {
+    console.error("Get my attendance error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch your attendance",
+      attendance: [],
     });
   }
 };
@@ -95,7 +138,10 @@ const getAttendanceById = async (req, res) => {
     // Branch-level access
     if (
       ["BRANCH_ADMIN", "COACH"].includes(req.user.role) &&
-      attendance.branch._id.toString() !== req.user.branch.toString()
+      attendance.branch &&
+      req.user.branch &&
+      attendance.branch._id.toString() !==
+        req.user.branch.toString()
     ) {
       return res.status(403).json({
         success: false,
@@ -103,14 +149,14 @@ const getAttendanceById = async (req, res) => {
       });
     }
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       attendance,
     });
   } catch (error) {
     console.error("Get attendance by ID error:", error);
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: "Failed to fetch attendance record",
     });
@@ -171,7 +217,9 @@ const markAttendance = async (req, res) => {
     // Branch-level access
     if (
       ["BRANCH_ADMIN", "COACH"].includes(req.user.role) &&
-      studentRecord.branch.toString() !== req.user.branch.toString()
+      req.user.branch &&
+      studentRecord.branch.toString() !==
+        req.user.branch.toString()
     ) {
       return res.status(403).json({
         success: false,
@@ -197,7 +245,7 @@ const markAttendance = async (req, res) => {
       });
     }
 
-    // Create date range for duplicate checking
+    // Validate attendance date
     const attendanceDate = new Date(date);
 
     if (Number.isNaN(attendanceDate.getTime())) {
@@ -250,7 +298,7 @@ const markAttendance = async (req, res) => {
       .populate("branch", "name address")
       .populate("markedBy", "name email");
 
-    res.status(201).json({
+    return res.status(201).json({
       success: true,
       message: "Attendance marked successfully",
       attendance: populatedAttendance,
@@ -258,7 +306,7 @@ const markAttendance = async (req, res) => {
   } catch (error) {
     console.error("Mark attendance error:", error);
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: "Failed to mark attendance",
     });
@@ -267,6 +315,7 @@ const markAttendance = async (req, res) => {
 
 module.exports = {
   getAttendance,
+  getMyAttendance,
   getAttendanceById,
   markAttendance,
 };

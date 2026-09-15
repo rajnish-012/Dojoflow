@@ -84,6 +84,17 @@ type Progress = {
   averageRating: number;
 };
 
+type EditForm = {
+  name: string;
+  age: string;
+  phone: string;
+  email: string;
+  plan: string;
+  currentBelt: string;
+  status: "ACTIVE" | "INACTIVE" | "COMPLETED";
+  password: string;
+};
+
 export default function StudentDetailsPage() {
   const params = useParams();
   const router = useRouter();
@@ -108,17 +119,15 @@ export default function StudentDetailsPage() {
     }[]
   >([]);
 
-  const [editForm, setEditForm] = useState({
+  const [editForm, setEditForm] = useState<EditForm>({
     name: "",
     age: "",
     phone: "",
     email: "",
     plan: "",
     currentBelt: "",
-    status: "ACTIVE" as
-      | "ACTIVE"
-      | "INACTIVE"
-      | "COMPLETED",
+    status: "ACTIVE",
+    password: "",
   });
 
   useEffect(() => {
@@ -151,13 +160,17 @@ export default function StudentDetailsPage() {
     setEditError("");
 
     setEditForm({
-      name: student.name,
-      age: String(student.age),
-      phone: student.phone,
+      name: student.name || "",
+      age: String(student.age || ""),
+      phone: student.phone || "",
       email: student.email || "",
       plan: student.plan?._id || "",
-      currentBelt: student.currentBelt,
-      status: student.status,
+      currentBelt: student.currentBelt || "White",
+      status: student.status || "ACTIVE",
+
+      // Never load the existing password.
+      // Keep this field empty unless the admin wants to change it.
+      password: "",
     });
 
     try {
@@ -198,6 +211,8 @@ export default function StudentDetailsPage() {
   ) => {
     event.preventDefault();
 
+    setEditError("");
+
     if (
       !editForm.name.trim() ||
       !editForm.age ||
@@ -208,18 +223,36 @@ export default function StudentDetailsPage() {
       return;
     }
 
+    if (Number(editForm.age) < 1) {
+      setEditError("Age must be greater than zero.");
+      return;
+    }
+
+    if (
+      editForm.password.trim() &&
+      editForm.password.trim().length < 6
+    ) {
+      setEditError(
+        "New password must be at least 6 characters.",
+      );
+      return;
+    }
+
     try {
       setSaving(true);
-      setEditError("");
 
       await updateStudent(studentId, {
         name: editForm.name.trim(),
         age: Number(editForm.age),
         phone: editForm.phone.trim(),
-        email: editForm.email.trim(),
+        email: editForm.email.trim() || undefined,
         plan: editForm.plan,
         currentBelt: editForm.currentBelt,
         status: editForm.status,
+
+        // If blank, backend will keep the old password.
+        password:
+          editForm.password.trim() || undefined,
       });
 
       const [studentData, progressData] =
@@ -232,6 +265,7 @@ export default function StudentDetailsPage() {
       setProgress(progressData.progress);
 
       setShowEditModal(false);
+      setEditError("");
     } catch (error) {
       console.error(error);
 
@@ -741,7 +775,7 @@ export default function StudentDetailsPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white shadow-xl">
             {/* Modal Header */}
-            <div className="sticky top-0 flex items-center justify-between border-b border-slate-200 bg-white px-6 py-4">
+            <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-200 bg-white px-6 py-4">
               <div>
                 <h2 className="text-lg font-semibold text-slate-900">
                   Edit Student
@@ -756,7 +790,7 @@ export default function StudentDetailsPage() {
                 type="button"
                 onClick={closeEditModal}
                 disabled={saving}
-                className="rounded-lg p-2 text-slate-500 hover:bg-slate-100"
+                className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 disabled:opacity-50"
               >
                 <X className="h-5 w-5" />
               </button>
@@ -836,6 +870,31 @@ export default function StudentDetailsPage() {
                     className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-900"
                     placeholder="Email address"
                   />
+                </div>
+
+                {/* New Password */}
+                <div className="md:col-span-2">
+                  <label className="mb-1.5 block text-sm font-medium text-slate-700">
+                    New Login Password{" "}
+                    <span className="text-xs font-normal text-slate-400">
+                      (Optional)
+                    </span>
+                  </label>
+
+                  <input
+                    name="password"
+                    type="password"
+                    minLength={6}
+                    value={editForm.password}
+                    onChange={handleEditChange}
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-slate-900"
+                    placeholder="Leave blank to keep current password"
+                  />
+
+                  <p className="mt-1.5 text-xs text-slate-400">
+                    Enter a password only if you want to change the
+                    student's login password. Minimum 6 characters.
+                  </p>
                 </div>
 
                 {/* Plan */}
