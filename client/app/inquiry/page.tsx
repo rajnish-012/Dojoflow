@@ -722,7 +722,13 @@ export default function InquiryPage() {
             </div>
           ) : plans.length === 0 ? (
             <div className="mx-auto mt-10 max-w-lg rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
-              <Dumbbell className="mx-auto h-10 w-10 text-slate-400" />
+              <Image
+                src="/logo.png"
+                alt="DojoFlow logo"
+                width={28}
+                height={28}
+                className="h-7 w-7 rounded-md object-contain"
+              />
 
               <h3 className="mt-4 text-lg font-semibold text-slate-950">
                 No active plans available
@@ -753,7 +759,13 @@ export default function InquiryPage() {
                     </div>
 
                     <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#0b1020] text-orange-400 transition group-hover:bg-orange-500 group-hover:text-white">
-                      <Dumbbell className="h-5 w-5" />
+                      <Image
+                        src="/logo.png"
+                        alt="DojoFlow logo"
+                        width={28}
+                        height={28}
+                        className="h-7 w-7 rounded-md object-contain"
+                      />
                     </div>
                   </div>
 
@@ -831,7 +843,13 @@ export default function InquiryPage() {
       <section className="bg-[#0b1020]">
         <div className="mx-auto max-w-4xl px-5 py-16 text-center sm:px-8 lg:py-20">
           <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-orange-500 text-white">
-            <Sparkles className="h-7 w-7" />
+            <Image
+              src="/logo.png"
+              alt="DojoFlow logo"
+              width={28}
+              height={28}
+              className="h-7 w-7 rounded-md object-contain"
+            />
           </div>
 
           <h2 className="mt-6 text-3xl font-bold tracking-tight text-white sm:text-4xl">
@@ -856,12 +874,21 @@ export default function InquiryPage() {
       {/* Footer */}
       <footer className="border-t border-slate-200 bg-white">
         <div className="mx-auto flex max-w-7xl flex-col gap-5 px-5 py-8 text-sm text-slate-500 sm:px-8 md:flex-row md:items-center md:justify-between">
-          <div>
-            <p className="font-semibold text-slate-950">
+          <div className="mb-2 flex items-center gap-3 text-sm font-medium text-orange-600" >
+            <Image
+              src="/logo.png"
+              alt="DojoFlow logo"
+              width={28}
+              height={28}
+              className="h-7 w-7 rounded-md object-contain"
+            />
+            <div>
+              <p className="font-semibold text-slate-950">
               DojoFlow Karate Academy
             </p>
 
             <p className="mt-1">Train with discipline. Grow with confidence.</p>
+            </div>
           </div>
 
           <div className="flex flex-wrap gap-5">
