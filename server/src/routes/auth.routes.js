@@ -1,18 +1,16 @@
 const express = require("express");
 
-const {
-  register,
-  login,
-} = require("../controllers/auth.controller");
+const { login } = require("../controllers/auth.controller");
 
 const protect = require("../middleware/auth.middleware");
 const authorize = require("../middleware/role.middleware");
 
 const router = express.Router();
 
-router.post("/register", register);
+// Public login
 router.post("/login", login);
 
+// Logged-in user's profile
 router.get("/me", protect, (req, res) => {
   res.status(200).json({
     success: true,
@@ -26,6 +24,7 @@ router.get("/me", protect, (req, res) => {
   });
 });
 
+// Super Admin test route
 router.get(
   "/admin-test",
   protect,

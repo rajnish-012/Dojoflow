@@ -7,11 +7,15 @@ const getBranches = async (req, res) => {
       isActive: true,
     };
 
-    // Branch admins and coaches can only see their own branch
-    if (
-      (req.user.role === "BRANCH_ADMIN" || req.user.role === "COACH") &&
-      req.user.branch
-    ) {
+    // Branch Admins and Coaches can only see their own branch
+    if (req.user.role === "BRANCH_ADMIN" || req.user.role === "COACH") {
+      if (!req.user.branch) {
+        return res.status(403).json({
+          success: false,
+          message: "No branch is assigned to this account",
+        });
+      }
+
       filter._id = req.user.branch;
     }
 
@@ -52,6 +56,17 @@ const getBranchById = async (req, res) => {
       });
     }
 
+    // Branch-level access
+    if (
+      req.user.role !== "SUPER_ADMIN" &&
+      branch._id.toString() !== req.user.branch?.toString()
+    ) {
+      return res.status(403).json({
+        success: false,
+        message: "You do not have access to this branch",
+      });
+    }
+
     res.status(200).json({
       success: true,
       branch,
@@ -79,7 +94,7 @@ const createBranch = async (req, res) => {
     }
 
     const existingBranch = await Branch.findOne({
-      name: name.trim(),
+      name: { $regex: `^${name}$`, $options: "i" },
     });
 
     if (existingBranch) {
@@ -110,7 +125,6 @@ const createBranch = async (req, res) => {
     });
   }
 };
-
 
 module.exports = {
   getBranches,

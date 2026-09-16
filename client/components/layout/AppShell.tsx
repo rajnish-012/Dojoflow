@@ -1,254 +1,143 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
-import { Menu, Search, Bell, X } from "lucide-react";
+import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import Sidebar from "./Sidebar";
+import Header from "./Header";
 
-type UserRole =
-  | "SUPER_ADMIN"
-  | "BRANCH_ADMIN"
-  | "COACH"
-  | "STUDENT";
+type AppShellProps = {
+  children: React.ReactNode;
+};
 
 const publicRoutes = ["/", "/login", "/inquiry"];
 
-const routePermissions: Record<string, UserRole[]> = {
-  "/dashboard": ["SUPER_ADMIN", "BRANCH_ADMIN", "COACH"],
-  "/students": ["SUPER_ADMIN", "BRANCH_ADMIN", "COACH"],
-  "/plans": ["SUPER_ADMIN", "BRANCH_ADMIN"],
-  "/branches": ["SUPER_ADMIN"],
-  "/curriculum": ["SUPER_ADMIN", "BRANCH_ADMIN", "COACH"],
-  "/attendance": ["SUPER_ADMIN", "BRANCH_ADMIN", "COACH"],
-  "/performance": ["SUPER_ADMIN", "BRANCH_ADMIN", "COACH"],
-  "/inquiries": ["SUPER_ADMIN", "BRANCH_ADMIN", "COACH"],
-  "/settings": ["SUPER_ADMIN"],
-  "/student-dashboard": ["STUDENT"],
-};
+function isPublicPath(pathname: string) {
+  return publicRoutes.some((route) => {
+    if (route === "/") {
+      return pathname === "/";
+    }
 
-function getRequiredRoles(pathname: string) {
-  const matchedRoute = Object.keys(routePermissions).find((route) => {
     return pathname === route || pathname.startsWith(`${route}/`);
   });
-
-  return matchedRoute ? routePermissions[matchedRoute] : null;
 }
 
-export default function AppShell({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
-  const pathname = usePathname();
-  const router = useRouter();
-
-  const [isMobileSidebarOpen, setIsMobileSidebarOpen] =
-    useState(false);
-
-  const [isCheckingAuth, setIsCheckingAuth] = useState(true);
-
-  const isPublicRoute = publicRoutes.includes(pathname);
-
-  useEffect(() => {
-    if (isPublicRoute) {
-      setIsCheckingAuth(false);
-      return;
-    }
-
-    const token = localStorage.getItem("token");
-    const storedUser = localStorage.getItem("user");
-
-    if (!token || !storedUser) {
-      router.replace("/login");
-      return;
-    }
-
-    try {
-      const user = JSON.parse(storedUser);
-      const userRole = user.role as UserRole;
-      const requiredRoles = getRequiredRoles(pathname);
-
-      if (
-        requiredRoles &&
-        !requiredRoles.includes(userRole)
-      ) {
-        if (userRole === "STUDENT") {
-          router.replace("/student-dashboard");
-        } else {
-          router.replace("/dashboard");
-        }
-
-        return;
-      }
-
-      setIsCheckingAuth(false);
-    } catch (error) {
-      console.error("Authentication check failed:", error);
-
-      localStorage.removeItem("token");
-      localStorage.removeItem("user");
-
-      router.replace("/login");
-    }
-  }, [pathname, router, isPublicRoute]);
-
-  useEffect(() => {
-    setIsMobileSidebarOpen(false);
-  }, [pathname]);
-
-  if (isPublicRoute) {
-    return <>{children}</>;
-  }
-
-  if (isCheckingAuth) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-50">
-        <div className="text-sm text-slate-500">
-          Loading...
-        </div>
-      </div>
-    );
-  }
-
+function AppLoadingScreen() {
   return (
-    <div className="min-h-screen bg-slate-50">
-      {/* Desktop Sidebar */}
-      <div className="hidden md:block">
-        <Sidebar />
-      </div>
-
-      {/* Mobile Overlay */}
-      {isMobileSidebarOpen && (
-        <button
-          aria-label="Close sidebar"
-          onClick={() => setIsMobileSidebarOpen(false)}
-          className="fixed inset-0 z-40 bg-slate-900/40 md:hidden"
-        />
-      )}
-
-      {/* Mobile Sidebar */}
-      <div
-        className={`fixed inset-y-0 left-0 z-50 w-64 transform transition-transform duration-300 md:hidden ${
-          isMobileSidebarOpen
-            ? "translate-x-0"
-            : "-translate-x-full"
-        }`}
-      >
-        <div className="relative h-full">
-          <Sidebar />
-
-          <button
-            onClick={() => setIsMobileSidebarOpen(false)}
-            className="absolute right-3 top-5 flex h-8 w-8 items-center justify-center rounded-lg bg-slate-100 text-slate-600"
-            aria-label="Close menu"
-          >
-            <X className="h-5 w-5" />
-          </button>
+    <div className="flex min-h-screen items-center justify-center bg-[#f5f7fb]">
+      <div className="flex flex-col items-center gap-4">
+        <div className="flex h-14 w-14 animate-pulse items-center justify-center rounded-2xl bg-[#101a33] text-[#d7a84b] shadow-lg">
+          <span className="text-xl font-extrabold">D</span>
         </div>
-      </div>
 
-      {/* Main Application Area */}
-      <div className="min-h-screen md:ml-64">
-        {/* Header */}
-        <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-slate-200 bg-white px-4 sm:px-6 lg:px-8">
-          <div className="flex min-w-0 flex-1 items-center gap-3">
-            {/* Mobile Menu Button */}
-            <button
-              onClick={() => setIsMobileSidebarOpen(true)}
-              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 text-slate-600 transition hover:bg-slate-100 md:hidden"
-              aria-label="Open menu"
-            >
-              <Menu className="h-5 w-5" />
-            </button>
+        <div className="text-center">
+          <p className="text-sm font-bold text-[#101a33]">
+            Loading DojoFlow
+          </p>
 
-            {/* Search */}
-            <div className="relative w-full max-w-md">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-
-              <input
-                type="text"
-                placeholder="Search students, plans..."
-                className="h-10 w-full rounded-xl border border-slate-200 bg-slate-50 pl-10 pr-4 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-slate-400 focus:bg-white"
-              />
-            </div>
-          </div>
-
-          <div className="ml-3 flex shrink-0 items-center gap-3 sm:gap-5">
-            {/* Notification */}
-            <button
-              className="relative flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100"
-              aria-label="Notifications"
-            >
-              <Bell className="h-5 w-5" />
-
-              <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-red-500" />
-            </button>
-
-            <div className="hidden h-8 w-px bg-slate-200 sm:block" />
-
-            {/* User Info */}
-            <UserHeader />
-          </div>
-        </header>
-
-        {/* Page Content */}
-        <main className="min-w-0">{children}</main>
+          <p className="mt-1 text-xs text-[#7b879b]">
+            Preparing your workspace...
+          </p>
+        </div>
       </div>
     </div>
   );
 }
 
-function UserHeader() {
-  const [user, setUser] = useState<{
-    name?: string;
-    role?: string;
-  } | null>(null);
+export default function AppShell({ children }: AppShellProps) {
+  const pathname = usePathname();
+  const router = useRouter();
 
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [isCheckingAuth, setIsCheckingAuth] = useState(true);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+
+  const isPublicRoute = isPublicPath(pathname);
+
+  /*
+   * Authentication is checked when the application starts
+   * and when the route changes to a protected route.
+   *
+   * The shell itself remains mounted after authentication.
+   */
   useEffect(() => {
-    try {
-      const storedUser = localStorage.getItem("user");
-
-      if (storedUser) {
-        setUser(JSON.parse(storedUser));
-      }
-    } catch (error) {
-      console.error("Failed to load user:", error);
+    if (isPublicRoute) {
+      setIsCheckingAuth(false);
+      setIsAuthenticated(false);
+      return;
     }
-  }, []);
 
-  const name = user?.name || "User";
-  const role = user?.role || "";
+    const token = localStorage.getItem("token");
 
-  const initials = name
-    .split(" ")
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0])
-    .join("")
-    .toUpperCase();
+    const storedUser =
+      localStorage.getItem("user") ||
+      localStorage.getItem("dojoUser") ||
+      localStorage.getItem("currentUser");
 
-  const formattedRole = role
-    .replaceAll("_", " ")
-    .toLowerCase()
-    .replace(/\b\w/g, (char) => char.toUpperCase());
+    if (!token || !storedUser) {
+      setIsAuthenticated(false);
+      setIsCheckingAuth(false);
+      router.replace("/login");
+      return;
+    }
+
+    setIsAuthenticated(true);
+    setIsCheckingAuth(false);
+  }, [isPublicRoute, router]);
+
+  /*
+   * Close only the mobile sidebar after navigation.
+   * This does not remount the Sidebar.
+   */
+  useEffect(() => {
+    setSidebarOpen(false);
+  }, [pathname]);
+
+  /*
+   * Public pages do not need the dashboard shell.
+   */
+  if (isPublicRoute) {
+    return <>{children}</>;
+  }
+
+  /*
+   * Show the loader only while the initial auth check is running.
+   */
+  if (isCheckingAuth) {
+    return <AppLoadingScreen />;
+  }
+
+  /*
+   * If authentication failed, the redirect will take the user
+   * to the login page. Avoid rendering the private dashboard.
+   */
+  if (!isAuthenticated) {
+    return null;
+  }
 
   return (
-    <div className="flex items-center gap-2 sm:gap-3">
-      <div className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-900 text-xs font-bold text-white sm:h-10 sm:w-10">
-        {initials || "U"}
+    <div className="min-h-screen bg-[#f5f7fb]">
+      <Sidebar
+        isOpen={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
+        collapsed={sidebarCollapsed}
+        onToggleCollapse={() =>
+          setSidebarCollapsed((previous) => !previous)
+        }
+      />
+
+      <div
+        className={[
+          "min-h-screen transition-[margin] duration-300 ease-in-out",
+          sidebarCollapsed ? "md:ml-[84px]" : "md:ml-[260px]",
+        ].join(" ")}
+      >
+        <Header onMenuClick={() => setSidebarOpen(true)} />
+
+        <main className="min-h-[calc(100vh-76px)]">
+          {children}
+        </main>
       </div>
-
-      <div className="hidden min-w-0 sm:block">
-        <p className="max-w-32 truncate text-sm font-semibold text-slate-900">
-          {name}
-        </p>
-
-        <p className="max-w-32 truncate text-xs text-slate-500">
-          {formattedRole}
-        </p>
-      </div>
-
-      <span className="hidden text-slate-400 sm:block">⌄</span>
     </div>
   );
 }

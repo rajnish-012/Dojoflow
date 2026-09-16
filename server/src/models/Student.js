@@ -62,10 +62,15 @@ const studentSchema = new mongoose.Schema(
       enum: ["ACTIVE", "INACTIVE", "COMPLETED"],
       default: "ACTIVE",
     },
+    registrationDate: {
+      type: Date,
+      required: true,
+      default: Date.now,
+    },
   },
   {
     timestamps: true,
-  }
+  },
 );
 
 module.exports = mongoose.model("Student", studentSchema);

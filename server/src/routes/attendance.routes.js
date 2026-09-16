@@ -4,6 +4,7 @@ const {
   getAttendance,
   getMyAttendance,
   getAttendanceById,
+  getAttendanceByStudent,
   markAttendance,
 } = require("../controllers/attendance.controller");
 
@@ -33,6 +34,17 @@ router.get(
   protect,
   authorize("SUPER_ADMIN", "BRANCH_ADMIN", "COACH"),
   getAttendance
+);
+
+// ======================================================
+// GET ATTENDANCE BY STUDENT ID
+// ======================================================
+
+router.get(
+  "/student/:studentId",
+  protect,
+  authorize("SUPER_ADMIN", "BRANCH_ADMIN", "COACH"),
+  getAttendanceByStudent
 );
 
 // ======================================================

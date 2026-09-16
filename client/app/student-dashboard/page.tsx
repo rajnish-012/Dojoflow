@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ElementType } from "react";
 import {
   Award,
   BarChart3,
@@ -12,10 +12,13 @@ import {
   Phone,
   ShieldCheck,
   UserRound,
+  Users,
   XCircle,
+  ArrowUpRight,
 } from "lucide-react";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api";
+const API_URL =
+  process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api";
 
 // ======================================================
 // TYPES
@@ -188,22 +191,36 @@ function SectionHeader({
   title,
   description,
   icon: Icon,
+  action,
 }: {
   title: string;
   description: string;
-  icon: React.ElementType;
+  icon: ElementType;
+  action?: string;
 }) {
   return (
-    <div className="mb-6 flex items-start gap-3 sm:gap-4">
-      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-100 sm:h-12 sm:w-12">
-        <Icon className="h-5 w-5 text-slate-700 sm:h-6 sm:w-6" />
+    <div className="mb-6 flex items-start justify-between gap-4">
+      <div className="flex min-w-0 items-start gap-3 sm:gap-4">
+        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#fff4e8]">
+          <Icon className="h-5 w-5 text-[#f97316]" />
+        </div>
+
+        <div className="min-w-0">
+          <h2 className="text-lg font-bold text-slate-950 sm:text-xl">
+            {title}
+          </h2>
+
+          <p className="mt-1 text-sm leading-5 text-slate-500">
+            {description}
+          </p>
+        </div>
       </div>
 
-      <div className="min-w-0">
-        <h2 className="text-lg font-bold text-slate-900 sm:text-xl">{title}</h2>
-
-        <p className="mt-1 text-sm leading-5 text-slate-500">{description}</p>
-      </div>
+      {action && (
+        <span className="hidden shrink-0 text-sm font-semibold text-[#f97316] sm:block">
+          {action}
+        </span>
+      )}
     </div>
   );
 }
@@ -216,11 +233,13 @@ function EmptyState({
   description?: string;
 }) {
   return (
-    <div className="rounded-xl bg-slate-50 px-4 py-8 text-center sm:px-6">
-      <p className="text-sm font-medium text-slate-600">{message}</p>
+    <div className="rounded-xl bg-[#f7f9fc] px-4 py-9 text-center sm:px-6">
+      <p className="text-sm font-semibold text-slate-600">{message}</p>
 
       {description && (
-        <p className="mt-2 text-xs leading-5 text-slate-400">{description}</p>
+        <p className="mt-2 text-xs leading-5 text-slate-400">
+          {description}
+        </p>
       )}
     </div>
   );
@@ -236,16 +255,16 @@ function StatCard({
   title: string;
   value: string;
   description: string;
-  icon: React.ElementType;
+  icon: ElementType;
   iconClassName: string;
 }) {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+    <div className="rounded-2xl border border-[#e3e8f0] bg-white p-5 shadow-[0_3px_12px_rgba(15,23,42,0.025)] sm:p-6">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-sm font-medium text-slate-500">{title}</p>
 
-          <p className="mt-2 truncate text-3xl font-bold text-slate-900 sm:text-4xl">
+          <p className="mt-2 truncate text-3xl font-bold tracking-tight text-slate-950 sm:text-4xl">
             {value}
           </p>
 
@@ -268,15 +287,20 @@ function StatCard({
 // ATTENDANCE SECTION
 // ======================================================
 
-function AttendanceSection({ attendance }: { attendance: AttendanceRecord[] }) {
+function AttendanceSection({
+  attendance,
+}: {
+  attendance: AttendanceRecord[];
+}) {
   const recentAttendance = attendance.slice(0, 5);
 
   return (
-    <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
+    <section className="rounded-2xl border border-[#e3e8f0] bg-white p-4 shadow-[0_3px_12px_rgba(15,23,42,0.025)] sm:p-6">
       <SectionHeader
         title="Recent Attendance"
         description="Your latest training attendance records"
         icon={CalendarDays}
+        action="Attendance"
       />
 
       {recentAttendance.length === 0 ? (
@@ -287,12 +311,13 @@ function AttendanceSection({ attendance }: { attendance: AttendanceRecord[] }) {
       ) : (
         <div className="space-y-3">
           {recentAttendance.map((record) => {
-            const isPresent = getAttendanceStatus(record.status) === "PRESENT";
+            const isPresent =
+              getAttendanceStatus(record.status) === "PRESENT";
 
             return (
               <div
                 key={record._id}
-                className="flex flex-col gap-3 rounded-xl bg-slate-50 p-4 sm:flex-row sm:items-center sm:justify-between"
+                className="flex flex-col gap-3 rounded-xl border border-[#e7ebf1] bg-[#fbfcfe] p-4 transition hover:border-[#d7dee9] sm:flex-row sm:items-center sm:justify-between"
               >
                 <div className="flex min-w-0 items-center gap-3">
                   <div
@@ -322,6 +347,7 @@ function AttendanceSection({ attendance }: { attendance: AttendanceRecord[] }) {
                       {record.curriculumTitle && (
                         <>
                           <span>•</span>
+
                           <span className="truncate">
                             {record.curriculumTitle}
                           </span>
@@ -338,7 +364,7 @@ function AttendanceSection({ attendance }: { attendance: AttendanceRecord[] }) {
                 </div>
 
                 <span
-                  className={`self-start rounded-full px-3 py-1 text-xs font-semibold sm:self-auto ${
+                  className={`self-start rounded-full px-3 py-1 text-xs font-bold sm:self-auto ${
                     isPresent
                       ? "bg-emerald-100 text-emerald-700"
                       : "bg-red-100 text-red-700"
@@ -367,7 +393,9 @@ function RatingStars({ rating }: { rating?: number }) {
       {[1, 2, 3, 4, 5].map((star) => (
         <span
           key={star}
-          className={star <= safeRating ? "text-amber-400" : "text-slate-300"}
+          className={
+            star <= safeRating ? "text-amber-400" : "text-slate-300"
+          }
         >
           ★
         </span>
@@ -386,7 +414,7 @@ function PerformanceSection({
 
   if (!latestPerformance) {
     return (
-      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
+      <section className="rounded-2xl border border-[#e3e8f0] bg-white p-4 shadow-[0_3px_12px_rgba(15,23,42,0.025)] sm:p-6">
         <SectionHeader
           title="Performance Evaluation"
           description="Your latest skill evaluation and coach feedback"
@@ -402,22 +430,27 @@ function PerformanceSection({
   }
 
   const rating = getSafeRating(latestPerformance.rating);
-  const ratingPercentage = getRatingPercentage(latestPerformance.rating);
+  const ratingPercentage = getRatingPercentage(
+    latestPerformance.rating,
+  );
 
   return (
-    <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
+    <section className="rounded-2xl border border-[#e3e8f0] bg-white p-4 shadow-[0_3px_12px_rgba(15,23,42,0.025)] sm:p-6">
       <SectionHeader
         title="Performance Evaluation"
         description="Your latest skill evaluation and coach feedback"
         icon={BarChart3}
+        action="Latest Evaluation"
       />
 
       <div className="space-y-5">
         {/* Latest evaluation summary */}
-        <div className="rounded-2xl bg-slate-900 p-5 text-white sm:p-6">
+        <div className="rounded-2xl bg-[#101828] p-5 text-white sm:p-6">
           <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
             <div className="min-w-0">
-              <p className="text-sm text-slate-300">Latest Evaluation</p>
+              <p className="text-sm text-slate-400">
+                Latest Evaluation
+              </p>
 
               <h3 className="mt-2 break-words text-xl font-bold sm:text-2xl">
                 {latestPerformance.curriculumTitle ||
@@ -444,7 +477,9 @@ function PerformanceSection({
 
               <p className="mt-1 text-4xl font-bold">
                 {rating}
-                <span className="text-lg font-medium text-slate-400">/5</span>
+                <span className="text-lg font-medium text-slate-400">
+                  /5
+                </span>
               </p>
 
               <div className="mt-2 sm:flex sm:justify-end">
@@ -455,13 +490,18 @@ function PerformanceSection({
 
           <div className="mt-5">
             <div className="mb-2 flex items-center justify-between text-xs">
-              <span className="text-slate-400">Performance rating</span>
-              <span className="font-semibold text-slate-200">{rating}/5</span>
+              <span className="text-slate-400">
+                Performance rating
+              </span>
+
+              <span className="font-semibold text-slate-200">
+                {rating}/5
+              </span>
             </div>
 
             <div className="h-2 overflow-hidden rounded-full bg-slate-700">
               <div
-                className="h-full rounded-full bg-white transition-all"
+                className="h-full rounded-full bg-[#f97316] transition-all"
                 style={{ width: `${ratingPercentage}%` }}
               />
             </div>
@@ -470,14 +510,15 @@ function PerformanceSection({
           <p className="mt-4 text-xs text-slate-400">
             Evaluated on{" "}
             {formatDate(
-              latestPerformance.evaluationDate || latestPerformance.createdAt,
+              latestPerformance.evaluationDate ||
+                latestPerformance.createdAt,
             )}
           </p>
         </div>
 
         {/* Evaluation details */}
         <div className="grid gap-3 sm:grid-cols-2">
-          <div className="rounded-xl border border-slate-200 p-4">
+          <div className="rounded-xl border border-[#e3e8f0] p-4">
             <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
               Curriculum
             </p>
@@ -487,7 +528,7 @@ function PerformanceSection({
             </p>
           </div>
 
-          <div className="rounded-xl border border-slate-200 p-4">
+          <div className="rounded-xl border border-[#e3e8f0] p-4">
             <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
               Skill Evaluated
             </p>
@@ -500,7 +541,7 @@ function PerformanceSection({
 
         {/* Coach remarks */}
         {latestPerformance.remarks && (
-          <div className="rounded-xl border border-slate-200 p-4">
+          <div className="rounded-xl border border-[#e3e8f0] p-4">
             <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
               Coach Remarks
             </p>
@@ -514,7 +555,7 @@ function PerformanceSection({
         {/* Evaluated by */}
         {latestPerformance.evaluatedBy?.name && (
           <div className="flex items-center gap-2 text-xs text-slate-500">
-            <ShieldCheck className="h-4 w-4" />
+            <ShieldCheck className="h-4 w-4 text-[#f97316]" />
             Evaluated by {latestPerformance.evaluatedBy.name}
           </div>
         )}
@@ -530,7 +571,7 @@ function PerformanceSection({
               {previousPerformance.map((record) => (
                 <div
                   key={record._id}
-                  className="flex flex-col gap-3 rounded-xl bg-slate-50 p-4 sm:flex-row sm:items-center sm:justify-between"
+                  className="flex flex-col gap-3 rounded-xl bg-[#f7f9fc] p-4 sm:flex-row sm:items-center sm:justify-between"
                 >
                   <div className="min-w-0">
                     <p className="break-words text-sm font-semibold text-slate-900">
@@ -540,7 +581,9 @@ function PerformanceSection({
                     </p>
 
                     <p className="mt-1 text-xs text-slate-500">
-                      {formatDate(record.evaluationDate || record.createdAt)}
+                      {formatDate(
+                        record.evaluationDate || record.createdAt,
+                      )}
                     </p>
                   </div>
 
@@ -565,9 +608,13 @@ function PerformanceSection({
 // PROFILE SECTION
 // ======================================================
 
-function ProfileSection({ student }: { student: Student | null }) {
+function ProfileSection({
+  student,
+}: {
+  student: Student | null;
+}) {
   return (
-    <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
+    <section className="rounded-2xl border border-[#e3e8f0] bg-white p-4 shadow-[0_3px_12px_rgba(15,23,42,0.025)] sm:p-6">
       <SectionHeader
         title="My Profile"
         description="Your registered academy information"
@@ -575,22 +622,38 @@ function ProfileSection({ student }: { student: Student | null }) {
       />
 
       <div className="flex flex-col gap-5 sm:flex-row sm:items-center">
-        <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-slate-900 text-xl font-bold text-white">
+        <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-[#101828] text-xl font-bold text-white">
           {getInitials(student?.name)}
         </div>
 
         <div className="min-w-0">
-          <h3 className="break-words text-xl font-bold text-slate-900">
+          <h3 className="break-words text-xl font-bold text-slate-950">
             {student?.name || "Not available"}
           </h3>
 
-          <p className="mt-1 text-sm text-slate-500">Student account</p>
+          <p className="mt-1 text-sm text-slate-500">
+            Student account
+          </p>
+
+          {student?.status && (
+            <span
+              className={`mt-3 inline-flex rounded-full px-3 py-1 text-xs font-bold ${
+                student.status === "ACTIVE"
+                  ? "bg-emerald-100 text-emerald-700"
+                  : "bg-slate-100 text-slate-600"
+              }`}
+            >
+              {student.status}
+            </span>
+          )}
         </div>
       </div>
 
-      <div className="mt-6 grid gap-4 sm:grid-cols-2">
+      <div className="mt-6 grid gap-5 sm:grid-cols-2">
         <div className="flex min-w-0 items-start gap-3">
-          <Phone className="mt-0.5 h-5 w-5 shrink-0 text-slate-400" />
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#f7f9fc]">
+            <Phone className="h-4 w-4 text-slate-500" />
+          </div>
 
           <div className="min-w-0">
             <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
@@ -604,7 +667,9 @@ function ProfileSection({ student }: { student: Student | null }) {
         </div>
 
         <div className="flex min-w-0 items-start gap-3">
-          <Mail className="mt-0.5 h-5 w-5 shrink-0 text-slate-400" />
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#f7f9fc]">
+            <Mail className="h-4 w-4 text-slate-500" />
+          </div>
 
           <div className="min-w-0">
             <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
@@ -618,7 +683,9 @@ function ProfileSection({ student }: { student: Student | null }) {
         </div>
 
         <div className="flex min-w-0 items-start gap-3">
-          <UserRound className="mt-0.5 h-5 w-5 shrink-0 text-slate-400" />
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#f7f9fc]">
+            <UserRound className="h-4 w-4 text-slate-500" />
+          </div>
 
           <div className="min-w-0">
             <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
@@ -632,7 +699,9 @@ function ProfileSection({ student }: { student: Student | null }) {
         </div>
 
         <div className="flex min-w-0 items-start gap-3">
-          <CalendarDays className="mt-0.5 h-5 w-5 shrink-0 text-slate-400" />
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#f7f9fc]">
+            <CalendarDays className="h-4 w-4 text-slate-500" />
+          </div>
 
           <div className="min-w-0">
             <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
@@ -641,6 +710,38 @@ function ProfileSection({ student }: { student: Student | null }) {
 
             <p className="mt-1 text-sm font-medium text-slate-800">
               {formatDate(student?.joinDate)}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex min-w-0 items-start gap-3">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#f7f9fc]">
+            <Award className="h-4 w-4 text-slate-500" />
+          </div>
+
+          <div className="min-w-0">
+            <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
+              Current Belt
+            </p>
+
+            <p className="mt-1 text-sm font-semibold text-slate-800">
+              {student?.currentBelt || student?.belt || "Beginner"}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex min-w-0 items-start gap-3">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#f7f9fc]">
+            <ArrowUpRight className="h-4 w-4 text-slate-500" />
+          </div>
+
+          <div className="min-w-0">
+            <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
+              Branch
+            </p>
+
+            <p className="mt-1 break-words text-sm font-medium text-slate-800">
+              {student?.branch?.name || "Not available"}
             </p>
           </div>
         </div>
@@ -653,11 +754,15 @@ function ProfileSection({ student }: { student: Student | null }) {
 // PLAN SECTION
 // ======================================================
 
-function PlanSection({ student }: { student: Student | null }) {
+function PlanSection({
+  student,
+}: {
+  student: Student | null;
+}) {
   const plan = student?.plan;
 
   return (
-    <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
+    <section className="rounded-2xl border border-[#e3e8f0] bg-white p-4 shadow-[0_3px_12px_rgba(15,23,42,0.025)] sm:p-6">
       <SectionHeader
         title="Training Plan"
         description="Your currently assigned academy plan"
@@ -671,21 +776,30 @@ function PlanSection({ student }: { student: Student | null }) {
         />
       ) : (
         <div className="space-y-5">
-          <div className="rounded-2xl bg-slate-900 p-5 text-white sm:p-6">
-            <p className="text-sm text-slate-300">Current Plan</p>
+          <div className="rounded-2xl bg-[#101828] p-5 text-white sm:p-6">
+            <div className="flex items-start justify-between gap-4">
+              <div className="min-w-0">
+                <p className="text-sm text-slate-400">Current Plan</p>
 
-            <h3 className="mt-2 break-words text-2xl font-bold">
-              {plan.name || "Training Plan"}
-            </h3>
+                <h3 className="mt-2 break-words text-2xl font-bold">
+                  {plan.name || "Training Plan"}
+                </h3>
+              </div>
+
+              <Award className="h-7 w-7 shrink-0 text-[#f97316]" />
+            </div>
 
             {plan.price !== undefined && (
-              <p className="mt-3 text-sm text-slate-300">
+              <p className="mt-4 text-sm text-slate-300">
                 ₹{plan.price}
+
                 {plan.duration && (
                   <span>
                     {" "}
                     / {plan.duration}{" "}
-                    {plan.durationUnit === "MONTHS" ? "months" : "days"}
+                    {plan.durationUnit === "MONTHS"
+                      ? "months"
+                      : "days"}
                   </span>
                 )}
               </p>
@@ -693,7 +807,7 @@ function PlanSection({ student }: { student: Student | null }) {
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2">
-            <div className="rounded-xl border border-slate-200 p-4">
+            <div className="rounded-xl border border-[#e3e8f0] p-4">
               <p className="text-xs uppercase tracking-wide text-slate-400">
                 Starting Belt
               </p>
@@ -703,7 +817,7 @@ function PlanSection({ student }: { student: Student | null }) {
               </p>
             </div>
 
-            <div className="rounded-xl border border-slate-200 p-4">
+            <div className="rounded-xl border border-[#e3e8f0] p-4">
               <p className="text-xs uppercase tracking-wide text-slate-400">
                 Classes Per Week
               </p>
@@ -713,7 +827,7 @@ function PlanSection({ student }: { student: Student | null }) {
               </p>
             </div>
 
-            <div className="rounded-xl border border-slate-200 p-4">
+            <div className="rounded-xl border border-[#e3e8f0] p-4">
               <p className="text-xs uppercase tracking-wide text-slate-400">
                 Curriculum
               </p>
@@ -723,7 +837,7 @@ function PlanSection({ student }: { student: Student | null }) {
               </p>
             </div>
 
-            <div className="rounded-xl border border-slate-200 p-4">
+            <div className="rounded-xl border border-[#e3e8f0] p-4">
               <p className="text-xs uppercase tracking-wide text-slate-400">
                 Milestones
               </p>
@@ -736,15 +850,21 @@ function PlanSection({ student }: { student: Student | null }) {
 
           {plan.curriculum && plan.curriculum.length > 0 && (
             <div>
-              <h3 className="mb-3 text-sm font-bold text-slate-900">
-                Curriculum Preview
-              </h3>
+              <div className="mb-3 flex items-center justify-between">
+                <h3 className="text-sm font-bold text-slate-900">
+                  Curriculum Preview
+                </h3>
+
+                <span className="text-xs font-medium text-slate-400">
+                  {plan.curriculum.length} days
+                </span>
+              </div>
 
               <div className="space-y-3">
                 {plan.curriculum.slice(0, 4).map((item, index) => (
                   <div
                     key={`${item.day || index}-${item.title || index}`}
-                    className="flex items-start gap-3 rounded-xl bg-slate-50 p-4"
+                    className="flex items-start gap-3 rounded-xl bg-[#f7f9fc] p-4"
                   >
                     <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white text-xs font-bold text-slate-700">
                       {item.day || index + 1}
@@ -752,7 +872,9 @@ function PlanSection({ student }: { student: Student | null }) {
 
                     <div className="min-w-0">
                       <p className="break-words text-sm font-semibold text-slate-900">
-                        {item.title || item.skill || "Training Session"}
+                        {item.title ||
+                          item.skill ||
+                          "Training Session"}
                       </p>
 
                       {item.description && (
@@ -785,7 +907,9 @@ function PlanSection({ student }: { student: Student | null }) {
 export default function StudentDashboard() {
   const [student, setStudent] = useState<Student | null>(null);
   const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
-  const [performance, setPerformance] = useState<PerformanceRecord[]>([]);
+  const [performance, setPerformance] = useState<PerformanceRecord[]>(
+    [],
+  );
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -796,18 +920,23 @@ export default function StudentDashboard() {
         setLoading(true);
         setError("");
 
-        const [studentResponse, attendanceResponse, performanceResponse] =
-          await Promise.all([
-            fetchJson<{ student?: Student }>(`${API_URL}/students/me`),
+        const [
+          studentResponse,
+          attendanceResponse,
+          performanceResponse,
+        ] = await Promise.all([
+          fetchJson<{ student?: Student }>(
+            `${API_URL}/students/me`,
+          ),
 
-            fetchJson<{ attendance?: AttendanceRecord[] }>(
-              `${API_URL}/attendance/me`,
-            ),
+          fetchJson<{ attendance?: AttendanceRecord[] }>(
+            `${API_URL}/attendance/me`,
+          ),
 
-            fetchJson<{ performance?: PerformanceRecord[] }>(
-              `${API_URL}/performance/me`,
-            ),
-          ]);
+          fetchJson<{ performance?: PerformanceRecord[] }>(
+            `${API_URL}/performance/me`,
+          ),
+        ]);
 
         setStudent(studentResponse.student || null);
         setAttendance(attendanceResponse.attendance || []);
@@ -830,17 +959,21 @@ export default function StudentDashboard() {
 
   const attendanceStats = useMemo(() => {
     const presentCount = attendance.filter(
-      (record) => getAttendanceStatus(record.status) === "PRESENT",
+      (record) =>
+        getAttendanceStatus(record.status) === "PRESENT",
     ).length;
 
     const absentCount = attendance.filter(
-      (record) => getAttendanceStatus(record.status) === "ABSENT",
+      (record) =>
+        getAttendanceStatus(record.status) === "ABSENT",
     ).length;
 
     const totalCount = attendance.length;
 
     const percentage =
-      totalCount > 0 ? Math.round((presentCount / totalCount) * 100) : 0;
+      totalCount > 0
+        ? Math.round((presentCount / totalCount) * 100)
+        : 0;
 
     return {
       presentCount,
@@ -850,15 +983,16 @@ export default function StudentDashboard() {
     };
   }, [attendance]);
 
-  const currentBelt = student?.currentBelt || student?.belt || "Beginner";
+  const currentBelt =
+    student?.currentBelt || student?.belt || "Beginner";
 
   const latestPerformance = performance[0];
 
   if (loading) {
     return (
-      <div className="flex min-h-[70vh] items-center justify-center px-4">
-        <div className="flex items-center gap-3 text-sm text-slate-600">
-          <Loader2 className="h-5 w-5 animate-spin" />
+      <div className="flex min-h-[70vh] items-center justify-center bg-[#f5f7fb] px-4">
+        <div className="flex items-center gap-3 rounded-2xl border border-[#e3e8f0] bg-white px-6 py-5 text-sm text-slate-600 shadow-sm">
+          <Loader2 className="h-5 w-5 animate-spin text-[#f97316]" />
           <span>Loading your dashboard...</span>
         </div>
       </div>
@@ -867,13 +1001,17 @@ export default function StudentDashboard() {
 
   if (error) {
     return (
-      <div className="flex min-h-[70vh] items-center justify-center px-4">
-        <div className="w-full max-w-md rounded-2xl border border-red-200 bg-red-50 p-6 text-center">
-          <p className="font-semibold text-red-700">{error}</p>
+      <div className="flex min-h-[70vh] items-center justify-center bg-[#f5f7fb] px-4">
+        <div className="w-full max-w-md rounded-2xl border border-red-200 bg-white p-6 text-center shadow-sm">
+          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-red-100">
+            <XCircle className="h-6 w-6 text-red-600" />
+          </div>
+
+          <p className="mt-4 font-semibold text-red-700">{error}</p>
 
           <button
             onClick={() => window.location.reload()}
-            className="mt-4 rounded-xl bg-red-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-red-700"
+            className="mt-5 rounded-xl bg-[#101828] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#f97316]"
           >
             Refresh
           </button>
@@ -883,28 +1021,39 @@ export default function StudentDashboard() {
   }
 
   return (
-    <main className="min-h-screen w-full overflow-x-hidden bg-slate-50 px-3 py-5 sm:px-6 sm:py-8 lg:px-8">
-      <div className="mx-auto w-full max-w-7xl">
-        {/* Page heading */}
-        <div className="mb-7 flex flex-col gap-5 sm:mb-8 lg:flex-row lg:items-center lg:justify-between">
-          <div className="min-w-0">
-            <p className="text-sm font-medium text-slate-500">Student Portal</p>
+    <main className="min-h-screen bg-[#f5f7fb] px-4 py-5 sm:px-6 lg:px-8">
+      <div className="space-y-8">
+        {/* Page Header */}
+        <div className="flex flex-col justify-between gap-6 lg:flex-row lg:items-end">
+            <div>
+            <div className="mb-2 flex items-center gap-2 text-sm font-medium text-orange-600">
+              <Users size={16}/>
+              Student Portal
+            </div>
 
-            <h1 className="mt-1 break-words text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl lg:text-4xl">
+            <h1 className="text-3xl font-bold tracking-tight text-slate-950">
               Welcome back, {getStudentName(student)}
             </h1>
 
-            <p className="mt-2 text-sm leading-6 text-slate-500">
+            <p className="mt-2 max-w-xl text-sm text-slate-500">
               Track your karate training, attendance, and performance.
             </p>
           </div>
 
-          <div className="flex w-fit items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2.5 shadow-sm">
-            <Award className="h-5 w-5 text-amber-500" />
+          <div className="flex w-fit items-center gap-3 rounded-2xl border border-[#e3e8f0] bg-white px-4 py-3 shadow-sm">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#fff4e8]">
+              <Award className="h-5 w-5 text-[#f97316]" />
+            </div>
 
-            <span className="text-sm font-semibold text-slate-700">
-              {currentBelt}
-            </span>
+            <div>
+              <p className="text-[11px] font-medium uppercase tracking-wide text-slate-400">
+                Current Belt
+              </p>
+
+              <p className="mt-0.5 text-sm font-bold text-slate-900">
+                {currentBelt}
+              </p>
+            </div>
           </div>
         </div>
 
@@ -915,7 +1064,7 @@ export default function StudentDashboard() {
             value={currentBelt}
             description="Your current karate rank"
             icon={Award}
-            iconClassName="bg-amber-100 text-amber-600"
+            iconClassName="bg-[#fff4e8] text-[#f97316]"
           />
 
           <StatCard

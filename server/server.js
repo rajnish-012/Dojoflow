@@ -9,12 +9,14 @@ const authRoutes = require("./src/routes/auth.routes");
 const studentRoutes = require("./src/routes/student.routes");
 const planRoutes = require("./src/routes/plan.routes");
 const attendanceRoutes = require("./src/routes/attendance.routes");
+const makeupRoutes = require("./src/routes/makeup.routes");
 const performanceRoutes = require("./src/routes/performance.routes");
 const progressRoutes = require("./src/routes/progress.routes");
 const dashboardRoutes = require("./src/routes/dashboard.routes");
 const branchRoutes = require("./src/routes/branch.routes");
 const userRoutes = require("./src/routes/user.routes");
 const inquiryRoutes = require("./src/routes/inquiry.routes");
+
 
 // Load environment variables
 dotenv.config();
@@ -40,6 +42,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/students", studentRoutes);
 app.use("/api/plans", planRoutes);
 app.use("/api/attendance", attendanceRoutes);
+app.use("/api/makeups", makeupRoutes);
 app.use("/api/performance", performanceRoutes);
 app.use("/api/progress", progressRoutes);
 app.use("/api/dashboard", dashboardRoutes);
@@ -75,8 +78,9 @@ app.use((error, req, res, next) => {
 
 // Start Server
 const PORT = process.env.PORT || 5000;
+const URL = process.env.MONGO_URI;
 
 app.listen(PORT, () => {
   console.log(`DojoFlow server running on port ${PORT}`);
-  console.log(`API URL: http://localhost:${PORT}/api`);
+  console.log(`API URL: hhg${URL}rjdfghjkmn `);
 });

@@ -4,11 +4,15 @@ import { useEffect, useState } from "react";
 import {
   Award,
   CalendarDays,
+  Check,
   Clock,
-  Pencil,
+  Dumbbell,
+  Edit3,
+  Layers3,
   Plus,
   Trash2,
   X,
+  Zap,
 } from "lucide-react";
 
 import {
@@ -66,6 +70,17 @@ const emptyForm: FormData = {
   progressReports: "Monthly",
 };
 
+const beltColors: Record<string, string> = {
+  White: "bg-slate-100 text-slate-700 border-slate-200",
+  Yellow: "bg-yellow-100 text-yellow-700 border-yellow-200",
+  Orange: "bg-orange-100 text-orange-700 border-orange-200",
+  Green: "bg-emerald-100 text-emerald-700 border-emerald-200",
+  Blue: "bg-blue-100 text-blue-700 border-blue-200",
+  Purple: "bg-purple-100 text-purple-700 border-purple-200",
+  Brown: "bg-amber-100 text-amber-800 border-amber-200",
+  Black: "bg-slate-900 text-white border-slate-900",
+};
+
 export default function PlansPage() {
   const [plans, setPlans] = useState<Plan[]>([]);
   const [loading, setLoading] = useState(true);
@@ -75,7 +90,6 @@ export default function PlansPage() {
   const [editingPlan, setEditingPlan] = useState<Plan | null>(null);
 
   const [form, setForm] = useState<FormData>(emptyForm);
-
   const [curriculum, setCurriculum] = useState<CurriculumItem[]>([]);
   const [milestones, setMilestones] = useState<MilestoneItem[]>([]);
 
@@ -102,7 +116,7 @@ export default function PlansPage() {
 
   function openCreateModal() {
     setEditingPlan(null);
-    setForm(emptyForm);
+    setForm({ ...emptyForm });
     setCurriculum([]);
     setMilestones([]);
     setFormError("");
@@ -185,8 +199,7 @@ export default function PlansPage() {
         i === index
           ? {
               ...item,
-              [field]:
-                field === "day" ? Number(value) : value,
+              [field]: field === "day" ? Number(value) : value,
             }
           : item
       )
@@ -226,8 +239,7 @@ export default function PlansPage() {
         i === index
           ? {
               ...item,
-              [field]:
-                field === "day" ? Number(value) : value,
+              [field]: field === "day" ? Number(value) : value,
             }
           : item
       )
@@ -240,7 +252,6 @@ export default function PlansPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-
     setFormError("");
 
     if (!form.name.trim()) {
@@ -265,18 +276,14 @@ export default function PlansPage() {
 
     for (const item of curriculum) {
       if (!item.day || !item.title.trim()) {
-        setFormError(
-          "Every curriculum item must have a day and title."
-        );
+        setFormError("Every curriculum item must have a day and title.");
         return;
       }
     }
 
     for (const item of milestones) {
       if (!item.day || !item.belt.trim() || !item.skill.trim()) {
-        setFormError(
-          "Every milestone must have a day, belt and skill."
-        );
+        setFormError("Every milestone must have a day, belt and skill.");
         return;
       }
     }
@@ -323,9 +330,7 @@ export default function PlansPage() {
 
     try {
       setError("");
-
       await deletePlan(plan._id);
-
       await loadPlans();
     } catch (err: any) {
       setError(err.message || "Failed to delete plan");
@@ -333,280 +338,200 @@ export default function PlansPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
-      {/* Header */}
-      <div className="mb-8 flex items-center justify-between">
+    <div className="min-h-screen bg-[#f6f7fb] px-4 py-5 sm:px-6 lg:px-8">
+      {/* Page Header */}
+      <div className="mb-8 flex flex-col justify-between gap-5 sm:flex-row sm:items-center">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">
+          <div className="mb-2 flex items-center gap-2 text-sm font-medium text-orange-600">
+            <Layers3 size={16} />
+            Academy Management
+          </div>
+
+          <h1 className="text-3xl font-bold tracking-tight text-slate-950">
             Training Plans
           </h1>
 
-          <p className="mt-1 text-sm text-gray-500">
-            Manage academy plans, curriculum and belt milestones.
+          <p className="mt-2 max-w-xl text-sm text-slate-500">
+            Create and manage structured training programs, curriculum,
+            pricing, and belt progression.
           </p>
         </div>
 
         <button
           onClick={openCreateModal}
-          className="flex items-center gap-2 rounded-lg bg-black px-4 py-2.5 text-sm font-medium text-white hover:bg-gray-800"
+          className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-slate-950/10 transition hover:bg-orange-600"
         >
           <Plus size={18} />
-          Add Plan
+          Add Training Plan
         </button>
+      </div>
+
+      {/* Summary Cards */}
+      <div className="mb-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <SummaryCard
+          icon={<Layers3 size={20} />}
+          label="Total Plans"
+          value={plans.length}
+          description="Available training programs"
+        />
+
+        <SummaryCard
+          icon={<Check size={20} />}
+          label="Active Plans"
+          value={plans.filter((plan) => plan.isActive).length}
+          description="Currently available"
+        />
+
+        <SummaryCard
+          icon={<CalendarDays size={20} />}
+          label="Curriculum Days"
+          value={plans.reduce(
+            (total, plan) => total + (plan.curriculum?.length || 0),
+            0
+          )}
+          description="Across all plans"
+        />
+
+        <SummaryCard
+          icon={<Award size={20} />}
+          label="Milestones"
+          value={plans.reduce(
+            (total, plan) => total + (plan.milestones?.length || 0),
+            0
+          )}
+          description="Belt progression checkpoints"
+        />
       </div>
 
       {/* Error */}
       {error && (
-        <div className="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <div className="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           {error}
         </div>
       )}
 
-      {/* Loading */}
+      {/* Content */}
       {loading ? (
-        <div className="rounded-xl border border-gray-200 bg-white p-10 text-center text-gray-500">
-          Loading plans...
-        </div>
-      ) : plans.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-gray-300 bg-white p-12 text-center">
-          <CalendarDays
-            size={40}
-            className="mx-auto mb-3 text-gray-400"
-          />
-
-          <h2 className="text-lg font-semibold text-gray-800">
-            No plans found
-          </h2>
-
-          <p className="mt-1 text-sm text-gray-500">
-            Create your first training plan.
+        <div className="rounded-2xl border border-slate-200 bg-white p-16 text-center shadow-sm">
+          <div className="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-2 border-slate-200 border-t-orange-500" />
+          <p className="text-sm font-medium text-slate-500">
+            Loading training plans...
           </p>
         </div>
+      ) : plans.length === 0 ? (
+        <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-16 text-center shadow-sm">
+          <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-2xl bg-orange-50 text-orange-600">
+            <CalendarDays size={30} />
+          </div>
+
+          <h2 className="text-xl font-bold text-slate-900">
+            No training plans yet
+          </h2>
+
+          <p className="mx-auto mt-2 max-w-sm text-sm text-slate-500">
+            Create your first plan to organize classes, curriculum, and belt
+            progression.
+          </p>
+
+          <button
+            onClick={openCreateModal}
+            className="mt-6 inline-flex items-center gap-2 rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-orange-600"
+          >
+            <Plus size={17} />
+            Create First Plan
+          </button>
+        </div>
       ) : (
-        <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
+        <div className="grid gap-6 md:grid-cols-2 2xl:grid-cols-3">
           {plans.map((plan) => (
-            <div
+            <PlanCard
               key={plan._id}
-              className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm"
-            >
-              {/* Card Header */}
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <h2 className="text-lg font-bold text-gray-900">
-                    {plan.name}
-                  </h2>
-
-                  <p className="mt-1 text-sm text-gray-500">
-                    Starting belt: {plan.startingBelt}
-                  </p>
-                </div>
-
-                <span
-                  className={`rounded-full px-2.5 py-1 text-xs font-medium ${
-                    plan.isActive
-                      ? "bg-green-100 text-green-700"
-                      : "bg-gray-100 text-gray-600"
-                  }`}
-                >
-                  {plan.isActive ? "Active" : "Inactive"}
-                </span>
-              </div>
-
-              {/* Price */}
-              <div className="mt-5 flex items-end gap-2">
-                <span className="text-2xl font-bold text-gray-900">
-                  ₹{plan.price}
-                </span>
-
-                <span className="pb-1 text-sm text-gray-500">
-                  / {plan.duration}{" "}
-                  {plan.durationUnit === "MONTHS"
-                    ? "months"
-                    : "days"}
-                </span>
-              </div>
-
-              {/* Details */}
-              <div className="mt-5 space-y-3 text-sm">
-                <div className="flex items-center justify-between">
-                  <span className="text-gray-500">
-                    Classes / week
-                  </span>
-
-                  <span className="font-medium text-gray-800">
-                    {plan.classesPerWeek}
-                  </span>
-                </div>
-
-                <div className="flex items-center justify-between">
-                  <span className="text-gray-500">
-                    Progress reports
-                  </span>
-
-                  <span className="font-medium text-gray-800">
-                    {plan.progressReports}
-                  </span>
-                </div>
-
-                <div className="flex items-center justify-between">
-                  <span className="text-gray-500">
-                    Curriculum
-                  </span>
-
-                  <span className="font-medium text-gray-800">
-                    {plan.curriculum?.length || 0} days
-                  </span>
-                </div>
-
-                <div className="flex items-center justify-between">
-                  <span className="text-gray-500">
-                    Milestones
-                  </span>
-
-                  <span className="font-medium text-gray-800">
-                    {plan.milestones?.length || 0}
-                  </span>
-                </div>
-              </div>
-
-              {/* Curriculum Preview */}
-              {plan.curriculum?.length > 0 && (
-                <div className="mt-5 rounded-lg bg-gray-50 p-4">
-                  <div className="mb-3 flex items-center gap-2">
-                    <CalendarDays
-                      size={16}
-                      className="text-gray-600"
-                    />
-
-                    <span className="text-sm font-semibold text-gray-800">
-                      Curriculum Preview
-                    </span>
-                  </div>
-
-                  <div className="space-y-2">
-                    {plan.curriculum.slice(0, 3).map((item) => (
-                      <div
-                        key={`${plan._id}-${item.day}`}
-                        className="flex gap-3 text-sm"
-                      >
-                        <span className="font-medium text-gray-500">
-                          Day {item.day}
-                        </span>
-
-                        <span className="text-gray-700">
-                          {item.title}
-                        </span>
-                      </div>
-                    ))}
-
-                    {plan.curriculum.length > 3 && (
-                      <p className="pt-1 text-xs text-gray-400">
-                        +{plan.curriculum.length - 3} more days
-                      </p>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* Actions */}
-              <div className="mt-5 flex gap-3 border-t border-gray-100 pt-4">
-                <button
-                  onClick={() => openEditModal(plan)}
-                  className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-                >
-                  <Pencil size={16} />
-                  Edit
-                </button>
-
-                <button
-                  onClick={() => handleDelete(plan)}
-                  className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-red-200 px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
-                >
-                  <Trash2 size={16} />
-                  Delete
-                </button>
-              </div>
-            </div>
+              plan={plan}
+              onEdit={() => openEditModal(plan)}
+              onDelete={() => handleDelete(plan)}
+            />
           ))}
         </div>
       )}
 
       {/* Modal */}
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="max-h-[92vh] w-full max-w-4xl overflow-y-auto rounded-2xl bg-white shadow-xl">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-3 backdrop-blur-sm sm:p-5">
+          <div className="flex max-h-[94vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
             {/* Modal Header */}
-            <div className="sticky top-0 z-10 flex items-center justify-between border-b border-gray-200 bg-white px-6 py-4">
+            <div className="flex items-center justify-between border-b border-slate-200 bg-white px-5 py-4 sm:px-7">
               <div>
-                <h2 className="text-xl font-bold text-gray-900">
-                  {editingPlan ? "Edit Plan" : "Create Training Plan"}
+                <div className="mb-1 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-orange-600">
+                  <Zap size={14} />
+                  Plan Configuration
+                </div>
+
+                <h2 className="text-xl font-bold text-slate-950">
+                  {editingPlan ? "Edit Training Plan" : "Create Training Plan"}
                 </h2>
 
-                <p className="mt-1 text-sm text-gray-500">
-                  {editingPlan
-                    ? "Update plan details, curriculum and milestones."
-                    : "Define the training plan and progression structure."}
+                <p className="mt-1 text-sm text-slate-500">
+                  Configure pricing, curriculum, and progression milestones.
                 </p>
               </div>
 
               <button
                 onClick={closeModal}
-                className="rounded-lg p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-800"
+                disabled={saving}
+                className="rounded-xl p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 disabled:opacity-50"
               >
-                <X size={20} />
+                <X size={21} />
               </button>
             </div>
 
-            <form onSubmit={handleSubmit} className="p-6">
-              {/* Form Error */}
+            <form
+              onSubmit={handleSubmit}
+              className="overflow-y-auto px-5 py-6 sm:px-7"
+            >
               {formError && (
-                <div className="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                <div className="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
                   {formError}
                 </div>
               )}
 
               {/* Basic Information */}
               <section>
-                <h3 className="mb-4 text-base font-semibold text-gray-900">
-                  Basic Information
-                </h3>
+                <SectionHeading
+                  icon={<Layers3 size={18} />}
+                  title="Basic Information"
+                  description="Set the main details of this training plan."
+                />
 
                 <div className="grid gap-4 md:grid-cols-2">
-                  <div>
-                    <label className="mb-1.5 block text-sm font-medium text-gray-700">
-                      Plan Name
-                    </label>
-
+                  <FormField label="Plan Name" required>
                     <input
                       name="name"
                       value={form.name}
                       onChange={handleChange}
                       placeholder="e.g. Beginner Plan"
-                      className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm outline-none focus:border-black"
+                      className={inputClass}
                     />
-                  </div>
+                  </FormField>
 
-                  <div>
-                    <label className="mb-1.5 block text-sm font-medium text-gray-700">
-                      Price
-                    </label>
+                  <FormField label="Price" required>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-semibold text-slate-400">
+                        ₹
+                      </span>
 
-                    <input
-                      name="price"
-                      type="number"
-                      min="0"
-                      value={form.price}
-                      onChange={handleChange}
-                      placeholder="4000"
-                      className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm outline-none focus:border-black"
-                    />
-                  </div>
+                      <input
+                        name="price"
+                        type="number"
+                        min="0"
+                        value={form.price}
+                        onChange={handleChange}
+                        placeholder="4000"
+                        className={`${inputClass} pl-8`}
+                      />
+                    </div>
+                  </FormField>
 
-                  <div>
-                    <label className="mb-1.5 block text-sm font-medium text-gray-700">
-                      Duration
-                    </label>
-
+                  <FormField label="Duration" required>
                     <input
                       name="duration"
                       type="number"
@@ -614,51 +539,39 @@ export default function PlansPage() {
                       value={form.duration}
                       onChange={handleChange}
                       placeholder="6"
-                      className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm outline-none focus:border-black"
+                      className={inputClass}
                     />
-                  </div>
+                  </FormField>
 
-                  <div>
-                    <label className="mb-1.5 block text-sm font-medium text-gray-700">
-                      Duration Unit
-                    </label>
-
+                  <FormField label="Duration Unit">
                     <select
                       name="durationUnit"
                       value={form.durationUnit}
                       onChange={handleChange}
-                      className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-black"
+                      className={selectClass}
                     >
                       <option value="MONTHS">Months</option>
                       <option value="DAYS">Days</option>
                     </select>
-                  </div>
+                  </FormField>
 
-                  <div>
-                    <label className="mb-1.5 block text-sm font-medium text-gray-700">
-                      Classes Per Week
-                    </label>
-
+                  <FormField label="Classes Per Week" required>
                     <input
                       name="classesPerWeek"
                       type="number"
                       min="1"
                       value={form.classesPerWeek}
                       onChange={handleChange}
-                      className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm outline-none focus:border-black"
+                      className={inputClass}
                     />
-                  </div>
+                  </FormField>
 
-                  <div>
-                    <label className="mb-1.5 block text-sm font-medium text-gray-700">
-                      Starting Belt
-                    </label>
-
+                  <FormField label="Starting Belt">
                     <select
                       name="startingBelt"
                       value={form.startingBelt}
                       onChange={handleChange}
-                      className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-black"
+                      className={selectClass}
                     >
                       <option value="White">White</option>
                       <option value="Yellow">Yellow</option>
@@ -669,45 +582,36 @@ export default function PlansPage() {
                       <option value="Brown">Brown</option>
                       <option value="Black">Black</option>
                     </select>
-                  </div>
+                  </FormField>
 
-                  <div>
-                    <label className="mb-1.5 block text-sm font-medium text-gray-700">
-                      Progress Reports
-                    </label>
-
+                  <FormField label="Progress Reports">
                     <select
                       name="progressReports"
                       value={form.progressReports}
                       onChange={handleChange}
-                      className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-black"
+                      className={selectClass}
                     >
                       <option value="Weekly">Weekly</option>
                       <option value="Monthly">Monthly</option>
                       <option value="Quarterly">Quarterly</option>
                     </select>
-                  </div>
+                  </FormField>
                 </div>
               </section>
 
               {/* Curriculum */}
-              <section className="mt-8">
-                <div className="mb-4 flex items-center justify-between">
-                  <div>
-                    <h3 className="flex items-center gap-2 text-base font-semibold text-gray-900">
-                      <CalendarDays size={18} />
-                      Day-wise Curriculum
-                    </h3>
-
-                    <p className="mt-1 text-xs text-gray-500">
-                      Define what students learn on each training day.
-                    </p>
-                  </div>
+              <section className="mt-10">
+                <div className="mb-4 flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
+                  <SectionHeading
+                    icon={<CalendarDays size={18} />}
+                    title="Day-wise Curriculum"
+                    description="Define what students learn on each training day."
+                  />
 
                   <button
                     type="button"
                     onClick={addCurriculum}
-                    className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                    className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-orange-200 hover:bg-orange-50 hover:text-orange-700"
                   >
                     <Plus size={16} />
                     Add Day
@@ -715,38 +619,44 @@ export default function PlansPage() {
                 </div>
 
                 {curriculum.length === 0 ? (
-                  <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-500">
-                    No curriculum days added yet.
-                  </div>
+                  <EmptySection
+                    icon={<CalendarDays size={22} />}
+                    text="No curriculum days added yet."
+                  />
                 ) : (
                   <div className="space-y-4">
                     {curriculum.map((item, index) => (
                       <div
                         key={index}
-                        className="rounded-xl border border-gray-200 bg-gray-50 p-4"
+                        className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 sm:p-5"
                       >
-                        <div className="mb-3 flex items-center justify-between">
-                          <span className="text-sm font-semibold text-gray-800">
-                            Training Day {item.day}
-                          </span>
+                        <div className="mb-4 flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-orange-100 text-sm font-bold text-orange-700">
+                              {item.day}
+                            </div>
+
+                            <div>
+                              <p className="text-sm font-bold text-slate-900">
+                                Training Day {item.day}
+                              </p>
+                              <p className="text-xs text-slate-500">
+                                Curriculum lesson
+                              </p>
+                            </div>
+                          </div>
 
                           <button
                             type="button"
-                            onClick={() =>
-                              removeCurriculum(index)
-                            }
-                            className="rounded-lg p-1.5 text-red-500 hover:bg-red-100"
+                            onClick={() => removeCurriculum(index)}
+                            className="rounded-xl p-2 text-red-500 transition hover:bg-red-100"
                           >
-                            <Trash2 size={16} />
+                            <Trash2 size={17} />
                           </button>
                         </div>
 
                         <div className="grid gap-3 md:grid-cols-2">
-                          <div>
-                            <label className="mb-1 block text-xs font-medium text-gray-600">
-                              Day
-                            </label>
-
+                          <FormField label="Day">
                             <input
                               type="number"
                               min="1"
@@ -758,15 +668,11 @@ export default function PlansPage() {
                                   e.target.value
                                 )
                               }
-                              className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-black"
+                              className={inputClass}
                             />
-                          </div>
+                          </FormField>
 
-                          <div>
-                            <label className="mb-1 block text-xs font-medium text-gray-600">
-                              Title
-                            </label>
-
+                          <FormField label="Title">
                             <input
                               value={item.title}
                               onChange={(e) =>
@@ -777,15 +683,11 @@ export default function PlansPage() {
                                 )
                               }
                               placeholder="e.g. Straight Punch"
-                              className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-black"
+                              className={inputClass}
                             />
-                          </div>
+                          </FormField>
 
-                          <div>
-                            <label className="mb-1 block text-xs font-medium text-gray-600">
-                              Skill
-                            </label>
-
+                          <FormField label="Skill">
                             <input
                               value={item.skill}
                               onChange={(e) =>
@@ -796,15 +698,11 @@ export default function PlansPage() {
                                 )
                               }
                               placeholder="e.g. Punching"
-                              className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-black"
+                              className={inputClass}
                             />
-                          </div>
+                          </FormField>
 
-                          <div>
-                            <label className="mb-1 block text-xs font-medium text-gray-600">
-                              Description
-                            </label>
-
+                          <FormField label="Description">
                             <input
                               value={item.description}
                               onChange={(e) =>
@@ -815,9 +713,9 @@ export default function PlansPage() {
                                 )
                               }
                               placeholder="Brief description"
-                              className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-black"
+                              className={inputClass}
                             />
-                          </div>
+                          </FormField>
                         </div>
                       </div>
                     ))}
@@ -826,23 +724,18 @@ export default function PlansPage() {
               </section>
 
               {/* Milestones */}
-              <section className="mt-8">
-                <div className="mb-4 flex items-center justify-between">
-                  <div>
-                    <h3 className="flex items-center gap-2 text-base font-semibold text-gray-900">
-                      <Award size={18} />
-                      Belt Milestones
-                    </h3>
-
-                    <p className="mt-1 text-xs text-gray-500">
-                      Define belt progression checkpoints.
-                    </p>
-                  </div>
+              <section className="mt-10">
+                <div className="mb-4 flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
+                  <SectionHeading
+                    icon={<Award size={18} />}
+                    title="Belt Milestones"
+                    description="Define belt progression checkpoints."
+                  />
 
                   <button
                     type="button"
                     onClick={addMilestone}
-                    className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                    className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-orange-200 hover:bg-orange-50 hover:text-orange-700"
                   >
                     <Plus size={16} />
                     Add Milestone
@@ -850,38 +743,44 @@ export default function PlansPage() {
                 </div>
 
                 {milestones.length === 0 ? (
-                  <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-500">
-                    No milestones added yet.
-                  </div>
+                  <EmptySection
+                    icon={<Award size={22} />}
+                    text="No milestones added yet."
+                  />
                 ) : (
                   <div className="space-y-4">
                     {milestones.map((item, index) => (
                       <div
                         key={index}
-                        className="rounded-xl border border-gray-200 bg-gray-50 p-4"
+                        className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 sm:p-5"
                       >
-                        <div className="mb-3 flex items-center justify-between">
-                          <span className="text-sm font-semibold text-gray-800">
-                            Milestone {index + 1}
-                          </span>
+                        <div className="mb-4 flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-900 text-sm font-bold text-white">
+                              {index + 1}
+                            </div>
+
+                            <div>
+                              <p className="text-sm font-bold text-slate-900">
+                                Milestone {index + 1}
+                              </p>
+                              <p className="text-xs text-slate-500">
+                                Belt progression checkpoint
+                              </p>
+                            </div>
+                          </div>
 
                           <button
                             type="button"
-                            onClick={() =>
-                              removeMilestone(index)
-                            }
-                            className="rounded-lg p-1.5 text-red-500 hover:bg-red-100"
+                            onClick={() => removeMilestone(index)}
+                            className="rounded-xl p-2 text-red-500 transition hover:bg-red-100"
                           >
-                            <Trash2 size={16} />
+                            <Trash2 size={17} />
                           </button>
                         </div>
 
                         <div className="grid gap-3 md:grid-cols-2">
-                          <div>
-                            <label className="mb-1 block text-xs font-medium text-gray-600">
-                              Day
-                            </label>
-
+                          <FormField label="Day">
                             <input
                               type="number"
                               min="1"
@@ -893,15 +792,11 @@ export default function PlansPage() {
                                   e.target.value
                                 )
                               }
-                              className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-black"
+                              className={inputClass}
                             />
-                          </div>
+                          </FormField>
 
-                          <div>
-                            <label className="mb-1 block text-xs font-medium text-gray-600">
-                              Belt
-                            </label>
-
+                          <FormField label="Belt">
                             <select
                               value={item.belt}
                               onChange={(e) =>
@@ -911,11 +806,9 @@ export default function PlansPage() {
                                   e.target.value
                                 )
                               }
-                              className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-black"
+                              className={selectClass}
                             >
-                              <option value="">
-                                Select belt
-                              </option>
+                              <option value="">Select belt</option>
                               <option value="White">White</option>
                               <option value="Yellow">Yellow</option>
                               <option value="Orange">Orange</option>
@@ -925,13 +818,9 @@ export default function PlansPage() {
                               <option value="Brown">Brown</option>
                               <option value="Black">Black</option>
                             </select>
-                          </div>
+                          </FormField>
 
-                          <div>
-                            <label className="mb-1 block text-xs font-medium text-gray-600">
-                              Skill
-                            </label>
-
+                          <FormField label="Skill">
                             <input
                               value={item.skill}
                               onChange={(e) =>
@@ -942,15 +831,11 @@ export default function PlansPage() {
                                 )
                               }
                               placeholder="e.g. Kicks & Blocking"
-                              className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-black"
+                              className={inputClass}
                             />
-                          </div>
+                          </FormField>
 
-                          <div>
-                            <label className="mb-1 block text-xs font-medium text-gray-600">
-                              Description
-                            </label>
-
+                          <FormField label="Description">
                             <input
                               value={item.description}
                               onChange={(e) =>
@@ -961,9 +846,9 @@ export default function PlansPage() {
                                 )
                               }
                               placeholder="Milestone description"
-                              className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-black"
+                              className={inputClass}
                             />
-                          </div>
+                          </FormField>
                         </div>
                       </div>
                     ))}
@@ -972,12 +857,12 @@ export default function PlansPage() {
               </section>
 
               {/* Footer */}
-              <div className="mt-8 flex justify-end gap-3 border-t border-gray-200 pt-5">
+              <div className="mt-10 flex flex-col-reverse gap-3 border-t border-slate-200 pt-5 sm:flex-row sm:justify-end">
                 <button
                   type="button"
                   onClick={closeModal}
                   disabled={saving}
-                  className="rounded-lg border border-gray-200 px-5 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                  className="rounded-xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
                 >
                   Cancel
                 </button>
@@ -985,11 +870,9 @@ export default function PlansPage() {
                 <button
                   type="submit"
                   disabled={saving}
-                  className="flex items-center gap-2 rounded-lg bg-black px-5 py-2.5 text-sm font-medium text-white hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-950 px-6 py-3 text-sm font-semibold text-white transition hover:bg-orange-600 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  {saving && (
-                    <Clock size={16} className="animate-spin" />
-                  )}
+                  {saving && <Clock size={16} className="animate-spin" />}
 
                   {saving
                     ? editingPlan
@@ -1007,3 +890,293 @@ export default function PlansPage() {
     </div>
   );
 }
+
+/* ---------- Reusable Components ---------- */
+
+function SummaryCard({
+  icon,
+  label,
+  value,
+  description,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: number;
+  description: string;
+}) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm hover:border-[#d7a84b] hover:shadow-[0_12px_30px_rgba(16,26,51,0.08)]">
+      <div className="mb-4 flex items-center justify-between">
+        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-orange-50 text-orange-600">
+          {icon}
+        </div>
+
+        <span className="text-xs font-medium text-slate-400">
+          DojoFlow
+        </span>
+      </div>
+
+      <p className="text-sm font-medium text-slate-500">{label}</p>
+
+      <p className="mt-1 text-2xl font-bold text-slate-950">{value}</p>
+
+      <p className="mt-1 text-xs text-slate-400">{description}</p>
+    </div>
+  );
+}
+
+function PlanCard({
+  plan,
+  onEdit,
+  onDelete,
+}: {
+  plan: Plan;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <div className="group overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition duration-300 hover:-translate-y-1 hover:shadow-xl">
+      {/* Top Accent */}
+      <div className="h-1.5 bg-gradient-to-r from-orange-500 via-orange-400 to-yellow-300" />
+
+      <div className="p-5 sm:p-6">
+        {/* Header */}
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <div className="mb-3 flex items-center gap-2">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-orange-50 text-orange-600">
+                <Dumbbell size={20} />
+              </div>
+
+              <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+                Training Plan
+              </span>
+            </div>
+
+            <h2 className="truncate text-xl font-bold text-slate-950">
+              {plan.name}
+            </h2>
+
+            <div className="mt-2 flex items-center gap-2">
+              <span
+                className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${
+                  beltColors[plan.startingBelt] ||
+                  "border-slate-200 bg-slate-100 text-slate-700"
+                }`}
+              >
+                {plan.startingBelt} Belt
+              </span>
+
+              <span
+                className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
+                  plan.isActive
+                    ? "bg-emerald-50 text-emerald-700"
+                    : "bg-slate-100 text-slate-500"
+                }`}
+              >
+                {plan.isActive ? "Active" : "Inactive"}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Price */}
+        <div className="mt-7 rounded-2xl bg-slate-950 p-5 text-white">
+          <p className="text-xs font-medium text-slate-400">Plan investment</p>
+
+          <div className="mt-1 flex items-end gap-2">
+            <span className="text-3xl font-bold tracking-tight">
+              ₹{plan.price.toLocaleString("en-IN")}
+            </span>
+
+            <span className="pb-1 text-sm text-slate-400">
+              / {plan.duration}{" "}
+              {plan.durationUnit === "MONTHS" ? "months" : "days"}
+            </span>
+          </div>
+        </div>
+
+        {/* Details */}
+        <div className="mt-5 grid grid-cols-2 gap-3">
+          <DetailBox
+            label="Classes / Week"
+            value={String(plan.classesPerWeek)}
+            icon={<CalendarDays size={15} />}
+          />
+
+          <DetailBox
+            label="Reports"
+            value={plan.progressReports}
+            icon={<Clock size={15} />}
+          />
+
+          <DetailBox
+            label="Curriculum"
+            value={`${plan.curriculum?.length || 0} days`}
+            icon={<Layers3 size={15} />}
+          />
+
+          <DetailBox
+            label="Milestones"
+            value={String(plan.milestones?.length || 0)}
+            icon={<Award size={15} />}
+          />
+        </div>
+
+        {/* Curriculum Preview */}
+        {plan.curriculum?.length > 0 && (
+          <div className="mt-5 rounded-2xl border border-slate-100 bg-slate-50 p-4">
+            <div className="mb-3 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <CalendarDays size={16} className="text-orange-600" />
+                <span className="text-sm font-bold text-slate-800">
+                  Curriculum Preview
+                </span>
+              </div>
+
+              <span className="text-xs font-medium text-slate-400">
+                {plan.curriculum.length} total
+              </span>
+            </div>
+
+            <div className="space-y-3">
+              {plan.curriculum.slice(0, 3).map((item) => (
+                <div
+                  key={`${plan._id}-${item.day}`}
+                  className="flex items-start gap-3"
+                >
+                  <div className="flex h-6 min-w-6 items-center justify-center rounded-lg bg-white text-[11px] font-bold text-orange-600 shadow-sm">
+                    {item.day}
+                  </div>
+
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-slate-700">
+                      {item.title}
+                    </p>
+
+                    {item.skill && (
+                      <p className="mt-0.5 truncate text-xs text-slate-400">
+                        {item.skill}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              ))}
+
+              {plan.curriculum.length > 3 && (
+                <p className="pt-1 text-xs font-medium text-orange-600">
+                  +{plan.curriculum.length - 3} more curriculum days
+                </p>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Actions */}
+        <div className="mt-6 flex gap-3 border-t border-slate-100 pt-5">
+          <button
+            onClick={onEdit}
+            className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-orange-200 hover:bg-orange-50 hover:text-orange-700"
+          >
+            <Edit3 size={16} />
+            Edit
+          </button>
+
+          <button
+            onClick={onDelete}
+            className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl border border-red-200 px-3 py-2.5 text-sm font-semibold text-red-600 transition hover:bg-red-50"
+          >
+            <Trash2 size={16} />
+            Delete
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DetailBox({
+  label,
+  value,
+  icon,
+}: {
+  label: string;
+  value: string;
+  icon: React.ReactNode;
+}) {
+  return (
+    <div className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-3">
+      <div className="mb-1 flex items-center gap-1.5 text-slate-400">
+        {icon}
+        <span className="text-[11px] font-medium">{label}</span>
+      </div>
+
+      <p className="truncate text-sm font-bold text-slate-800">{value}</p>
+    </div>
+  );
+}
+
+function SectionHeading({
+  icon,
+  title,
+  description,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  description: string;
+}) {
+  return (
+    <div className="flex items-start gap-3">
+      <div className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-xl bg-orange-50 text-orange-600">
+        {icon}
+      </div>
+
+      <div>
+        <h3 className="text-base font-bold text-slate-950">{title}</h3>
+        <p className="mt-1 text-xs text-slate-500">{description}</p>
+      </div>
+    </div>
+  );
+}
+
+function FormField({
+  label,
+  required,
+  children,
+}: {
+  label: string;
+  required?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <div>
+      <label className="mb-1.5 block text-xs font-semibold text-slate-600">
+        {label}
+        {required && <span className="ml-1 text-orange-600">*</span>}
+      </label>
+
+      {children}
+    </div>
+  );
+}
+
+function EmptySection({
+  icon,
+  text,
+}: {
+  icon: React.ReactNode;
+  text: string;
+}) {
+  return (
+    <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-slate-50/50 px-6 py-10 text-center">
+      <div className="mb-3 text-slate-400">{icon}</div>
+      <p className="text-sm text-slate-500">{text}</p>
+    </div>
+  );
+}
+
+const inputClass =
+  "w-full rounded-xl border border-slate-200 bg-white px-3.5 py-3 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-orange-400 focus:ring-4 focus:ring-orange-500/10";
+
+const selectClass =
+  "w-full rounded-xl border border-slate-200 bg-white px-3.5 py-3 text-sm text-slate-800 outline-none transition focus:border-orange-400 focus:ring-4 focus:ring-orange-500/10";

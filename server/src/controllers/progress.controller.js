@@ -7,32 +7,67 @@ const Plan = require("../models/Plan");
 const Attendance = require("../models/Attendance");
 const Performance = require("../models/Performance");
 
-// ==============================
+// =========================================================
+// SHARED BRANCH ACCESS HELPER
+// =========================================================
+
+const canAccessStudent = (user, student) => {
+  if (!user || !student) {
+    return false;
+  }
+
+  // Super Admin can access every student.
+  if (user.role === "SUPER_ADMIN") {
+    return true;
+  }
+
+  // Branch-level staff must have an assigned branch.
+  if (["BRANCH_ADMIN", "COACH"].includes(user.role)) {
+    if (!user.branch || !student.branch) {
+      return false;
+    }
+
+    return (
+      user.branch.toString() ===
+      student.branch.toString()
+    );
+  }
+
+  return false;
+};
+
+// =========================================================
 // GET ALL STUDENTS
-// ==============================
+// =========================================================
 
 const getStudents = async (req, res) => {
   try {
     const filter = {};
 
-    // Branch admins and coaches can only see students
-    // belonging to their own branch
-    if (
-      ["BRANCH_ADMIN", "COACH"].includes(req.user.role) &&
-      req.user.branch
-    ) {
+    // Branch Admin and Coach can only see their own branch.
+    if (["BRANCH_ADMIN", "COACH"].includes(req.user.role)) {
+      if (!req.user.branch) {
+        return res.status(403).json({
+          success: false,
+          message:
+            "Your account is not assigned to a branch",
+        });
+      }
+
       filter.branch = req.user.branch;
     }
 
     const students = await Student.find(filter)
-      .populate("user", "name email role")
       .populate("branch", "name address")
-      .populate("plan")
+      .populate(
+        "plan",
+        "name price duration durationUnit startingBelt"
+      )
+      .populate("user", "name email role")
       .sort({ createdAt: -1 });
 
     return res.status(200).json({
       success: true,
-      count: students.length,
       students,
     });
   } catch (error) {
@@ -45,9 +80,9 @@ const getStudents = async (req, res) => {
   }
 };
 
-// ==============================
+// =========================================================
 // GET STUDENT BY ID
-// ==============================
+// =========================================================
 
 const getStudentById = async (req, res) => {
   try {
@@ -61,9 +96,12 @@ const getStudentById = async (req, res) => {
     }
 
     const student = await Student.findById(id)
-      .populate("user", "name email role")
       .populate("branch", "name address")
-      .populate("plan");
+      .populate(
+        "plan",
+        "name price duration durationUnit startingBelt"
+      )
+      .populate("user", "name email role");
 
     if (!student) {
       return res.status(404).json({
@@ -72,21 +110,11 @@ const getStudentById = async (req, res) => {
       });
     }
 
-    // Branch admins and coaches can only access
-    // students from their own branch
-    if (
-      ["BRANCH_ADMIN", "COACH"].includes(req.user.role) &&
-      req.user.branch
-    ) {
-      if (
-        !student.branch ||
-        student.branch._id.toString() !== req.user.branch.toString()
-      ) {
-        return res.status(403).json({
-          success: false,
-          message: "You do not have access to this student",
-        });
-      }
+    if (!canAccessStudent(req.user, student)) {
+      return res.status(403).json({
+        success: false,
+        message: "You do not have access to this student",
+      });
     }
 
     return res.status(200).json({
@@ -94,7 +122,7 @@ const getStudentById = async (req, res) => {
       student,
     });
   } catch (error) {
-    console.error("Get student error:", error);
+    console.error("Get student by ID error:", error);
 
     return res.status(500).json({
       success: false,
@@ -103,18 +131,21 @@ const getStudentById = async (req, res) => {
   }
 };
 
-// ==============================
-// GET STUDENT'S OWN PROFILE
-// ==============================
+// =========================================================
+// GET MY STUDENT PROFILE
+// =========================================================
 
 const getMyStudentProfile = async (req, res) => {
   try {
     const student = await Student.findOne({
       user: req.user._id,
     })
-      .populate("user", "name email role")
       .populate("branch", "name address")
-      .populate("plan");
+      .populate(
+        "plan",
+        "name price duration durationUnit startingBelt"
+      )
+      .populate("user", "name email role");
 
     if (!student) {
       return res.status(404).json({
@@ -132,14 +163,14 @@ const getMyStudentProfile = async (req, res) => {
 
     return res.status(500).json({
       success: false,
-      message: "Failed to fetch your student profile",
+      message: "Failed to fetch your profile",
     });
   }
 };
 
-// ==============================
+// =========================================================
 // CREATE STUDENT
-// ==============================
+// =========================================================
 
 const createStudent = async (req, res) => {
   try {
@@ -150,56 +181,174 @@ const createStudent = async (req, res) => {
       email,
       branch,
       plan,
-      joinDate,
-      currentBelt,
-      status,
-      user,
+      loginEmail,
+      loginPassword,
     } = req.body;
 
-    if (!name || !age || !phone || !branch || !plan) {
+    if (
+      !name ||
+      age === undefined ||
+      !phone ||
+      !branch ||
+      !plan ||
+      !loginEmail ||
+      !loginPassword
+    ) {
       return res.status(400).json({
         success: false,
-        message: "Name, age, phone, branch and plan are required",
+        message:
+          "Name, age, phone, branch, plan, login email and login password are required",
       });
     }
 
-    // Branch admins can only create students in their own branch
-    if (
-      req.user.role === "BRANCH_ADMIN" &&
-      req.user.branch &&
-      branch.toString() !== req.user.branch.toString()
-    ) {
-      return res.status(403).json({
+    if (!mongoose.Types.ObjectId.isValid(branch)) {
+      return res.status(400).json({
         success: false,
-        message: "You can only create students in your own branch",
+        message: "Invalid branch ID",
       });
     }
 
-    const student = await Student.create({
+    if (!mongoose.Types.ObjectId.isValid(plan)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid plan ID",
+      });
+    }
+
+    if (Number(age) <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Age must be greater than zero",
+      });
+    }
+
+    if (loginPassword.length < 6) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Login password must be at least 6 characters",
+      });
+    }
+
+    // Branch Admin can only create students in their branch.
+    if (req.user.role === "BRANCH_ADMIN") {
+      if (!req.user.branch) {
+        return res.status(403).json({
+          success: false,
+          message:
+            "Your account is not assigned to a branch",
+        });
+      }
+
+      if (
+        req.user.branch.toString() !== branch.toString()
+      ) {
+        return res.status(403).json({
+          success: false,
+          message:
+            "You can only create students in your branch",
+        });
+      }
+    }
+
+    const Branch = require("../models/Branch");
+
+    const branchExists = await Branch.findOne({
+      _id: branch,
+      isActive: true,
+    });
+
+    if (!branchExists) {
+      return res.status(404).json({
+        success: false,
+        message: "Active branch not found",
+      });
+    }
+
+    const planExists = await Plan.findOne({
+      _id: plan,
+      isActive: true,
+    });
+
+    if (!planExists) {
+      return res.status(404).json({
+        success: false,
+        message: "Active plan not found",
+      });
+    }
+
+    const normalizedLoginEmail = loginEmail
+      .trim()
+      .toLowerCase();
+
+    const existingUser = await User.findOne({
+      email: normalizedLoginEmail,
+    });
+
+    if (existingUser) {
+      return res.status(409).json({
+        success: false,
+        message: "Login email already exists",
+      });
+    }
+
+    const hashedPassword = await bcrypt.hash(
+      loginPassword,
+      10
+    );
+
+    const user = await User.create({
       name: name.trim(),
-      age,
-      phone: phone.trim(),
-      email: email ? email.trim().toLowerCase() : "",
+      email: normalizedLoginEmail,
+      password: hashedPassword,
+      role: "STUDENT",
       branch,
-      plan,
-      joinDate: joinDate || Date.now(),
-      currentBelt: currentBelt || "White",
-      status: status || "ACTIVE",
-      user: user || null,
     });
 
-    const populatedStudent = await Student.findById(student._id)
-      .populate("user", "name email role")
-      .populate("branch", "name address")
-      .populate("plan");
+    try {
+      const student = await Student.create({
+        user: user._id,
+        name: name.trim(),
+        age: Number(age),
+        phone: phone.trim(),
+        email: email ? email.trim() : "",
+        branch,
+        plan,
+        currentBelt:
+          planExists.startingBelt || "White",
+        status: "ACTIVE",
+        joinDate: new Date(),
+      });
 
-    return res.status(201).json({
-      success: true,
-      message: "Student created successfully",
-      student: populatedStudent,
-    });
+      const populatedStudent = await Student.findById(
+        student._id
+      )
+        .populate("branch", "name address")
+        .populate(
+          "plan",
+          "name price duration durationUnit startingBelt"
+        )
+        .populate("user", "name email role");
+
+      return res.status(201).json({
+        success: true,
+        message: "Student created successfully",
+        student: populatedStudent,
+      });
+    } catch (studentError) {
+      // Remove the user if student creation fails.
+      await User.findByIdAndDelete(user._id);
+      throw studentError;
+    }
   } catch (error) {
     console.error("Create student error:", error);
+
+    if (error.code === 11000) {
+      return res.status(409).json({
+        success: false,
+        message: "Login email already exists",
+      });
+    }
 
     return res.status(500).json({
       success: false,
@@ -208,10 +357,9 @@ const createStudent = async (req, res) => {
   }
 };
 
-// ==============================
+// =========================================================
 // UPDATE STUDENT
-// Includes linked login password
-// ==============================
+// =========================================================
 
 const updateStudent = async (req, res) => {
   try {
@@ -224,19 +372,6 @@ const updateStudent = async (req, res) => {
       });
     }
 
-    const {
-      name,
-      age,
-      phone,
-      email,
-      branch,
-      plan,
-      joinDate,
-      currentBelt,
-      status,
-      password,
-    } = req.body;
-
     const student = await Student.findById(id);
 
     if (!student) {
@@ -246,46 +381,52 @@ const updateStudent = async (req, res) => {
       });
     }
 
-    // Branch admins can only update students
-    // belonging to their own branch
-    if (req.user.role === "BRANCH_ADMIN") {
-      if (
-        !req.user.branch ||
-        student.branch.toString() !== req.user.branch.toString()
-      ) {
-        return res.status(403).json({
-          success: false,
-          message: "You do not have access to this student",
-        });
-      }
-
-      // A branch admin cannot move a student
-      // to another branch
-      if (
-        branch !== undefined &&
-        branch.toString() !== req.user.branch.toString()
-      ) {
-        return res.status(403).json({
-          success: false,
-          message: "You cannot assign this student to another branch",
-        });
-      }
+    if (!canAccessStudent(req.user, student)) {
+      return res.status(403).json({
+        success: false,
+        message: "You do not have access to this student",
+      });
     }
 
-    // Update student fields only when provided
-    if (name !== undefined) {
-      if (!name.trim()) {
-        return res.status(400).json({
-          success: false,
-          message: "Student name cannot be empty",
-        });
-      }
+    const {
+      name,
+      age,
+      phone,
+      email,
+      branch,
+      plan,
+      currentBelt,
+      status,
+      joinDate,
+      password,
+      loginEmail,
+    } = req.body;
 
+    // Only Super Admin can change the branch.
+    if (
+      branch !== undefined &&
+      req.user.role !== "SUPER_ADMIN"
+    ) {
+      return res.status(403).json({
+        success: false,
+        message:
+          "Only Super Admin can change a student's branch",
+      });
+    }
+
+    if (name !== undefined) {
       student.name = name.trim();
     }
 
     if (age !== undefined) {
-      student.age = age;
+      if (Number(age) <= 0) {
+        return res.status(400).json({
+          success: false,
+          message: "Age must be greater than zero",
+        });
+      }
+
+      student.age = Number(age);
     }
 
     if (phone !== undefined) {
@@ -293,56 +434,129 @@ const updateStudent = async (req, res) => {
     }
 
     if (email !== undefined) {
-      student.email = email
-        ? email.trim().toLowerCase()
-        : "";
+      student.email = email.trim();
     }
 
     if (branch !== undefined) {
+      if (!mongoose.Types.ObjectId.isValid(branch)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid branch ID",
+        });
+      }
+
+      const Branch = require("../models/Branch");
+
+      const branchExists = await Branch.findOne({
+        _id: branch,
+        isActive: true,
+      });
+
+      if (!branchExists) {
+        return res.status(404).json({
+          success: false,
+          message: "Active branch not found",
+        });
+      }
+
       student.branch = branch;
     }
 
     if (plan !== undefined) {
+      if (!mongoose.Types.ObjectId.isValid(plan)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid plan ID",
+        });
+      }
+
+      const planExists = await Plan.findOne({
+        _id: plan,
+        isActive: true,
+      });
+
+      if (!planExists) {
+        return res.status(404).json({
+          success: false,
+          message: "Active plan not found",
+        });
+      }
+
       student.plan = plan;
     }
 
-    if (joinDate !== undefined) {
-      student.joinDate = joinDate;
-    }
-
     if (currentBelt !== undefined) {
-      student.currentBelt = currentBelt.trim();
+      student.currentBelt = currentBelt;
     }
 
     if (status !== undefined) {
       student.status = status;
     }
 
+    if (joinDate !== undefined) {
+      const parsedJoinDate = new Date(joinDate);
+
+      if (Number.isNaN(parsedJoinDate.getTime())) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid join date",
+        });
+      }
+
+      student.joinDate = parsedJoinDate;
+    }
+
     await student.save();
 
-    // ==============================
-    // UPDATE LINKED USER ACCOUNT
-    // ==============================
-
+    // Update linked login account.
     if (student.user) {
       const user = await User.findById(student.user);
 
       if (user) {
-        if (name !== undefined && name.trim()) {
-          user.name = name.trim();
+        if (loginEmail !== undefined) {
+          const normalizedLoginEmail = loginEmail
+            .trim()
+            .toLowerCase();
+
+          const existingUser = await User.findOne({
+            email: normalizedLoginEmail,
+            _id: { $ne: user._id },
+          });
+
+          if (existingUser) {
+            return res.status(409).json({
+              success: false,
+              message: "Login email already exists",
+            });
+          }
+
+          user.email = normalizedLoginEmail;
         }
 
-        if (email !== undefined && email.trim()) {
-          user.email = email.trim().toLowerCase();
-        }
+        if (
+          password !== undefined &&
+          password.trim().length > 0
+        ) {
+          if (password.trim().length < 6) {
+            return res.status(400).json({
+              success: false,
+              message:
+                "Password must be at least 6 characters",
+            });
+          }
 
-        // Password is optional.
-        // Empty password means keep the existing password.
-        if (password && password.trim().length > 0) {
           user.password = await bcrypt.hash(
             password.trim(),
             10
           );
+        }
+
+        if (name !== undefined) {
+          user.name = name.trim();
+        }
+
+        if (branch !== undefined) {
+          user.branch = branch;
         }
 
         await user.save();
@@ -352,7 +566,10 @@ const updateStudent = async (req, res) => {
     const updatedStudent = await Student.findById(id)
       .populate("user", "name email role")
       .populate("branch", "name address")
-      .populate("plan");
+      .populate(
+        "plan",
+        "name price duration durationUnit startingBelt"
+      );
 
     return res.status(200).json({
       success: true,
@@ -369,9 +586,9 @@ const updateStudent = async (req, res) => {
   }
 };
 
-// ==============================
+// =========================================================
 // DELETE STUDENT
-// ==============================
+// =========================================================
 
 const deleteStudent = async (req, res) => {
   try {
@@ -393,11 +610,25 @@ const deleteStudent = async (req, res) => {
       });
     }
 
+    if (req.user.role !== "SUPER_ADMIN") {
+      return res.status(403).json({
+        success: false,
+        message:
+          "Only Super Admin can delete students",
+      });
+    }
+
+    // Delete linked student login account too.
+    if (student.user) {
+      await User.findByIdAndDelete(student.user);
+    }
+
     await Student.findByIdAndDelete(id);
 
     return res.status(200).json({
       success: true,
-      message: "Student deleted successfully",
+      message:
+        "Student and linked login account deleted successfully",
     });
   } catch (error) {
     console.error("Delete student error:", error);
@@ -409,9 +640,9 @@ const deleteStudent = async (req, res) => {
   }
 };
 
-// ==============================
+// =========================================================
 // GET STUDENT PROGRESS
-// ==============================
+// =========================================================
 
 const getStudentProgress = async (req, res) => {
   try {
@@ -435,16 +666,47 @@ const getStudentProgress = async (req, res) => {
       });
     }
 
-    // Branch-level access
-    if (
-      ["BRANCH_ADMIN", "COACH"].includes(req.user.role) &&
-      req.user.branch &&
-      student.branch &&
-      student.branch._id.toString() !== req.user.branch.toString()
-    ) {
+    // Branch-level access.
+    // This also blocks staff accounts that have no branch.
+    if (!canAccessStudent(req.user, student)) {
       return res.status(403).json({
         success: false,
         message: "You do not have access to this student",
+      });
+    }
+
+    // A student without a plan cannot have curriculum progress.
+    if (!student.plan) {
+      return res.status(200).json({
+        success: true,
+        progress: {
+          student: {
+            id: student._id,
+            name: student.name,
+            currentBelt: student.currentBelt,
+            status: student.status,
+          },
+          plan: null,
+          training: {
+            currentTrainingDay: 0,
+            completedDays: 0,
+            totalCurriculumDays: 0,
+            presentClasses: 0,
+            absentClasses: 0,
+            pendingMakeups: 0,
+            completedMakeups: 0,
+          },
+          currentCurriculum: null,
+          milestone: {
+            achieved: null,
+            next: null,
+          },
+          performance: {
+            totalEvaluations: 0,
+            averageRating: null,
+            latest: null,
+          },
+        },
       });
     }
 
@@ -489,7 +751,12 @@ const getStudentProgress = async (req, res) => {
           (record.makeupRequired === true &&
             record.makeupCompleted === true)
       )
-      .map((record) => record.planDay);
+      .map((record) => record.planDay)
+      .filter(
+        (planDay) =>
+          typeof planDay === "number" &&
+          Number.isFinite(planDay)
+      );
 
     const uniqueCompletedDays = [
       ...new Set(completedTrainingDays),
@@ -500,15 +767,35 @@ const getStudentProgress = async (req, res) => {
         ? Math.max(...uniqueCompletedDays)
         : 0;
 
-    // Find the next milestone
-    const nextMilestone = student.plan.milestones
-      .filter((milestone) => milestone.day > currentTrainingDay)
-      .sort((a, b) => a.day - b.day)[0] || null;
+    const milestones = Array.isArray(
+      student.plan.milestones
+    )
+      ? student.plan.milestones
+      : [];
 
-    // Find the last achieved milestone
-    const achievedMilestone = student.plan.milestones
-      .filter((milestone) => milestone.day <= currentTrainingDay)
-      .sort((a, b) => b.day - a.day)[0] || null;
+    const curriculum = Array.isArray(
+      student.plan.curriculum
+    )
+      ? student.plan.curriculum
+      : [];
+
+    // Find the next milestone.
+    const nextMilestone =
+      milestones
+        .filter(
+          (milestone) =>
+            milestone.day > currentTrainingDay
+        )
+        .sort((a, b) => a.day - b.day)[0] || null;
+
+    // Find the last achieved milestone.
+    const achievedMilestone =
+      milestones
+        .filter(
+          (milestone) =>
+            milestone.day <= currentTrainingDay
+        )
+        .sort((a, b) => b.day - a.day)[0] || null;
 
     const averageRating =
       performance.length > 0
@@ -522,9 +809,11 @@ const getStudentProgress = async (req, res) => {
           )
         : null;
 
-    const currentCurriculum = student.plan.curriculum.find(
-      (lesson) => lesson.day === currentTrainingDay + 1
-    ) || null;
+    const currentCurriculum =
+      curriculum.find(
+        (lesson) =>
+          lesson.day === currentTrainingDay + 1
+      ) || null;
 
     return res.status(200).json({
       success: true,
@@ -544,7 +833,7 @@ const getStudentProgress = async (req, res) => {
         training: {
           currentTrainingDay,
           completedDays: uniqueCompletedDays.length,
-          totalCurriculumDays: student.plan.curriculum.length,
+          totalCurriculumDays: curriculum.length,
           presentClasses: presentClasses.length,
           absentClasses: absentClasses.length,
           pendingMakeups: pendingMakeups.length,
@@ -571,6 +860,10 @@ const getStudentProgress = async (req, res) => {
     });
   }
 };
+
+// =========================================================
+// EXPORTS
+// =========================================================
 
 module.exports = {
   getStudents,

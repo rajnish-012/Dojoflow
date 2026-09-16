@@ -4,11 +4,11 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
   ArrowLeft,
-  Award,
   CalendarCheck,
   CheckCircle2,
   Clock,
   GraduationCap,
+  Mail,
   Star,
   Target,
   TrendingUp,
@@ -19,99 +19,197 @@ import {
 import {
   getStudentById,
   getStudentProgress,
+  getStudentAttendance,
+  getStudentPerformance,
 } from "@/lib/api";
 
 type Student = {
   _id: string;
   name: string;
-  age: number;
-  phone: string;
+  age?: number;
+  phone?: string;
   email?: string;
   currentBelt?: string;
   status?: string;
+  joinDate?: string;
   plan?: {
-    _id: string;
-    name: string;
-    price?: number;
+    _id?: string;
+    name?: string;
     duration?: number;
     durationUnit?: string;
-  };
-};
-
-type CurriculumItem = {
-  day: number;
-  title: string;
-  description?: string;
-  skill?: string;
-};
-
-type PerformanceItem = {
-  _id: string;
-  planDay: number;
-  curriculumTitle: string;
-  skill: string;
-  rating: number;
-  remarks?: string;
-  evaluationDate?: string;
+  } | null;
 };
 
 type AttendanceItem = {
-  _id: string;
-  date: string;
-  planDay: number;
-  curriculumTitle: string;
-  status: "PRESENT" | "ABSENT";
+  _id?: string;
+  date?: string;
+  planDay?: number;
+  curriculumTitle?: string;
+  status?: string;
   makeupRequired?: boolean;
   makeupCompleted?: boolean;
 };
 
-type Milestone = {
-  day: number;
-  belt: string;
-  skill: string;
+type PerformanceItem = {
+  _id?: string;
+  planDay?: number;
+  curriculumTitle?: string;
+  skill?: string;
+  rating?: number | string;
+  remarks?: string;
+  evaluationDate?: string;
+};
+
+type CurriculumItem = {
+  day?: number;
+  title?: string;
   description?: string;
+  skill?: string;
 };
 
 type ProgressData = {
-  currentTrainingDay: number;
-  completedDays: number;
-  totalCurriculumDays: number;
-
-  presentClasses: number;
-  absentClasses: number;
-
-  pendingMakeups: number;
-  completedMakeups: number;
-
+  currentTrainingDay?: number | string;
+  completedDays?: number | string;
+  totalCurriculumDays?: number | string;
+  presentClasses?: number | string;
+  absentClasses?: number | string;
+  pendingMakeups?: number | string;
+  completedMakeups?: number | string;
+  averageRating?: number | string;
   currentCurriculum?: CurriculumItem | null;
-
-  nextMilestone?: Milestone | null;
-  achievedMilestone?: Milestone | null;
-
-  averageRating: number;
-
-  performance: PerformanceItem[];
-  attendance: AttendanceItem[];
+  nextMilestone?: any;
+  achievedMilestone?: any;
+  attendance?: AttendanceItem[];
+  performance?: PerformanceItem[];
 };
+
+function numberValue(...values: unknown[]) {
+  for (const value of values) {
+    if (value !== undefined && value !== null && value !== "") {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+  }
+  return 0;
+}
+
+function getInitials(name = "") {
+  return (
+    name
+      .trim()
+      .split(/\s+/)
+      .map((part) => part[0])
+      .join("")
+      .slice(0, 2)
+      .toUpperCase() || "ST"
+  );
+}
+
+function formatDate(date?: string) {
+  if (!date) return "—";
+  const parsed = new Date(date);
+  if (Number.isNaN(parsed.getTime())) return "—";
+
+  return parsed.toLocaleDateString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+function statusOf(status?: string) {
+  return String(status || "")
+    .trim()
+    .toUpperCase();
+}
+
+function extractArray<T = any>(source: any, keys: string[] = []): T[] {
+  if (Array.isArray(source)) return source;
+
+  for (const key of keys) {
+    if (Array.isArray(source?.[key])) return source[key];
+  }
+
+  return [];
+}
+
+function unwrapProgress(response: any): any {
+  return (
+    response?.progress ??
+    response?.data?.progress ??
+    response?.data ??
+    response ??
+    {}
+  );
+}
+
+function normalizeAttendance(response: any): AttendanceItem[] {
+  return extractArray<AttendanceItem>(response, [
+    "attendance",
+    "records",
+    "items",
+    "data",
+  ]);
+}
+
+function normalizePerformance(response: any): PerformanceItem[] {
+  return extractArray<PerformanceItem>(response, [
+    "performance",
+    "records",
+    "items",
+    "data",
+  ]);
+}
+
+function SummaryCard({
+  title,
+  value,
+  description,
+  icon: Icon,
+  iconClass,
+}: {
+  title: string;
+  value: string | number;
+  description: string;
+  icon: any;
+  iconClass: string;
+}) {
+  return (
+    <div className="rounded-2xl border border-[#e1e7ef] bg-white p-5 shadow-[0_2px_10px_rgba(15,23,42,0.04)]">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-bold uppercase tracking-wide text-slate-400">
+            {title}
+          </p>
+          <p className="mt-3 text-4xl font-bold tracking-tight text-slate-950">
+            {value}
+          </p>
+        </div>
+
+        <div className={`rounded-2xl p-3 ${iconClass}`}>
+          <Icon className="h-5 w-5" />
+        </div>
+      </div>
+
+      <p className="mt-2 text-sm text-slate-500">{description}</p>
+    </div>
+  );
+}
 
 export default function StudentProgressPage() {
   const params = useParams();
   const router = useRouter();
-
-  const studentId = params.id as string;
+  const studentId = String(params.id || "");
 
   const [student, setStudent] = useState<Student | null>(null);
-  const [progress, setProgress] = useState<ProgressData | null>(
-    null
-  );
-
+  const [progress, setProgress] = useState<ProgressData | null>(null);
+  const [attendance, setAttendance] = useState<AttendanceItem[]>([]);
+  const [performance, setPerformance] = useState<PerformanceItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    if (studentId) {
-      loadProgress();
-    }
+    if (studentId) loadProgress();
   }, [studentId]);
 
   async function loadProgress() {
@@ -119,163 +217,205 @@ export default function StudentProgressPage() {
       setLoading(true);
       setError("");
 
-      const [studentData, progressData] = await Promise.all([
+      const [studentResponse, progressResponse] = await Promise.all([
         getStudentById(studentId),
         getStudentProgress(studentId),
       ]);
 
       const studentResult =
-        studentData.student || studentData;
+        studentResponse?.student ??
+        studentResponse?.data?.student ??
+        studentResponse?.data ??
+        studentResponse;
 
-      const progressResult: any =
-        progressData.progress || progressData;
+      const progressResult = unwrapProgress(progressResponse);
 
-      /*
-       * Normalize performance and attendance.
-       *
-       * Depending on the backend response, these can sometimes
-       * arrive as arrays or nested objects. We always convert
-       * them into arrays before rendering.
-       */
+      let attendanceResult: AttendanceItem[] = [];
+      let performanceResult: PerformanceItem[] = [];
 
-      let performanceData: PerformanceItem[] = [];
-
-      if (Array.isArray(progressResult.performance)) {
-        performanceData = progressResult.performance;
-      } else if (
-        Array.isArray(progressResult.performance?.performance)
-      ) {
-        performanceData =
-          progressResult.performance.performance;
-      } else if (
-        Array.isArray(progressResult.performance?.records)
-      ) {
-        performanceData =
-          progressResult.performance.records;
-      } else if (
-        Array.isArray(progressResult.performance?.data)
-      ) {
-        performanceData =
-          progressResult.performance.data;
+      try {
+        attendanceResult = normalizeAttendance(
+          await getStudentAttendance(studentId),
+        );
+      } catch (err) {
+        console.error("Attendance API failed:", err);
       }
 
-      let attendanceData: AttendanceItem[] = [];
-
-      if (Array.isArray(progressResult.attendance)) {
-        attendanceData = progressResult.attendance;
-      } else if (
-        Array.isArray(progressResult.attendance?.attendance)
-      ) {
-        attendanceData =
-          progressResult.attendance.attendance;
-      } else if (
-        Array.isArray(progressResult.attendance?.records)
-      ) {
-        attendanceData =
-          progressResult.attendance.records;
-      } else if (
-        Array.isArray(progressResult.attendance?.data)
-      ) {
-        attendanceData =
-          progressResult.attendance.data;
+      try {
+        performanceResult = normalizePerformance(
+          await getStudentPerformance(studentId),
+        );
+      } catch (err) {
+        console.error("Performance API failed:", err);
       }
 
-      const normalizedProgress: ProgressData = {
+      // Some backend versions return these arrays inside the progress response.
+      if (!attendanceResult.length) {
+        attendanceResult = normalizeAttendance(progressResult?.attendance);
+        if (!attendanceResult.length) {
+          attendanceResult = normalizeAttendance(progressResult);
+        }
+      }
+
+      if (!performanceResult.length) {
+        performanceResult = normalizePerformance(progressResult?.performance);
+        if (!performanceResult.length) {
+          performanceResult = normalizePerformance(progressResult);
+        }
+      }
+
+      const normalized: ProgressData = {
         ...progressResult,
-
-        currentTrainingDay:
-          Number(progressResult.currentTrainingDay) || 0,
-
-        completedDays:
-          Number(progressResult.completedDays) || 0,
-
-        totalCurriculumDays:
-          Number(progressResult.totalCurriculumDays) || 0,
-
-        presentClasses:
-          Number(progressResult.presentClasses) || 0,
-
-        absentClasses:
-          Number(progressResult.absentClasses) || 0,
-
-        pendingMakeups:
-          Number(progressResult.pendingMakeups) || 0,
-
-        completedMakeups:
-          Number(progressResult.completedMakeups) || 0,
-
-        averageRating:
-          Number(progressResult.averageRating) || 0,
-
-        performance: performanceData,
-
-        attendance: attendanceData,
+        currentTrainingDay: numberValue(
+          progressResult.currentTrainingDay,
+          progressResult.trainingDay,
+          progressResult.currentDay,
+        ),
+        completedDays: numberValue(progressResult.completedDays),
+        totalCurriculumDays: numberValue(
+          progressResult.totalCurriculumDays,
+          progressResult.curriculumDays,
+        ),
+        presentClasses: numberValue(
+          progressResult.presentClasses,
+          progressResult.present,
+          progressResult.totalPresent,
+        ),
+        absentClasses: numberValue(
+          progressResult.absentClasses,
+          progressResult.absent,
+          progressResult.totalAbsent,
+        ),
+        pendingMakeups: numberValue(progressResult.pendingMakeups),
+        completedMakeups: numberValue(progressResult.completedMakeups),
+        averageRating: numberValue(
+          progressResult.averageRating,
+          progressResult.avgRating,
+          progressResult.averagePerformance,
+        ),
+        attendance: attendanceResult,
+        performance: performanceResult,
       };
 
       setStudent(studentResult);
-      setProgress(normalizedProgress);
-    } catch (err: any) {
+      setProgress(normalized);
+      setAttendance(attendanceResult);
+      setPerformance(performanceResult);
+    } catch (err) {
+      console.error("Failed to load student progress:", err);
       setError(
-        err.message || "Failed to load student progress"
+        err instanceof Error ? err.message : "Failed to load student progress",
       );
     } finally {
       setLoading(false);
     }
   }
 
-  const curriculumPercentage = useMemo(() => {
-    if (!progress?.totalCurriculumDays) {
-      return 0;
+  const attendanceStats = useMemo(() => {
+    const presentFromRecords = attendance.filter(
+      (item) => statusOf(item.status) === "PRESENT",
+    ).length;
+
+    const absentFromRecords = attendance.filter(
+      (item) => statusOf(item.status) === "ABSENT",
+    ).length;
+
+    const hasAttendanceRecords = presentFromRecords + absentFromRecords > 0;
+
+    const presentClasses = hasAttendanceRecords
+      ? presentFromRecords
+      : numberValue(progress?.presentClasses);
+
+    const absentClasses = hasAttendanceRecords
+      ? absentFromRecords
+      : numberValue(progress?.absentClasses);
+
+    const totalClasses = presentClasses + absentClasses;
+
+    return {
+      presentClasses,
+      absentClasses,
+      totalClasses,
+      attendancePercentage:
+        totalClasses > 0
+          ? Math.round((presentClasses / totalClasses) * 100)
+          : 0,
+    };
+  }, [attendance, progress]);
+
+  const summary = useMemo(() => {
+    const completedMakeupsFromRecords = attendance.filter(
+      (item) => item.makeupRequired === true && item.makeupCompleted === true,
+    ).length;
+
+    const pendingMakeupsFromRecords = attendance.filter(
+      (item) => item.makeupRequired === true && item.makeupCompleted !== true,
+    ).length;
+
+    const completedMakeups =
+      completedMakeupsFromRecords > 0
+        ? completedMakeupsFromRecords
+        : numberValue(progress?.completedMakeups);
+
+    const pendingMakeups =
+      pendingMakeupsFromRecords > 0
+        ? pendingMakeupsFromRecords
+        : numberValue(progress?.pendingMakeups);
+
+    // Required business rules:
+    // Training Day = present + absent
+    // Attendance = present / (present + absent)
+    // Completed Days = present + completed makeups
+    // Curriculum Days = present + absent
+    const trainingDay = attendanceStats.totalClasses;
+    const completedDays = attendanceStats.presentClasses + completedMakeups;
+    const totalCurriculumDays = trainingDay;
+
+    return {
+      trainingDay,
+      attendancePercentage: attendanceStats.attendancePercentage,
+      completedDays,
+      totalCurriculumDays,
+      completedMakeups,
+      pendingMakeups,
+    };
+  }, [attendance, progress, attendanceStats]);
+
+  const averageRating = useMemo(() => {
+    const ratings = performance
+      .map((item) => numberValue(item.rating))
+      .filter((rating) => rating > 0);
+
+    if (ratings.length) {
+      return ratings.reduce((sum, rating) => sum + rating, 0) / ratings.length;
     }
 
-    return Math.min(
-      100,
-      Math.round(
-        (progress.completedDays /
-          progress.totalCurriculumDays) *
-          100
-      )
-    );
-  }, [progress]);
+    return numberValue(progress?.averageRating);
+  }, [performance, progress]);
 
-  const attendanceTotal = useMemo(() => {
-    if (!progress) {
-      return 0;
-    }
-
-    return (
-      progress.presentClasses +
-      progress.absentClasses
-    );
-  }, [progress]);
-
-  const attendancePercentage = useMemo(() => {
-    if (!attendanceTotal || !progress) {
-      return 0;
-    }
-
-    return Math.round(
-      (progress.presentClasses / attendanceTotal) * 100
-    );
-  }, [progress, attendanceTotal]);
+  const currentCurriculum = progress?.currentCurriculum;
+  const progressPercentage =
+    summary.totalCurriculumDays > 0
+      ? Math.min(
+          100,
+          Math.round(
+            (summary.completedDays / summary.totalCurriculumDays) * 100,
+          ),
+        )
+      : 0;
 
   function renderStars(rating: number) {
     return (
-      <div className="flex items-center gap-0.5">
+      <div className="flex items-center gap-1">
         {[1, 2, 3, 4, 5].map((star) => (
           <Star
             key={star}
-            size={17}
-            fill={
-              star <= rating
-                ? "currentColor"
-                : "none"
-            }
             className={
-              star <= rating
-                ? "text-yellow-500"
-                : "text-gray-300"
+              star <= Math.round(rating)
+                ? "fill-amber-400 text-amber-400"
+                : "text-slate-200"
             }
+            size={18}
           />
         ))}
       </div>
@@ -284,589 +424,350 @@ export default function StudentProgressPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 p-6">
-        <div className="rounded-xl border border-gray-200 bg-white p-10 text-center text-gray-500">
+      <div className="flex min-h-screen items-center justify-center bg-[#f5f7fb]">
+        <div className="flex items-center gap-3 text-slate-600">
+          <Clock className="h-5 w-5 animate-spin text-orange-500" />
           Loading student progress...
         </div>
       </div>
     );
   }
 
-  if (error || !student || !progress) {
+  if (error || !student) {
     return (
-      <div className="min-h-screen bg-gray-50 p-6">
+      <div className="min-h-screen bg-[#f5f7fb] p-6">
         <button
           onClick={() => router.back()}
-          className="mb-5 flex items-center gap-2 text-sm font-medium text-gray-600 hover:text-gray-900"
+          className="mb-5 inline-flex items-center gap-2 text-sm font-semibold text-slate-600 hover:text-slate-950"
         >
-          <ArrowLeft size={17} />
-          Back
+          <ArrowLeft className="h-4 w-4" />
+          Back to Student
         </button>
 
-        <div className="rounded-xl border border-red-200 bg-red-50 p-6 text-red-700">
-          {error ||
-            "Student progress could not be loaded."}
+        <div className="rounded-2xl border border-red-200 bg-red-50 p-6 text-red-700">
+          {error || "Student not found"}
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
-      {/* Header */}
-      <div className="mb-6">
-        <button
-          onClick={() => router.back()}
-          className="mb-5 flex items-center gap-2 text-sm font-medium text-gray-600 hover:text-gray-900"
-        >
-          <ArrowLeft size={17} />
-          Back to Student
-        </button>
+    <main className="min-h-screen bg-[#f5f7fb] px-4 py-6 sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-[1600px] space-y-6">
+        <div className="flex items-center justify-between">
+          <button
+            onClick={() => router.back()}
+            className="inline-flex items-center gap-2 text-sm font-semibold text-slate-600 hover:text-slate-950"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Back to Student
+          </button>
 
-        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <div className="flex items-center gap-4">
-            <div className="flex h-14 w-14 items-center justify-center rounded-full bg-gray-200">
-              <UserRound
-                size={25}
-                className="text-gray-600"
-              />
-            </div>
-
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900">
-                {student.name}
-              </h1>
-
-              <p className="mt-1 text-sm text-gray-500">
-                {student.plan?.name || "No plan"} •{" "}
-                {student.currentBelt || "White"} Belt
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <span className="rounded-full bg-gray-100 px-3 py-1.5 text-xs font-medium text-gray-700">
-              Day {progress.currentTrainingDay}
-            </span>
-
-            <span
-              className={`rounded-full px-3 py-1.5 text-xs font-medium ${
-                student.status === "ACTIVE"
-                  ? "bg-green-100 text-green-700"
-                  : "bg-gray-100 text-gray-600"
-              }`}
-            >
-              {student.status || "ACTIVE"}
-            </span>
-          </div>
-        </div>
-      </div>
-
-      {/* Progress Overview */}
-      <div className="mb-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        {/* Training Progress */}
-        <div className="rounded-xl border border-gray-200 bg-white p-5">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-gray-500">
-                Training Progress
-              </p>
-
-              <p className="mt-1 text-2xl font-bold text-gray-900">
-                Day {progress.currentTrainingDay}
-              </p>
-            </div>
-
-            <div className="rounded-lg bg-gray-100 p-2.5">
-              <TrendingUp
-                size={21}
-                className="text-gray-600"
-              />
-            </div>
-          </div>
-
-          <p className="mt-3 text-xs text-gray-500">
-            {progress.completedDays} of{" "}
-            {progress.totalCurriculumDays} curriculum days
-          </p>
+          <button
+            onClick={loadProgress}
+            className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-600 hover:border-orange-300 hover:text-orange-600"
+          >
+            Refresh
+          </button>
         </div>
 
-        {/* Attendance */}
-        <div className="rounded-xl border border-gray-200 bg-white p-5">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-gray-500">
-                Attendance
-              </p>
-
-              <p className="mt-1 text-2xl font-bold text-gray-900">
-                {attendancePercentage}%
-              </p>
-            </div>
-
-            <div className="rounded-lg bg-green-50 p-2.5">
-              <CalendarCheck
-                size={21}
-                className="text-green-600"
-              />
-            </div>
-          </div>
-
-          <p className="mt-3 text-xs text-gray-500">
-            {progress.presentClasses} present •{" "}
-            {progress.absentClasses} absent
-          </p>
-        </div>
-
-        {/* Performance */}
-        <div className="rounded-xl border border-gray-200 bg-white p-5">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-gray-500">
-                Avg. Performance
-              </p>
-
-              <p className="mt-1 text-2xl font-bold text-gray-900">
-                {progress.averageRating.toFixed(1)}
-                <span className="text-sm font-normal text-gray-400">
-                  {" "}
-                  / 5
-                </span>
-              </p>
-            </div>
-
-            <div className="rounded-lg bg-yellow-50 p-2.5">
-              <Star
-                size={21}
-                className="text-yellow-500"
-              />
-            </div>
-          </div>
-
-          <p className="mt-3 text-xs text-gray-500">
-            Based on performance evaluations
-          </p>
-        </div>
-
-        {/* Makeups */}
-        <div className="rounded-xl border border-gray-200 bg-white p-5">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-gray-500">
-                Pending Makeups
-              </p>
-
-              <p className="mt-1 text-2xl font-bold text-gray-900">
-                {progress.pendingMakeups}
-              </p>
-            </div>
-
-            <div className="rounded-lg bg-red-50 p-2.5">
-              <Clock
-                size={21}
-                className="text-red-500"
-              />
-            </div>
-          </div>
-
-          <p className="mt-3 text-xs text-gray-500">
-            {progress.completedMakeups} completed
-          </p>
-        </div>
-      </div>
-
-      {/* Curriculum Progress */}
-      <div className="mb-6 grid gap-6 lg:grid-cols-2">
-        {/* Curriculum */}
-        <div className="rounded-xl border border-gray-200 bg-white p-6">
-          <div className="mb-5 flex items-center justify-between">
-            <div>
-              <h2 className="text-lg font-semibold text-gray-900">
-                Curriculum Progress
-              </h2>
-
-              <p className="mt-1 text-sm text-gray-500">
-                Student's progress through the training plan.
-              </p>
-            </div>
-
-            <GraduationCap
-              size={22}
-              className="text-gray-500"
-            />
-          </div>
-
-          <div className="mb-2 flex items-center justify-between text-sm">
-            <span className="text-gray-600">
-              Completed curriculum
-            </span>
-
-            <span className="font-semibold text-gray-900">
-              {curriculumPercentage}%
-            </span>
-          </div>
-
-          <div className="h-3 overflow-hidden rounded-full bg-gray-100">
-            <div
-              className="h-full rounded-full bg-gray-900 transition-all"
-              style={{
-                width: `${curriculumPercentage}%`,
-              }}
-            />
-          </div>
-
-          <div className="mt-4 grid grid-cols-2 gap-4">
-            <div className="rounded-lg bg-gray-50 p-4">
-              <p className="text-xs text-gray-500">
-                Completed Days
-              </p>
-
-              <p className="mt-1 text-xl font-bold text-gray-900">
-                {progress.completedDays}
-              </p>
-            </div>
-
-            <div className="rounded-lg bg-gray-50 p-4">
-              <p className="text-xs text-gray-500">
-                Total Days
-              </p>
-
-              <p className="mt-1 text-xl font-bold text-gray-900">
-                {progress.totalCurriculumDays}
-              </p>
-            </div>
-          </div>
-        </div>
-
-        {/* Current Curriculum */}
-        <div className="rounded-xl border border-gray-200 bg-white p-6">
-          <div className="mb-5 flex items-center gap-3">
-            <div className="rounded-lg bg-gray-100 p-2.5">
-              <Target
-                size={21}
-                className="text-gray-600"
-              />
-            </div>
-
-            <div>
-              <h2 className="text-lg font-semibold text-gray-900">
-                Current Training
-              </h2>
-
-              <p className="text-sm text-gray-500">
-                Current curriculum milestone
-              </p>
-            </div>
-          </div>
-
-          {progress.currentCurriculum ? (
-            <div className="rounded-xl bg-gray-50 p-5">
-              <div className="mb-3 flex items-center justify-between">
-                <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-gray-700">
-                  Day {progress.currentCurriculum.day}
-                </span>
-
-                {progress.currentCurriculum.skill && (
-                  <span className="text-xs text-gray-500">
-                    {progress.currentCurriculum.skill}
-                  </span>
-                )}
+        <section className="rounded-2xl border border-[#e1e7ef] bg-white p-5 shadow-sm sm:p-7">
+          <div className="flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
+            <div className="flex items-center gap-4">
+              <div className="flex h-20 w-20 items-center justify-center rounded-2xl bg-orange-50 text-2xl font-bold text-orange-600">
+                {getInitials(student.name)}
               </div>
 
-              <h3 className="text-lg font-semibold text-gray-900">
-                {progress.currentCurriculum.title}
-              </h3>
+              <div>
+                <div className="flex flex-wrap items-center gap-3">
+                  <h1 className="text-2xl font-bold text-slate-950 sm:text-3xl">
+                    {student.name}
+                  </h1>
+                  <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700">
+                    {student.status || "ACTIVE"}
+                  </span>
+                </div>
 
-              {progress.currentCurriculum.description && (
-                <p className="mt-2 text-sm leading-6 text-gray-500">
-                  {progress.currentCurriculum.description}
+                <p className="mt-2 text-sm text-slate-500">
+                  {student.currentBelt || "White Belt"}
+                  {student.plan?.name ? ` • ${student.plan.name}` : ""}
+                </p>
+
+                <div className="mt-3 flex flex-wrap gap-4 text-sm text-slate-500">
+                  {student.email && (
+                    <span className="inline-flex items-center gap-2">
+                      <Mail className="h-4 w-4" />
+                      {student.email}
+                    </span>
+                  )}
+                  {student.phone && <span>{student.phone}</span>}
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-6 py-4">
+              <p className="text-xs font-bold uppercase tracking-wide text-slate-400">
+                Current Training Day
+              </p>
+              <p className="mt-1 text-3xl font-bold text-slate-950">
+                Day {summary.trainingDay}
+              </p>
+            </div>
+          </div>
+        </section>
+
+        <section className="grid gap-5 md:grid-cols-2 xl:grid-cols-4">
+          <SummaryCard
+            title="Training Day"
+            value={summary.trainingDay}
+            description="Present + absent classes"
+            icon={Target}
+            iconClass="bg-orange-50 text-orange-600"
+          />
+
+          <SummaryCard
+            title="Attendance"
+            value={`${summary.attendancePercentage}%`}
+            description={`${Math.round(
+              (summary.attendancePercentage / 100) * summary.trainingDay,
+            )} present of ${summary.trainingDay} classes`}
+            icon={CheckCircle2}
+            iconClass="bg-emerald-50 text-emerald-600"
+          />
+
+          <SummaryCard
+            title="Completed Days"
+            value={`${summary.completedDays}/${summary.totalCurriculumDays}`}
+            description={`${summary.completedMakeups} completed makeups included`}
+            icon={CalendarCheck}
+            iconClass="bg-blue-50 text-blue-600"
+          />
+
+          <SummaryCard
+            title="Pending Makeups"
+            value={summary.pendingMakeups}
+            description="Classes requiring attention"
+            icon={XCircle}
+            iconClass="bg-red-50 text-red-600"
+          />
+        </section>
+
+        <section className="grid gap-6 lg:grid-cols-3">
+          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm lg:col-span-2">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-xl font-bold text-slate-950">
+                  Training Progress
+                </h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  Your completed training days and curriculum progress
+                </p>
+              </div>
+              <TrendingUp className="h-5 w-5 text-orange-500" />
+            </div>
+
+            <div className="mt-7 flex items-end justify-between">
+              <div>
+                <p className="text-sm text-slate-500">Completed Days</p>
+                <p className="mt-1 text-4xl font-bold text-slate-950">
+                  {summary.completedDays}
+                </p>
+              </div>
+              <p className="text-sm font-semibold text-slate-500">
+                of {summary.totalCurriculumDays} days
+              </p>
+            </div>
+
+            <div className="mt-5 h-3 overflow-hidden rounded-full bg-slate-100">
+              <div
+                className="h-full rounded-full bg-orange-500 transition-all"
+                style={{ width: `${progressPercentage}%` }}
+              />
+            </div>
+
+            <div className="mt-6 grid gap-3 sm:grid-cols-4">
+              <div className="rounded-xl bg-slate-50 p-4">
+                <p className="text-xs text-slate-400">Present</p>
+                <p className="mt-2 text-2xl font-bold text-emerald-600">
+                  {summary.completedDays || 0}
+                </p>
+              </div>
+              <div className="rounded-xl bg-slate-50 p-4">
+                <p className="text-xs text-slate-400">Absent</p>
+                <p className="mt-2 text-2xl font-bold text-red-500">
+                  {summary.totalCurriculumDays - summary.completedDays}
+                </p>
+              </div>
+              <div className="rounded-xl bg-slate-50 p-4">
+                <p className="text-xs text-slate-400">Completed Makeups</p>
+                <p className="mt-2 text-2xl font-bold text-blue-600">
+                  {summary.completedMakeups}
+                </p>
+              </div>
+              <div className="rounded-xl bg-slate-50 p-4">
+                <p className="text-xs text-slate-400">Pending Makeups</p>
+                <p className="mt-2 text-2xl font-bold text-red-500">
+                  {summary.pendingMakeups}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+            <div className="flex items-center gap-4">
+              <div className="rounded-2xl bg-amber-50 p-3">
+                <Star className="h-6 w-6 text-amber-500" />
+              </div>
+              <div>
+                <h2 className="text-xl font-bold text-slate-950">
+                  Average Rating
+                </h2>
+                <p className="text-sm text-slate-500">Overall performance</p>
+              </div>
+            </div>
+
+            <div className="mt-8 flex items-end gap-1">
+              <p className="text-5xl font-bold text-slate-950">
+                {averageRating.toFixed(1)}
+              </p>
+              <p className="mb-1 text-xl font-semibold text-slate-400">/5</p>
+            </div>
+
+            <div className="mt-5">{renderStars(averageRating)}</div>
+
+            <p className="mt-5 text-sm text-slate-500">
+              Based on {performance.length} performance evaluation
+              {performance.length === 1 ? "" : "s"}.
+            </p>
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="flex items-center gap-3">
+            <GraduationCap className="h-6 w-6 text-orange-500" />
+            <div>
+              <h2 className="text-xl font-bold text-slate-950">
+                Current Curriculum
+              </h2>
+              <p className="text-sm text-slate-500">
+                The student&apos;s current learning step
+              </p>
+            </div>
+          </div>
+
+          {currentCurriculum ? (
+            <div className="mt-5 rounded-xl bg-slate-50 p-5">
+              <p className="text-xs font-bold uppercase tracking-wide text-orange-500">
+                Day {currentCurriculum.day ?? summary.trainingDay}
+              </p>
+              <h3 className="mt-2 text-lg font-bold text-slate-950">
+                {currentCurriculum.title || "Current training curriculum"}
+              </h3>
+              {currentCurriculum.description && (
+                <p className="mt-2 text-sm text-slate-500">
+                  {currentCurriculum.description}
+                </p>
+              )}
+              {currentCurriculum.skill && (
+                <p className="mt-3 text-sm font-semibold text-slate-700">
+                  Skill: {currentCurriculum.skill}
                 </p>
               )}
             </div>
           ) : (
-            <div className="rounded-lg bg-gray-50 p-5 text-sm text-gray-500">
-              No current curriculum available.
+            <div className="mt-5 rounded-xl bg-slate-50 p-5 text-sm text-slate-500">
+              No current curriculum data available.
             </div>
           )}
-        </div>
-      </div>
+        </section>
 
-      {/* Belt Progression */}
-      <div className="mb-6 rounded-xl border border-gray-200 bg-white p-6">
-        <div className="mb-5 flex items-center gap-3">
-          <div className="rounded-lg bg-gray-100 p-2.5">
-            <Award
-              size={21}
-              className="text-gray-600"
-            />
-          </div>
-
-          <div>
-            <h2 className="text-lg font-semibold text-gray-900">
-              Belt Progression
+        <section className="grid gap-6 lg:grid-cols-2">
+          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+            <h2 className="text-xl font-bold text-slate-950">
+              Attendance Records
             </h2>
 
-            <p className="text-sm text-gray-500">
-              Track the student's next belt milestone.
-            </p>
-          </div>
-        </div>
-
-        <div className="grid gap-4 md:grid-cols-2">
-          {/* Current Belt */}
-          <div className="rounded-xl border border-gray-200 p-5">
-            <p className="text-xs font-medium uppercase tracking-wide text-gray-400">
-              Current Belt
-            </p>
-
-            <div className="mt-3 flex items-center gap-3">
-              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-gray-100">
-                <Award
-                  size={23}
-                  className="text-gray-600"
-                />
-              </div>
-
-              <div>
-                <p className="text-xl font-bold text-gray-900">
-                  {student.currentBelt || "White"}
+            <div className="mt-5 space-y-3">
+              {attendance.length ? (
+                attendance.map((item, index) => (
+                  <div
+                    key={item._id || `${item.date}-${index}`}
+                    className="flex items-center justify-between rounded-xl bg-slate-50 p-4"
+                  >
+                    <div>
+                      <p className="font-semibold text-slate-800">
+                        {item.curriculumTitle ||
+                          `Training Day ${item.planDay ?? "—"}`}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        {formatDate(item.date)}
+                      </p>
+                    </div>
+                    <span
+                      className={`rounded-full px-3 py-1 text-xs font-bold ${
+                        statusOf(item.status) === "PRESENT"
+                          ? "bg-emerald-50 text-emerald-700"
+                          : "bg-red-50 text-red-700"
+                      }`}
+                    >
+                      {statusOf(item.status) || "UNKNOWN"}
+                    </span>
+                  </div>
+                ))
+              ) : (
+                <p className="rounded-xl bg-slate-50 p-5 text-sm text-slate-500">
+                  No attendance records found.
                 </p>
-
-                <p className="text-xs text-gray-500">
-                  Current level
-                </p>
-              </div>
+              )}
             </div>
           </div>
 
-          {/* Next Milestone */}
-          <div className="rounded-xl border border-gray-200 p-5">
-            <p className="text-xs font-medium uppercase tracking-wide text-gray-400">
-              Next Milestone
-            </p>
-
-            {progress.nextMilestone ? (
-              <div className="mt-3">
-                <div className="flex items-center justify-between">
-                  <p className="text-xl font-bold text-gray-900">
-                    {progress.nextMilestone.belt}
-                  </p>
-
-                  <span className="rounded-full bg-gray-100 px-3 py-1 text-xs font-medium text-gray-600">
-                    Day {progress.nextMilestone.day}
-                  </span>
-                </div>
-
-                <p className="mt-2 text-sm font-medium text-gray-700">
-                  {progress.nextMilestone.skill}
-                </p>
-
-                {progress.nextMilestone.description && (
-                  <p className="mt-1 text-xs leading-5 text-gray-500">
-                    {progress.nextMilestone.description}
-                  </p>
-                )}
-              </div>
-            ) : (
-              <p className="mt-3 text-sm text-gray-500">
-                No upcoming milestone defined.
-              </p>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Attendance History */}
-      <div className="mb-6 rounded-xl border border-gray-200 bg-white p-6">
-        <div className="mb-5 flex items-center justify-between">
-          <div>
-            <h2 className="text-lg font-semibold text-gray-900">
-              Attendance History
+          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+            <h2 className="text-xl font-bold text-slate-950">
+              Performance Records
             </h2>
 
-            <p className="mt-1 text-sm text-gray-500">
-              Recent attendance records.
-            </p>
-          </div>
-
-          <CalendarCheck
-            size={21}
-            className="text-gray-500"
-          />
-        </div>
-
-        {!Array.isArray(progress.attendance) ||
-        progress.attendance.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-gray-300 p-8 text-center text-sm text-gray-500">
-            No attendance records found.
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[700px]">
-              <thead className="border-b border-gray-200">
-                <tr>
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
-                    Date
-                  </th>
-
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
-                    Day
-                  </th>
-
-                  <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
-                    Curriculum
-                  </th>
-
-                  <th className="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wide text-gray-500">
-                    Status
-                  </th>
-
-                  <th className="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wide text-gray-500">
-                    Makeup
-                  </th>
-                </tr>
-              </thead>
-
-              <tbody className="divide-y divide-gray-100">
-                {progress.attendance.map((item) => (
-                  <tr key={item._id}>
-                    <td className="px-4 py-3 text-sm text-gray-700">
-                      {new Date(
-                        item.date
-                      ).toLocaleDateString()}
-                    </td>
-
-                    <td className="px-4 py-3 text-sm text-gray-700">
-                      Day {item.planDay}
-                    </td>
-
-                    <td className="px-4 py-3 text-sm text-gray-700">
-                      {item.curriculumTitle}
-                    </td>
-
-                    <td className="px-4 py-3 text-center">
-                      {item.status === "PRESENT" ? (
-                        <span className="inline-flex items-center gap-1.5 rounded-full bg-green-100 px-2.5 py-1 text-xs font-medium text-green-700">
-                          <CheckCircle2 size={13} />
-                          Present
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1.5 rounded-full bg-red-100 px-2.5 py-1 text-xs font-medium text-red-700">
-                          <XCircle size={13} />
-                          Absent
-                        </span>
-                      )}
-                    </td>
-
-                    <td className="px-4 py-3 text-center">
-                      {item.makeupRequired ? (
-                        <span
-                          className={`rounded-full px-2.5 py-1 text-xs font-medium ${
-                            item.makeupCompleted
-                              ? "bg-green-100 text-green-700"
-                              : "bg-yellow-100 text-yellow-700"
-                          }`}
-                        >
-                          {item.makeupCompleted
-                            ? "Completed"
-                            : "Required"}
-                        </span>
-                      ) : (
-                        <span className="text-xs text-gray-400">
-                          —
-                        </span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-      {/* Performance History */}
-      <div className="rounded-xl border border-gray-200 bg-white p-6">
-        <div className="mb-5 flex items-center justify-between">
-          <div>
-            <h2 className="text-lg font-semibold text-gray-900">
-              Performance History
-            </h2>
-
-            <p className="mt-1 text-sm text-gray-500">
-              Student skill evaluations and coach feedback.
-            </p>
-          </div>
-
-          <Star
-            size={21}
-            className="text-gray-500"
-          />
-        </div>
-
-        {!Array.isArray(progress.performance) ||
-        progress.performance.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-gray-300 p-8 text-center text-sm text-gray-500">
-            No performance evaluations found.
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {progress.performance.map((item) => (
-              <div
-                key={item._id}
-                className="rounded-xl border border-gray-200 p-4"
-              >
-                <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="rounded-full bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-700">
-                        Day {item.planDay}
-                      </span>
-
-                      <span className="text-sm font-semibold text-gray-900">
-                        {item.curriculumTitle}
-                      </span>
+            <div className="mt-5 space-y-3">
+              {performance.length ? (
+                performance.map((item, index) => (
+                  <div
+                    key={item._id || `${item.evaluationDate}-${index}`}
+                    className="rounded-xl bg-slate-50 p-4"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="font-semibold text-slate-800">
+                          {item.curriculumTitle ||
+                            item.skill ||
+                            `Evaluation ${index + 1}`}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-500">
+                          {formatDate(item.evaluationDate)}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <p className="font-bold text-slate-950">
+                          {numberValue(item.rating).toFixed(1)}/5
+                        </p>
+                        {renderStars(numberValue(item.rating))}
+                      </div>
                     </div>
-
-                    <p className="mt-2 text-sm text-gray-500">
-                      Skill: {item.skill}
-                    </p>
+                    {item.remarks && (
+                      <p className="mt-3 text-sm text-slate-600">
+                        {item.remarks}
+                      </p>
+                    )}
                   </div>
-
-                  <div className="flex items-center gap-2">
-                    {renderStars(item.rating)}
-
-                    <span className="text-sm font-semibold text-gray-700">
-                      {item.rating}/5
-                    </span>
-                  </div>
-                </div>
-
-                {item.remarks && (
-                  <div className="mt-4 rounded-lg bg-gray-50 p-3">
-                    <p className="text-xs font-medium text-gray-500">
-                      Coach Remarks
-                    </p>
-
-                    <p className="mt-1 text-sm text-gray-700">
-                      {item.remarks}
-                    </p>
-                  </div>
-                )}
-
-                {item.evaluationDate && (
-                  <p className="mt-3 text-xs text-gray-400">
-                    Evaluated on{" "}
-                    {new Date(
-                      item.evaluationDate
-                    ).toLocaleDateString()}
-                  </p>
-                )}
-              </div>
-            ))}
+                ))
+              ) : (
+                <p className="rounded-xl bg-slate-50 p-5 text-sm text-slate-500">
+                  No performance records found.
+                </p>
+              )}
+            </div>
           </div>
-        )}
+        </section>
       </div>
-    </div>
+    </main>
   );
 }

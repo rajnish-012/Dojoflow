@@ -10,6 +10,8 @@ import {
   Building2,
   X,
   Pencil,
+  Settings,
+  Loader2,
 } from "lucide-react";
 
 const API_URL = "http://localhost:5000/api";
@@ -46,6 +48,79 @@ const emptyForm: FormData = {
   role: "COACH",
   branch: "",
 };
+
+function SummaryCard({
+  title,
+  value,
+  description,
+  icon: Icon,
+  iconClass,
+}: {
+  title: string;
+  value: number;
+  description: string;
+  icon: React.ElementType;
+  iconClass: string;
+}) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="mb-4 flex items-center justify-between">
+        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-orange-50 text-orange-600">
+          <Icon size={20} />
+        </div>
+
+        <span className="text-xs font-medium text-slate-400">
+          DojoFlow
+        </span>
+      </div>
+
+      <p className="text-sm font-medium text-slate-500">
+        {title}
+      </p>
+
+      <p className="mt-1 text-2xl font-bold text-slate-950">
+        {value}
+      </p>
+
+      <p className="mt-1 text-xs text-slate-400">
+        {description}
+      </p>
+    </div>
+  );
+}
+
+function InputField({
+  label,
+  name,
+  value,
+  onChange,
+  type = "text",
+  placeholder,
+}: {
+  label: string;
+  name: string;
+  value: string;
+  onChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
+  type?: string;
+  placeholder?: string;
+}) {
+  return (
+    <div>
+      <label className="mb-2 block text-sm font-semibold text-[#34445d]">
+        {label}
+      </label>
+
+      <input
+        name={name}
+        type={type}
+        value={value}
+        onChange={onChange}
+        placeholder={placeholder}
+        className="h-11 w-full rounded-xl border border-[#dfe5ed] bg-white px-4 text-sm text-[#101a33] outline-none transition placeholder:text-[#a0aabd] focus:border-[#d7a84b] focus:ring-4 focus:ring-[#d7a84b]/10"
+      />
+    </div>
+  );
+}
 
 export default function StaffManagementPage() {
   const [users, setUsers] = useState<StaffUser[]>([]);
@@ -90,7 +165,6 @@ export default function StaffManagementPage() {
               Authorization: `Bearer ${token}`,
             },
           }),
-
           fetch(`${API_URL}/branches`, {
             headers: {
               Authorization: `Bearer ${token}`,
@@ -103,15 +177,13 @@ export default function StaffManagementPage() {
 
       if (!usersResponse.ok) {
         throw new Error(
-          usersData.message ||
-            "Failed to load staff users",
+          usersData.message || "Failed to load staff users",
         );
       }
 
       if (!branchesResponse.ok) {
         throw new Error(
-          branchesData.message ||
-            "Failed to load branches",
+          branchesData.message || "Failed to load branches",
         );
       }
 
@@ -145,9 +217,7 @@ export default function StaffManagementPage() {
   }
 
   function openEditModal(user: StaffUser) {
-    if (user.role === "SUPER_ADMIN") {
-      return;
-    }
+    if (user.role === "SUPER_ADMIN") return;
 
     setEditingUser(user);
 
@@ -189,7 +259,6 @@ export default function StaffManagementPage() {
     event: React.FormEvent<HTMLFormElement>,
   ) {
     event.preventDefault();
-
     setFormError("");
 
     if (!form.name.trim()) {
@@ -249,11 +318,7 @@ export default function StaffManagementPage() {
         );
       }
 
-      setUsers((current) => [
-        data.user,
-        ...current,
-      ]);
-
+      setUsers((current) => [data.user, ...current]);
       closeModal();
     } catch (err) {
       console.error(err);
@@ -272,12 +337,9 @@ export default function StaffManagementPage() {
     event: React.FormEvent<HTMLFormElement>,
   ) {
     event.preventDefault();
-
     setEditError("");
 
-    if (!editingUser) {
-      return;
-    }
+    if (!editingUser) return;
 
     if (!form.name.trim()) {
       setEditError("Please enter the staff member's name.");
@@ -329,8 +391,7 @@ export default function StaffManagementPage() {
             email: form.email.trim(),
             role: form.role,
             branch: form.branch,
-            password:
-              form.password.trim() || undefined,
+            password: form.password.trim() || undefined,
           }),
         },
       );
@@ -370,9 +431,7 @@ export default function StaffManagementPage() {
       `Are you sure you want to delete ${user.name}?`,
     );
 
-    if (!confirmed) {
-      return;
-    }
+    if (!confirmed) return;
 
     try {
       const token = localStorage.getItem("token");
@@ -401,9 +460,7 @@ export default function StaffManagementPage() {
       }
 
       setUsers((current) =>
-        current.filter(
-          (item) => item._id !== user._id,
-        ),
+        current.filter((item) => item._id !== user._id),
       );
     } catch (err) {
       console.error(err);
@@ -420,340 +477,308 @@ export default function StaffManagementPage() {
     switch (role) {
       case "SUPER_ADMIN":
         return "Super Admin";
-
       case "BRANCH_ADMIN":
         return "Branch Admin";
-
       case "COACH":
         return "Coach";
-
       default:
         return role;
     }
   }
 
   function getRoleIcon(role: StaffUser["role"]) {
-    if (role === "SUPER_ADMIN") {
-      return ShieldCheck;
-    }
-
-    if (role === "BRANCH_ADMIN") {
-      return Building2;
-    }
-
+    if (role === "SUPER_ADMIN") return ShieldCheck;
+    if (role === "BRANCH_ADMIN") return Building2;
     return GraduationCap;
   }
 
-  function getRoleBadgeClass(
-    role: StaffUser["role"],
-  ) {
+  function getRoleBadgeClass(role: StaffUser["role"]) {
     switch (role) {
       case "SUPER_ADMIN":
         return "bg-purple-50 text-purple-700";
-
       case "BRANCH_ADMIN":
         return "bg-blue-50 text-blue-700";
-
       case "COACH":
         return "bg-green-50 text-green-700";
-
       default:
         return "bg-slate-100 text-slate-600";
     }
   }
 
+  const coaches = users.filter(
+    (user) => user.role === "COACH",
+  ).length;
+
+  const branchAdmins = users.filter(
+    (user) => user.role === "BRANCH_ADMIN",
+  ).length;
+
   if (loading) {
     return (
-      <div className="flex min-h-[400px] items-center justify-center">
-        <p className="text-sm text-slate-500">
-          Loading staff management...
-        </p>
-      </div>
+      <main className="min-h-screen bg-[#f5f7fb] px-4 py-5 sm:px-6 lg:px-8">
+        <div className="flex min-h-[400px] items-center justify-center">
+          <div className="flex items-center gap-3 text-sm text-slate-500">
+            <Loader2
+              size={18}
+              className="animate-spin text-orange-600"
+            />
+            Loading staff management...
+          </div>
+        </div>
+      </main>
     );
   }
 
   return (
-    <div className="space-y-6">
-      {/* Page Header */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900">
-            Staff Management
-          </h1>
-
-          <p className="mt-1 text-sm text-slate-500">
-            Create and manage academy staff accounts and
-            their roles.
-          </p>
-        </div>
-
-        <button
-          type="button"
-          onClick={openModal}
-          className="inline-flex items-center justify-center gap-2 rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800"
-        >
-          <UserPlus className="h-4 w-4" />
-          Add User
-        </button>
-      </div>
-
-      {/* Error */}
-      {error && (
-        <div className="rounded-xl border border-red-200 bg-red-50 p-4">
-          <p className="text-sm text-red-700">
-            {error}
-          </p>
-        </div>
-      )}
-
-      {/* Summary */}
-      <div className="grid gap-4 sm:grid-cols-3">
-        <div className="rounded-xl border border-slate-200 bg-white p-5">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-slate-100">
-              <Users className="h-5 w-5 text-slate-700" />
-            </div>
-
+    <main className="min-h-screen bg-[#f5f7fb] px-4 py-5 sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-[1500px]">
+        <div className="space-y-8">
+          {/* Page Header */}
+          <div className="flex flex-col justify-between gap-6 lg:flex-row lg:items-end">
             <div>
-              <p className="text-xs text-slate-400">
-                Total Staff
-              </p>
+              <div className="mb-2 flex items-center gap-2 text-sm font-medium text-orange-600">
+                <Settings size={16} />
+                Academy Management
+              </div>
 
-              <p className="text-2xl font-bold text-slate-900">
-                {users.length}
+              <h1 className="text-3xl font-bold tracking-tight text-slate-950">
+                Staff Management
+              </h1>
+
+              <p className="mt-2 max-w-xl text-sm text-slate-500">
+                Create and manage academy staff accounts,
+                roles, and branch access.
               </p>
             </div>
+
+            <button
+              type="button"
+              onClick={openModal}
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-slate-950/10 transition hover:bg-orange-600"
+            >
+              <UserPlus size={20} />
+              Add User
+            </button>
           </div>
-        </div>
 
-        <div className="rounded-xl border border-slate-200 bg-white p-5">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-green-50">
-              <GraduationCap className="h-5 w-5 text-green-600" />
+          {/* Error */}
+          {error && (
+            <div className="rounded-2xl border border-red-200 bg-red-50 p-4">
+              <p className="text-sm text-red-700">{error}</p>
             </div>
+          )}
 
-            <div>
-              <p className="text-xs text-slate-400">
-                Coaches
-              </p>
+          {/* Summary Cards */}
+          <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
+            <SummaryCard
+              title="Total Staff"
+              value={users.length}
+              description="All staff accounts"
+              icon={Users}
+              iconClass="bg-[#edf3ff] text-[#4774c8]"
+            />
 
-              <p className="text-2xl font-bold text-slate-900">
-                {
-                  users.filter(
-                    (user) => user.role === "COACH",
-                  ).length
-                }
-              </p>
-            </div>
+            <SummaryCard
+              title="Coaches"
+              value={coaches}
+              description="Academy coaching staff"
+              icon={GraduationCap}
+              iconClass="bg-[#edf9f2] text-[#29945d]"
+            />
+
+            <SummaryCard
+              title="Branch Admins"
+              value={branchAdmins}
+              description="Branch management accounts"
+              icon={Building2}
+              iconClass="bg-[#fff6e8] text-[#c78316]"
+            />
           </div>
-        </div>
 
-        <div className="rounded-xl border border-slate-200 bg-white p-5">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-50">
-              <Building2 className="h-5 w-5 text-blue-600" />
+          {/* Staff Table */}
+          <section className="overflow-hidden rounded-2xl border border-[#e4e9f0] bg-white shadow-[0_4px_18px_rgba(16,26,51,0.035)]">
+            <div className="flex flex-col justify-between gap-3 border-b border-[#e4e9f0] px-5 py-5 sm:flex-row sm:items-center sm:px-7">
+              <div>
+                <h2 className="text-lg font-black tracking-tight text-[#101a33]">
+                  Staff Accounts
+                </h2>
+
+                <p className="mt-1 text-sm text-[#697386]">
+                  Users who can access the DojoFlow management
+                  system.
+                </p>
+              </div>
+
+              <span className="w-fit rounded-full bg-[#f1f4f8] px-3 py-1.5 text-xs font-semibold text-[#697386]">
+                {users.length} accounts
+              </span>
             </div>
 
-            <div>
-              <p className="text-xs text-slate-400">
-                Branch Admins
-              </p>
+            {users.length === 0 ? (
+              <div className="px-6 py-14 text-center">
+                <Users className="mx-auto h-10 w-10 text-[#cbd3df]" />
 
-              <p className="text-2xl font-bold text-slate-900">
-                {
-                  users.filter(
-                    (user) =>
-                      user.role === "BRANCH_ADMIN",
-                  ).length
-                }
-              </p>
-            </div>
-          </div>
-        </div>
-      </div>
+                <p className="mt-3 text-sm font-semibold text-[#34445d]">
+                  No staff accounts found
+                </p>
 
-      {/* Staff Table */}
-      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-        <div className="border-b border-slate-200 px-6 py-5">
-          <h2 className="font-semibold text-slate-900">
-            Staff Accounts
-          </h2>
+                <p className="mt-1 text-xs text-[#9aa5b5]">
+                  Create your first staff account.
+                </p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[850px]">
+                  <thead className="border-b border-[#e4e9f0] bg-[#fbfcfe]">
+                    <tr>
+                      <th className="px-7 py-4 text-left text-xs font-bold uppercase tracking-wide text-[#8b98aa]">
+                        Staff
+                      </th>
 
-          <p className="mt-1 text-xs text-slate-500">
-            Users who can access the DojoFlow management
-            system.
-          </p>
-        </div>
+                      <th className="px-7 py-4 text-left text-xs font-bold uppercase tracking-wide text-[#8b98aa]">
+                        Role
+                      </th>
 
-        {users.length === 0 ? (
-          <div className="px-6 py-12 text-center">
-            <Users className="mx-auto h-10 w-10 text-slate-300" />
+                      <th className="px-7 py-4 text-left text-xs font-bold uppercase tracking-wide text-[#8b98aa]">
+                        Branch
+                      </th>
 
-            <p className="mt-3 text-sm font-medium text-slate-700">
-              No staff accounts found
-            </p>
+                      <th className="px-7 py-4 text-left text-xs font-bold uppercase tracking-wide text-[#8b98aa]">
+                        Created
+                      </th>
 
-            <p className="mt-1 text-xs text-slate-400">
-              Create your first staff account.
-            </p>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[850px]">
-              <thead className="border-b border-slate-200 bg-slate-50">
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    Staff
-                  </th>
-
-                  <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    Role
-                  </th>
-
-                  <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    Branch
-                  </th>
-
-                  <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    Created
-                  </th>
-
-                  <th className="px-6 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    Actions
-                  </th>
-                </tr>
-              </thead>
-
-              <tbody className="divide-y divide-slate-100">
-                {users.map((user) => {
-                  const RoleIcon = getRoleIcon(
-                    user.role,
-                  );
-
-                  const initials = user.name
-                    .split(" ")
-                    .filter(Boolean)
-                    .map((part) => part[0])
-                    .join("")
-                    .slice(0, 2)
-                    .toUpperCase();
-
-                  return (
-                    <tr
-                      key={user._id}
-                      className="transition hover:bg-slate-50"
-                    >
-                      {/* Staff */}
-                      <td className="px-6 py-4">
-                        <div className="flex items-center gap-3">
-                          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-sm font-semibold text-slate-700">
-                            {initials || "U"}
-                          </div>
-
-                          <div>
-                            <p className="text-sm font-semibold text-slate-900">
-                              {user.name}
-                            </p>
-
-                            <p className="mt-0.5 text-xs text-slate-500">
-                              {user.email}
-                            </p>
-                          </div>
-                        </div>
-                      </td>
-
-                      {/* Role */}
-                      <td className="px-6 py-4">
-                        <span
-                          className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${getRoleBadgeClass(
-                            user.role,
-                          )}`}
-                        >
-                          <RoleIcon className="h-3.5 w-3.5" />
-
-                          {getRoleLabel(user.role)}
-                        </span>
-                      </td>
-
-                      {/* Branch */}
-                      <td className="px-6 py-4">
-                        <div className="flex items-center gap-2">
-                          <Building2 className="h-4 w-4 text-slate-400" />
-
-                          <span className="text-sm text-slate-700">
-                            {user.branch?.name ||
-                              "All Branches"}
-                          </span>
-                        </div>
-                      </td>
-
-                      {/* Created */}
-                      <td className="px-6 py-4">
-                        <span className="text-sm text-slate-500">
-                          {user.createdAt
-                            ? new Date(
-                                user.createdAt,
-                              ).toLocaleDateString(
-                                "en-IN",
-                                {
-                                  day: "2-digit",
-                                  month: "short",
-                                  year: "numeric",
-                                },
-                              )
-                            : "—"}
-                        </span>
-                      </td>
-
-                      {/* Actions */}
-                      <td className="px-6 py-4 text-right">
-                        {user.role !== "SUPER_ADMIN" && (
-                          <div className="flex items-center justify-end gap-2">
-                            <button
-                              type="button"
-                              onClick={() =>
-                                openEditModal(user)
-                              }
-                              className="inline-flex items-center justify-center rounded-lg p-2 text-slate-400 transition hover:bg-blue-50 hover:text-blue-600"
-                              title="Edit staff user"
-                            >
-                              <Pencil className="h-4 w-4" />
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() =>
-                                handleDeleteUser(user)
-                              }
-                              className="inline-flex items-center justify-center rounded-lg p-2 text-slate-400 transition hover:bg-red-50 hover:text-red-600"
-                              title="Delete staff user"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </button>
-                          </div>
-                        )}
-                      </td>
+                      <th className="px-7 py-4 text-right text-xs font-bold uppercase tracking-wide text-[#8b98aa]">
+                        Actions
+                      </th>
                     </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
+                  </thead>
+
+                  <tbody className="divide-y divide-[#edf0f4]">
+                    {users.map((user) => {
+                      const RoleIcon = getRoleIcon(user.role);
+
+                      const initials = user.name
+                        .split(" ")
+                        .filter(Boolean)
+                        .map((part) => part[0])
+                        .join("")
+                        .slice(0, 2)
+                        .toUpperCase();
+
+                      return (
+                        <tr
+                          key={user._id}
+                          className="transition hover:bg-[#fbfcfe]"
+                        >
+                          <td className="px-7 py-5">
+                            <div className="flex items-center gap-3">
+                              <div className="flex h-11 w-11 items-center justify-center rounded-full bg-[#edf3ff] text-sm font-bold text-[#4774c8]">
+                                {initials || "U"}
+                              </div>
+
+                              <div>
+                                <p className="text-sm font-bold text-[#101a33]">
+                                  {user.name}
+                                </p>
+
+                                <p className="mt-0.5 text-xs text-[#8b98aa]">
+                                  {user.email}
+                                </p>
+                              </div>
+                            </div>
+                          </td>
+
+                          <td className="px-7 py-5">
+                            <span
+                              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold ${getRoleBadgeClass(
+                                user.role,
+                              )}`}
+                            >
+                              <RoleIcon size={14} />
+                              {getRoleLabel(user.role)}
+                            </span>
+                          </td>
+
+                          <td className="px-7 py-5">
+                            <div className="flex items-center gap-2">
+                              <Building2
+                                size={16}
+                                className="text-[#9aa5b5]"
+                              />
+
+                              <span className="text-sm font-medium text-[#34445d]">
+                                {user.branch?.name ||
+                                  "All Branches"}
+                              </span>
+                            </div>
+                          </td>
+
+                          <td className="px-7 py-5">
+                            <span className="text-sm text-[#697386]">
+                              {user.createdAt
+                                ? new Date(
+                                    user.createdAt,
+                                  ).toLocaleDateString(
+                                    "en-IN",
+                                    {
+                                      day: "2-digit",
+                                      month: "short",
+                                      year: "numeric",
+                                    },
+                                  )
+                                : "—"}
+                            </span>
+                          </td>
+
+                          <td className="px-7 py-5 text-right">
+                            {user.role !== "SUPER_ADMIN" && (
+                              <div className="flex items-center justify-end gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    openEditModal(user)
+                                  }
+                                  className="inline-flex h-9 w-9 items-center justify-center rounded-xl text-[#9aa5b5] transition hover:bg-[#edf3ff] hover:text-[#4774c8]"
+                                  title="Edit staff user"
+                                >
+                                  <Pencil size={16} />
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    handleDeleteUser(user)
+                                  }
+                                  className="inline-flex h-9 w-9 items-center justify-center rounded-xl text-[#9aa5b5] transition hover:bg-red-50 hover:text-red-600"
+                                  title="Delete staff user"
+                                >
+                                  <Trash2 size={16} />
+                                </button>
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+        </div>
       </div>
 
       {/* Add User Modal */}
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white shadow-xl">
-            {/* Modal Header */}
-            <div className="sticky top-0 flex items-center justify-between border-b border-slate-200 bg-white px-6 py-5">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-sm">
+          <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-[#e4e9f0] bg-white shadow-2xl">
+            <div className="sticky top-0 flex items-center justify-between border-b border-[#e4e9f0] bg-white px-6 py-5">
               <div>
-                <h2 className="text-lg font-semibold text-slate-900">
+                <h2 className="text-lg font-black text-[#101a33]">
                   Add Staff User
                 </h2>
 
-                <p className="mt-1 text-xs text-slate-500">
+                <p className="mt-1 text-xs text-[#8b98aa]">
                   Create a login account for academy staff.
                 </p>
               </div>
@@ -762,9 +787,9 @@ export default function StaffManagementPage() {
                 type="button"
                 onClick={closeModal}
                 disabled={saving}
-                className="rounded-lg p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 disabled:opacity-50"
+                className="rounded-xl p-2 text-[#9aa5b5] transition hover:bg-[#f1f4f8] hover:text-[#101a33]"
               >
-                <X className="h-5 w-5" />
+                <X size={19} />
               </button>
             </div>
 
@@ -772,110 +797,70 @@ export default function StaffManagementPage() {
               onSubmit={handleCreateUser}
               className="space-y-5 p-6"
             >
-              {/* Error */}
               {formError && (
-                <div className="rounded-lg border border-red-200 bg-red-50 p-3">
+                <div className="rounded-xl border border-red-200 bg-red-50 p-3">
                   <p className="text-sm text-red-700">
                     {formError}
                   </p>
                 </div>
               )}
 
-              {/* Name */}
+              <InputField
+                label="Full Name"
+                name="name"
+                value={form.name}
+                onChange={handleChange}
+                placeholder="Rahul Kumar"
+              />
+
+              <InputField
+                label="Email"
+                name="email"
+                type="email"
+                value={form.email}
+                onChange={handleChange}
+                placeholder="rahul@dojoflow.com"
+              />
+
+              <InputField
+                label="Temporary Password"
+                name="password"
+                type="password"
+                value={form.password}
+                onChange={handleChange}
+                placeholder="Minimum 6 characters"
+              />
+
               <div>
-                <label className="mb-1.5 block text-sm font-medium text-slate-700">
-                  Full Name *
-                </label>
-
-                <input
-                  name="name"
-                  value={form.name}
-                  onChange={handleChange}
-                  placeholder="Rahul Kumar"
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-slate-900"
-                />
-              </div>
-
-              {/* Email */}
-              <div>
-                <label className="mb-1.5 block text-sm font-medium text-slate-700">
-                  Email *
-                </label>
-
-                <input
-                  name="email"
-                  type="email"
-                  value={form.email}
-                  onChange={handleChange}
-                  placeholder="rahul@dojoflow.com"
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-slate-900"
-                />
-              </div>
-
-              {/* Password */}
-              <div>
-                <label className="mb-1.5 block text-sm font-medium text-slate-700">
-                  Temporary Password *
-                </label>
-
-                <input
-                  name="password"
-                  type="password"
-                  value={form.password}
-                  onChange={handleChange}
-                  placeholder="Minimum 6 characters"
-                  minLength={6}
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-slate-900"
-                />
-
-                <p className="mt-1.5 text-xs text-slate-400">
-                  The staff member will use this password
-                  to sign in.
-                </p>
-              </div>
-
-              {/* Role */}
-              <div>
-                <label className="mb-1.5 block text-sm font-medium text-slate-700">
-                  Role *
+                <label className="mb-2 block text-sm font-semibold text-[#34445d]">
+                  Role
                 </label>
 
                 <select
                   name="role"
                   value={form.role}
                   onChange={handleChange}
-                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-slate-900"
+                  className="h-11 w-full rounded-xl border border-[#dfe5ed] bg-white px-4 text-sm text-[#34445d] outline-none transition focus:border-[#d7a84b] focus:ring-4 focus:ring-[#d7a84b]/10"
                 >
-                  <option value="COACH">
-                    Coach
-                  </option>
-
+                  <option value="COACH">Coach</option>
                   <option value="BRANCH_ADMIN">
                     Branch Admin
                   </option>
                 </select>
-
-                <p className="mt-1.5 text-xs text-slate-400">
-                  Super Admin accounts cannot be created
-                  here.
-                </p>
               </div>
 
-              {/* Branch */}
               <div>
-                <label className="mb-1.5 block text-sm font-medium text-slate-700">
-                  Branch *
+                <label className="mb-2 block text-sm font-semibold text-[#34445d]">
+                  Branch
                 </label>
 
                 <select
                   name="branch"
                   value={form.branch}
                   onChange={handleChange}
-                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-slate-900"
+                  className="h-11 w-full rounded-xl border border-[#dfe5ed] bg-white px-4 text-sm text-[#34445d] outline-none transition focus:border-[#d7a84b] focus:ring-4 focus:ring-[#d7a84b]/10"
                 >
-                  <option value="">
-                    Select a branch
-                  </option>
+                  <option value="">Select a branch</option>
 
                   {branches
                     .filter(
@@ -891,21 +876,14 @@ export default function StaffManagementPage() {
                       </option>
                     ))}
                 </select>
-
-                {branches.length === 0 && (
-                  <p className="mt-1.5 text-xs text-red-500">
-                    No active branches available.
-                  </p>
-                )}
               </div>
 
-              {/* Footer */}
-              <div className="flex justify-end gap-3 border-t border-slate-200 pt-5">
+              <div className="flex justify-end gap-3 border-t border-[#e4e9f0] pt-5">
                 <button
                   type="button"
                   onClick={closeModal}
                   disabled={saving}
-                  className="rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
+                  className="rounded-xl border border-[#dfe5ed] px-5 py-2.5 text-sm font-semibold text-[#697386] transition hover:bg-[#f8fafc]"
                 >
                   Cancel
                 </button>
@@ -913,19 +891,18 @@ export default function StaffManagementPage() {
                 <button
                   type="submit"
                   disabled={saving}
-                  className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="inline-flex items-center gap-2 rounded-xl bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-orange-600 disabled:opacity-60"
                 >
                   {saving ? (
-                    <>
-                      <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
-                      Creating...
-                    </>
+                    <Loader2
+                      size={16}
+                      className="animate-spin"
+                    />
                   ) : (
-                    <>
-                      <UserPlus className="h-4 w-4" />
-                      Create User
-                    </>
+                    <UserPlus size={16} />
                   )}
+
+                  {saving ? "Creating..." : "Create User"}
                 </button>
               </div>
             </form>
@@ -933,18 +910,17 @@ export default function StaffManagementPage() {
         </div>
       )}
 
-      {/* Edit Staff User Modal */}
+      {/* Edit User Modal */}
       {showEditModal && editingUser && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white shadow-xl">
-            {/* Modal Header */}
-            <div className="sticky top-0 flex items-center justify-between border-b border-slate-200 bg-white px-6 py-5">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-sm">
+          <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-[#e4e9f0] bg-white shadow-2xl">
+            <div className="sticky top-0 flex items-center justify-between border-b border-[#e4e9f0] bg-white px-6 py-5">
               <div>
-                <h2 className="text-lg font-semibold text-slate-900">
+                <h2 className="text-lg font-black text-[#101a33]">
                   Edit Staff User
                 </h2>
 
-                <p className="mt-1 text-xs text-slate-500">
+                <p className="mt-1 text-xs text-[#8b98aa]">
                   Update staff account information.
                 </p>
               </div>
@@ -953,9 +929,9 @@ export default function StaffManagementPage() {
                 type="button"
                 onClick={closeEditModal}
                 disabled={updating}
-                className="rounded-lg p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 disabled:opacity-50"
+                className="rounded-xl p-2 text-[#9aa5b5] transition hover:bg-[#f1f4f8] hover:text-[#101a33]"
               >
-                <X className="h-5 w-5" />
+                <X size={19} />
               </button>
             </div>
 
@@ -963,108 +939,70 @@ export default function StaffManagementPage() {
               onSubmit={handleUpdateUser}
               className="space-y-5 p-6"
             >
-              {/* Error */}
               {editError && (
-                <div className="rounded-lg border border-red-200 bg-red-50 p-3">
+                <div className="rounded-xl border border-red-200 bg-red-50 p-3">
                   <p className="text-sm text-red-700">
                     {editError}
                   </p>
                 </div>
               )}
 
-              {/* Name */}
+              <InputField
+                label="Full Name"
+                name="name"
+                value={form.name}
+                onChange={handleChange}
+                placeholder="Rahul Kumar"
+              />
+
+              <InputField
+                label="Email"
+                name="email"
+                type="email"
+                value={form.email}
+                onChange={handleChange}
+                placeholder="rahul@dojoflow.com"
+              />
+
+              <InputField
+                label="New Password (Optional)"
+                name="password"
+                type="password"
+                value={form.password}
+                onChange={handleChange}
+                placeholder="Leave blank to keep current password"
+              />
+
               <div>
-                <label className="mb-1.5 block text-sm font-medium text-slate-700">
-                  Full Name *
-                </label>
-
-                <input
-                  name="name"
-                  value={form.name}
-                  onChange={handleChange}
-                  placeholder="Rahul Kumar"
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-slate-900"
-                />
-              </div>
-
-              {/* Email */}
-              <div>
-                <label className="mb-1.5 block text-sm font-medium text-slate-700">
-                  Email *
-                </label>
-
-                <input
-                  name="email"
-                  type="email"
-                  value={form.email}
-                  onChange={handleChange}
-                  placeholder="rahul@dojoflow.com"
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-slate-900"
-                />
-              </div>
-
-              {/* New Password */}
-              <div>
-                <label className="mb-1.5 block text-sm font-medium text-slate-700">
-                  New Password{" "}
-                  <span className="text-xs font-normal text-slate-400">
-                    (Optional)
-                  </span>
-                </label>
-
-                <input
-                  name="password"
-                  type="password"
-                  value={form.password}
-                  onChange={handleChange}
-                  placeholder="Leave blank to keep current password"
-                  minLength={6}
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-slate-900"
-                />
-
-                <p className="mt-1.5 text-xs text-slate-400">
-                  Enter a password only if you want to change
-                  the current password.
-                </p>
-              </div>
-
-              {/* Role */}
-              <div>
-                <label className="mb-1.5 block text-sm font-medium text-slate-700">
-                  Role *
+                <label className="mb-2 block text-sm font-semibold text-[#34445d]">
+                  Role
                 </label>
 
                 <select
                   name="role"
                   value={form.role}
                   onChange={handleChange}
-                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-slate-900"
+                  className="h-11 w-full rounded-xl border border-[#dfe5ed] bg-white px-4 text-sm text-[#34445d] outline-none transition focus:border-[#d7a84b] focus:ring-4 focus:ring-[#d7a84b]/10"
                 >
-                  <option value="COACH">
-                    Coach
-                  </option>
-
+                  <option value="COACH">Coach</option>
                   <option value="BRANCH_ADMIN">
                     Branch Admin
                   </option>
                 </select>
               </div>
 
-              {/* Branch */}
               <div>
-                <label className="mb-1.5 block text-sm font-medium text-slate-700">
-                  Branch *
+                <label className="mb-2 block text-sm font-semibold text-[#34445d]">
+                  Branch
                 </label>
 
                 <select
                   name="branch"
                   value={form.branch}
                   onChange={handleChange}
-                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-slate-900"
+                  className="h-11 w-full rounded-xl border border-[#dfe5ed] bg-white px-4 text-sm text-[#34445d] outline-none transition focus:border-[#d7a84b] focus:ring-4 focus:ring-[#d7a84b]/10"
                 >
-                  <option value="">
-                    Select a branch
-                  </option>
+                  <option value="">Select a branch</option>
 
                   {branches
                     .filter(
@@ -1082,13 +1020,12 @@ export default function StaffManagementPage() {
                 </select>
               </div>
 
-              {/* Footer */}
-              <div className="flex justify-end gap-3 border-t border-slate-200 pt-5">
+              <div className="flex justify-end gap-3 border-t border-[#e4e9f0] pt-5">
                 <button
                   type="button"
                   onClick={closeEditModal}
                   disabled={updating}
-                  className="rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
+                  className="rounded-xl border border-[#dfe5ed] px-5 py-2.5 text-sm font-semibold text-[#697386] transition hover:bg-[#f8fafc]"
                 >
                   Cancel
                 </button>
@@ -1096,22 +1033,22 @@ export default function StaffManagementPage() {
                 <button
                   type="submit"
                   disabled={updating}
-                  className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="inline-flex items-center gap-2 rounded-xl bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-orange-600 disabled:opacity-60"
                 >
-                  {updating ? (
-                    <>
-                      <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
-                      Saving...
-                    </>
-                  ) : (
-                    "Save Changes"
+                  {updating && (
+                    <Loader2
+                      size={16}
+                      className="animate-spin"
+                    />
                   )}
+
+                  {updating ? "Saving..." : "Save Changes"}
                 </button>
               </div>
             </form>
           </div>
         </div>
       )}
-    </div>
+    </main>
   );
 }

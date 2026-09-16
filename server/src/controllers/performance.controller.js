@@ -11,8 +11,16 @@ const getPerformance = async (req, res) => {
   try {
     const filter = {};
 
-    // Branch-level access
+    // Branch admins and coaches can only see
+    // performance records from their assigned branch
     if (["BRANCH_ADMIN", "COACH"].includes(req.user.role)) {
+      if (!req.user.branch) {
+        return res.status(403).json({
+          success: false,
+          message: "No branch is assigned to this account",
+        });
+      }
+
       filter.branch = req.user.branch;
     }
 
@@ -43,7 +51,8 @@ const getPerformance = async (req, res) => {
 // ==============================
 const getMyPerformance = async (req, res) => {
   try {
-    // Find the Student document connected to the logged-in User
+    // Find the Student document connected
+    // to the logged-in User
     const student = await Student.findOne({
       user: req.user._id,
     });
@@ -56,7 +65,6 @@ const getMyPerformance = async (req, res) => {
       });
     }
 
-    // Find performance records using the Student ID
     const performance = await Performance.find({
       student: student._id,
     })
@@ -76,6 +84,74 @@ const getMyPerformance = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to fetch your performance records",
+      performance: [],
+    });
+  }
+};
+
+// ==============================
+// GET PERFORMANCE BY STUDENT ID
+// ==============================
+const getPerformanceByStudent = async (req, res) => {
+  try {
+    const { studentId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(studentId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid student ID",
+      });
+    }
+
+    const student = await Student.findById(studentId);
+
+    if (!student) {
+      return res.status(404).json({
+        success: false,
+        message: "Student not found",
+      });
+    }
+
+    // Branch admins and coaches can only access
+    // students from their assigned branch
+    if (["BRANCH_ADMIN", "COACH"].includes(req.user.role)) {
+      if (!req.user.branch) {
+        return res.status(403).json({
+          success: false,
+          message: "No branch is assigned to this account",
+        });
+      }
+
+      if (
+        !student.branch ||
+        student.branch.toString() !== req.user.branch.toString()
+      ) {
+        return res.status(403).json({
+          success: false,
+          message: "You do not have access to this student",
+        });
+      }
+    }
+
+    const performance = await Performance.find({
+      student: studentId,
+    })
+      .populate("student", "name age phone currentBelt status")
+      .populate("branch", "name address")
+      .populate("evaluatedBy", "name email")
+      .sort({ evaluationDate: -1, createdAt: -1 });
+
+    return res.status(200).json({
+      success: true,
+      count: performance.length,
+      performance,
+    });
+  } catch (error) {
+    console.error("Get performance by student error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch student performance",
       performance: [],
     });
   }
@@ -107,11 +183,18 @@ const getPerformanceById = async (req, res) => {
       });
     }
 
-    // Branch-level access
+    // Branch admins and coaches can only access
+    // performance records from their assigned branch
     if (["BRANCH_ADMIN", "COACH"].includes(req.user.role)) {
+      if (!req.user.branch) {
+        return res.status(403).json({
+          success: false,
+          message: "No branch is assigned to this account",
+        });
+      }
+
       if (
         !performance.branch ||
-        !req.user.branch ||
         performance.branch._id.toString() !==
           req.user.branch.toString()
       ) {
@@ -173,6 +256,18 @@ const createPerformance = async (req, res) => {
       });
     }
 
+    // Validate plan day
+    if (
+      !Number.isInteger(Number(planDay)) ||
+      Number(planDay) < 1
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "planDay must be a positive integer",
+      });
+    }
+
+    // Validate rating
     const numericRating = Number(rating);
 
     if (
@@ -186,6 +281,17 @@ const createPerformance = async (req, res) => {
       });
     }
 
+    // Validate evaluation date format
+    if (
+      typeof evaluationDate !== "string" ||
+      !/^\d{4}-\d{2}-\d{2}$/.test(evaluationDate)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "evaluationDate must be in YYYY-MM-DD format",
+      });
+    }
+
     const studentRecord = await Student.findById(student);
 
     if (!studentRecord) {
@@ -195,10 +301,17 @@ const createPerformance = async (req, res) => {
       });
     }
 
-    // Branch-level access
+    // Branch admins and coaches can only create
+    // performance records for their own branch
     if (["BRANCH_ADMIN", "COACH"].includes(req.user.role)) {
+      if (!req.user.branch) {
+        return res.status(403).json({
+          success: false,
+          message: "No branch is assigned to this account",
+        });
+      }
+
       if (
-        !req.user.branch ||
         !studentRecord.branch ||
         studentRecord.branch.toString() !==
           req.user.branch.toString()
@@ -210,6 +323,7 @@ const createPerformance = async (req, res) => {
       }
     }
 
+    // Verify that the student's branch exists
     const branch = await Branch.findById(studentRecord.branch);
 
     if (!branch) {
@@ -219,7 +333,9 @@ const createPerformance = async (req, res) => {
       });
     }
 
-    const parsedEvaluationDate = new Date(evaluationDate);
+    const parsedEvaluationDate = new Date(
+      `${evaluationDate}T00:00:00`
+    );
 
     if (Number.isNaN(parsedEvaluationDate.getTime())) {
       return res.status(400).json({
@@ -265,6 +381,7 @@ const createPerformance = async (req, res) => {
 module.exports = {
   getPerformance,
   getMyPerformance,
+  getPerformanceByStudent,
   getPerformanceById,
   createPerformance,
 };

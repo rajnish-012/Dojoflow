@@ -13,8 +13,10 @@ import {
   ShieldCheck,
   UserRound,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 
-const API_URL = "http://localhost:5000/api";
+const API_URL =
+  process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api";
 
 type LoginRole = "admin" | "coach" | "student";
 
@@ -24,24 +26,31 @@ type UserRole =
   | "COACH"
   | "STUDENT";
 
-const roleDetails = {
+type RoleDetail = {
+  title: string;
+  description: string;
+  icon: LucideIcon;
+  allowedRoles: UserRole[];
+};
+
+const roleDetails: Record<LoginRole, RoleDetail> = {
   admin: {
     title: "Admin Login",
     description: "Manage your academy, staff, students and operations.",
     icon: ShieldCheck,
-    allowedRoles: ["SUPER_ADMIN", "BRANCH_ADMIN"] as UserRole[],
+    allowedRoles: ["SUPER_ADMIN", "BRANCH_ADMIN"],
   },
   coach: {
     title: "Coach / Instructor Login",
     description: "Manage training, attendance and student performance.",
     icon: UserRound,
-    allowedRoles: ["COACH"] as UserRole[],
+    allowedRoles: ["COACH"],
   },
   student: {
     title: "Student / Parent Login",
     description: "View training progress, attendance and academy details.",
     icon: GraduationCap,
-    allowedRoles: ["STUDENT"] as UserRole[],
+    allowedRoles: ["STUDENT"],
   },
 };
 
@@ -49,36 +58,26 @@ export default function LoginPage() {
   const router = useRouter();
 
   const [selectedRole, setSelectedRole] = useState<LoginRole | null>(null);
-
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  // Read selected login type from URL
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const role = params.get("role");
 
-    if (
-      role === "admin" ||
-      role === "coach" ||
-      role === "student"
-    ) {
+    if (role === "admin" || role === "coach" || role === "student") {
       setSelectedRole(role);
     }
   }, []);
 
-  // Redirect already logged-in users to the correct portal
   useEffect(() => {
     const token = localStorage.getItem("token");
     const storedUser = localStorage.getItem("user");
 
-    if (!token || !storedUser) {
-      return;
-    }
+    if (!token || !storedUser) return;
 
     try {
       const user = JSON.parse(storedUser);
@@ -96,7 +95,10 @@ export default function LoginPage() {
 
   function handleRoleSelection(role: LoginRole) {
     setSelectedRole(role);
+    setEmail("");
+    setPassword("");
     setError("");
+    setShowPassword(false);
 
     router.push(`/login?role=${role}`);
   }
@@ -106,13 +108,17 @@ export default function LoginPage() {
     setEmail("");
     setPassword("");
     setError("");
+    setShowPassword(false);
 
     router.push("/login");
   }
 
+  function handleBackToLandingPage() {
+    router.push("/");
+  }
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-
     setError("");
 
     if (!selectedRole) {
@@ -156,41 +162,29 @@ export default function LoginPage() {
         data.accessToken ||
         data.data?.accessToken;
 
-      if (!token) {
-        throw new Error(
-          "Login successful, but no authentication token was received.",
-        );
-      }
+      const user = data.user || data.data?.user;
 
-      const user = data.user || data.data?.user || null;
-
-      if (!user || !user.role) {
-        throw new Error(
-          "Login successful, but user information was not received.",
-        );
+      if (!token || !user?.role) {
+        throw new Error("Invalid login response from server.");
       }
 
       const selectedRoleDetails = roleDetails[selectedRole];
 
-      // Verify that the selected login type matches the actual account role
       if (!selectedRoleDetails.allowedRoles.includes(user.role)) {
         throw new Error(
-          `This account cannot log in as ${selectedRoleDetails.title}. Please select the correct login type.`,
+          `This account cannot log in as ${selectedRoleDetails.title}.`,
         );
       }
 
       localStorage.setItem("token", token);
       localStorage.setItem("user", JSON.stringify(user));
 
-      // Redirect based on actual backend role
       if (user.role === "STUDENT") {
         router.replace("/student-dashboard");
       } else {
         router.replace("/dashboard");
       }
     } catch (error) {
-      console.error(error);
-
       setError(
         error instanceof Error
           ? error.message
@@ -205,170 +199,237 @@ export default function LoginPage() {
     ? roleDetails[selectedRole]
     : null;
 
+  const SelectedRoleIcon = selectedRoleDetails?.icon;
+
   return (
-    <main className="min-h-screen bg-slate-50">
-      <div className="grid min-h-screen lg:grid-cols-2">
-        {/* Left Side */}
-        <div className="hidden bg-slate-900 p-10 text-white lg:flex lg:flex-col lg:justify-between">
-          <div>
-            <div className="flex items-center gap-3">
-              <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-white text-lg font-bold text-slate-900">
-                D
-              </div>
+    <main className="min-h-screen bg-[#f5f7fb] text-[#172033]">
+      <div className="grid min-h-screen lg:grid-cols-[0.95fr_1.05fr]">
+        {/* Left Panel */}
+        <section className="relative hidden overflow-hidden bg-[#101a33] px-10 py-8 text-white lg:flex lg:flex-col lg:justify-between xl:px-14">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_85%_15%,rgba(215,168,75,0.2),transparent_30%),radial-gradient(circle_at_0%_100%,rgba(54,98,160,0.25),transparent_38%)]" />
 
-              <div>
-                <p className="text-lg font-bold">DojoFlow</p>
+          <div className="absolute inset-0 opacity-[0.04] [background-image:linear-gradient(rgba(255,255,255,0.5)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.5)_1px,transparent_1px)] [background-size:48px_48px]" />
 
-                <p className="text-xs text-slate-400">
-                  Karate Academy Management
-                </p>
-              </div>
+          {/* Logo */}
+          <div className="relative flex items-center gap-3">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#d7a84b] text-xl font-black text-[#101a33]">
+              D
+            </div>
+
+            <div>
+              <p className="text-xl font-black">DojoFlow</p>
+              <p className="text-xs text-white/45">
+                Karate Academy Management
+              </p>
             </div>
           </div>
 
-          <div className="max-w-md">
-            <div className="mb-6 flex h-14 w-14 items-center justify-center rounded-2xl bg-white/10">
-              <ShieldCheck className="h-7 w-7 text-white" />
+          {/* Main Content */}
+          <div className="relative max-w-lg">
+            <div className="mb-6 inline-flex rounded-full border border-[#d7a84b]/25 bg-[#d7a84b]/10 px-4 py-2 text-xs font-bold uppercase tracking-[0.18em] text-[#e5c477]">
+              Your academy, connected
             </div>
 
-            <h1 className="text-4xl font-bold leading-tight">
-              Manage your dojo.
-              <br />
-              Track every student.
+            <h1 className="text-5xl font-black leading-[1.08] tracking-[-0.04em] xl:text-6xl">
+              Train with purpose.
+              <span className="mt-2 block text-[#d7a84b]">
+                Manage with clarity.
+              </span>
             </h1>
 
-            <p className="mt-5 text-base leading-7 text-slate-400">
-              Manage students, training plans, attendance, performance
-              evaluations and belt progression from one place.
+            <p className="mt-6 max-w-md text-base leading-8 text-white/55">
+              Manage students, coaches, attendance, training plans,
+              performance, and academy growth from one platform.
             </p>
+
+            <div className="mt-9 grid max-w-md grid-cols-3 gap-5 border-t border-white/10 pt-6">
+              <div>
+                <p className="text-2xl font-black">500+</p>
+                <p className="mt-1 text-xs text-white/40">
+                  Students managed
+                </p>
+              </div>
+
+              <div>
+                <p className="text-2xl font-black">15+</p>
+                <p className="mt-1 text-xs text-white/40">
+                  Years of expertise
+                </p>
+              </div>
+
+              <div>
+                <p className="text-2xl font-black">24/7</p>
+                <p className="mt-1 text-xs text-white/40">
+                  Platform access
+                </p>
+              </div>
+            </div>
           </div>
 
-          <p className="text-xs text-slate-500">
-            DojoFlow · Karate Academy Management System
+          <p className="relative text-xs text-white/30">
+            © {new Date().getFullYear()} DojoFlow
           </p>
-        </div>
+        </section>
 
-        {/* Right Side */}
-        <div className="flex items-center justify-center p-6 sm:p-10">
-          <div className="w-full max-w-md">
+        {/* Right Panel */}
+        <section className="flex min-h-screen items-center justify-center px-5 py-8 sm:px-8 lg:px-12">
+          <div className="w-full max-w-xl">
             {/* Mobile Logo */}
-            <div className="mb-10 flex items-center gap-3 lg:hidden">
-              <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-slate-900 text-lg font-bold text-white">
+            <div className="mb-8 flex items-center justify-center gap-3 lg:hidden">
+              <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#101a33] text-lg font-black text-white">
                 D
               </div>
 
               <div>
-                <p className="text-lg font-bold text-slate-900">
+                <p className="text-lg font-black text-[#101a33]">
                   DojoFlow
                 </p>
-
-                <p className="text-xs text-slate-500">
+                <p className="text-xs text-[#697386]">
                   Karate Academy Management
                 </p>
               </div>
             </div>
 
             {!selectedRole ? (
-              /* Role Selection */
-              <div>
-                <div className="mb-8">
-                  <h2 className="text-3xl font-bold tracking-tight text-slate-900">
-                    Welcome to DojoFlow
+              /* Role Selection Page */
+              <div className="mx-auto max-w-lg">
+                {/* Back Button Only Here */}
+                <div className="mb-7">
+                  <button
+                  type="button"
+                  onClick={handleBackToLandingPage}
+                  className="group mb-7 inline-flex items-center gap-2 text-sm font-bold text-[#697386] transition hover:text-[#101a33]"
+                >
+                  <ArrowLeft
+                    size={16}
+                    className="transition group-hover:-translate-x-1"
+                  />
+                  Back to website
+                </button>
+                </div>
+
+                {/* Heading */}
+                <div className="mb-7">
+                  <div className="mb-4 inline-flex rounded-full bg-[#f8efde] px-4 py-2 text-xs font-black uppercase tracking-[0.16em] text-[#a87418]">
+                    Secure portal access
+                  </div>
+
+                  <h2 className="text-3xl font-black tracking-[-0.04em] text-[#101a33] sm:text-4xl">
+                    Welcome to
+                    <span className="block text-[#a87418]">
+                      DojoFlow.
+                    </span>
                   </h2>
 
-                  <p className="mt-2 text-sm text-slate-500">
-                    Choose how you want to access the academy.
+                  <p className="mt-3 text-sm leading-6 text-[#697386]">
+                    Choose your account type to continue.
                   </p>
                 </div>
 
-                <div className="space-y-4">
-                  {(Object.keys(roleDetails) as LoginRole[]).map(
-                    (role) => {
-                      const details = roleDetails[role];
-                      const Icon = details.icon;
+                {/* Three Login Options */}
+                <div className="space-y-3">
+                  {(Object.keys(roleDetails) as LoginRole[]).map((role) => {
+                    const details = roleDetails[role];
+                    const Icon = details.icon;
 
-                      return (
-                        <button
-                          key={role}
-                          type="button"
-                          onClick={() => handleRoleSelection(role)}
-                          className="group flex w-full items-center gap-4 rounded-xl border border-slate-200 bg-white p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-slate-900 hover:shadow-md"
-                        >
-                          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-700 transition group-hover:bg-slate-900 group-hover:text-white">
-                            <Icon className="h-6 w-6" />
-                          </div>
+                    return (
+                      <button
+                        key={role}
+                        type="button"
+                        onClick={() => handleRoleSelection(role)}
+                        className="group relative flex w-full items-center gap-4 overflow-hidden rounded-2xl border border-[#e1e6ee] bg-white p-4 text-left shadow-sm transition duration-300 hover:-translate-y-0.5 hover:border-[#d7a84b] hover:shadow-lg sm:p-5"
+                      >
+                        <div className="absolute bottom-0 left-0 top-0 w-1 bg-[#d7a84b] opacity-0 transition group-hover:opacity-100" />
 
-                          <div className="flex-1">
-                            <h3 className="font-semibold text-slate-900">
-                              {details.title}
-                            </h3>
+                        <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-[#f1f4f8] text-[#34445d] transition group-hover:bg-[#101a33] group-hover:text-[#d7a84b]">
+                          <Icon size={27} />
+                        </div>
 
-                            <p className="mt-1 text-sm leading-5 text-slate-500">
-                              {details.description}
-                            </p>
-                          </div>
+                        <div className="min-w-0 flex-1">
+                          <h3 className="text-base font-extrabold text-[#101a33] sm:text-lg">
+                            {details.title}
+                          </h3>
 
-                          <ArrowRight className="h-5 w-5 text-slate-400 transition group-hover:translate-x-1 group-hover:text-slate-900" />
-                        </button>
-                      );
-                    },
-                  )}
+                          <p className="mt-1 text-sm leading-5 text-[#697386]">
+                            {details.description}
+                          </p>
+                        </div>
+
+                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#f5f7fb] transition group-hover:bg-[#f8efde]">
+                          <ArrowRight
+                            size={18}
+                            className="text-[#9aabc2] transition group-hover:translate-x-1 group-hover:text-[#a87418]"
+                          />
+                        </div>
+                      </button>
+                    );
+                  })}
                 </div>
 
-                <p className="mt-8 text-center text-xs text-slate-400">
-                  Select your account type to continue.
+                <p className="mt-6 text-center text-xs text-[#9aa5b5]">
+                  Secure access for authorized DojoFlow users
                 </p>
               </div>
             ) : (
-              /* Login Form */
-              <div>
+              /* Login Form Page */
+              <div className="mx-auto max-w-md">
                 <button
                   type="button"
                   onClick={handleBackToRoleSelection}
-                  className="mb-7 flex items-center gap-2 text-sm font-medium text-slate-500 transition hover:text-slate-900"
+                  className="group mb-7 inline-flex items-center gap-2 text-sm font-bold text-[#697386] transition hover:text-[#101a33]"
                 >
-                  <ArrowLeft className="h-4 w-4" />
+                  <ArrowLeft
+                    size={16}
+                    className="transition group-hover:-translate-x-1"
+                  />
                   Change login type
                 </button>
 
-                <div className="mb-8">
-                  <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-slate-900 text-white">
-                    {selectedRoleDetails && (
-                      <selectedRoleDetails.icon className="h-6 w-6" />
+                <div className="mb-7">
+                  <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-[#101a33] text-[#d7a84b]">
+                    {SelectedRoleIcon && (
+                      <SelectedRoleIcon size={28} />
                     )}
                   </div>
 
-                  <h2 className="text-3xl font-bold tracking-tight text-slate-900">
+                  <p className="mb-2 text-xs font-black uppercase tracking-[0.2em] text-[#a87418]">
+                    {selectedRole === "student"
+                      ? "Student portal"
+                      : selectedRole === "coach"
+                        ? "Instructor portal"
+                        : "Administration portal"}
+                  </p>
+
+                  <h2 className="text-3xl font-black tracking-[-0.04em] text-[#101a33]">
                     {selectedRoleDetails?.title}
                   </h2>
 
-                  <p className="mt-2 text-sm text-slate-500">
+                  <p className="mt-3 text-sm leading-6 text-[#697386]">
                     {selectedRoleDetails?.description}
                   </p>
                 </div>
 
-                {/* Error */}
                 {error && (
-                  <div className="mb-5 rounded-lg border border-red-200 bg-red-50 px-4 py-3">
-                    <p className="text-sm leading-5 text-red-700">
-                      {error}
-                    </p>
+                  <div className="mb-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3">
+                    <p className="text-sm text-red-700">{error}</p>
                   </div>
                 )}
 
-                {/* Login Form */}
                 <form onSubmit={handleSubmit} className="space-y-5">
                   {/* Email */}
                   <div>
                     <label
                       htmlFor="email"
-                      className="mb-2 block text-sm font-medium text-slate-700"
+                      className="mb-2 block text-sm font-bold text-[#34445d]"
                     >
-                      Email
+                      Email Address
                     </label>
 
                     <div className="relative">
-                      <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                      <Mail
+                        size={17}
+                        className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-[#9aabc2]"
+                      />
 
                       <input
                         id="email"
@@ -379,22 +440,39 @@ export default function LoginPage() {
                           setEmail(event.target.value)
                         }
                         placeholder="Enter your email"
-                        className="w-full rounded-lg border border-slate-200 bg-white py-3 pl-10 pr-4 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-slate-900"
+                        className="w-full rounded-xl border border-[#dfe5ed] bg-white py-3.5 pl-11 pr-4 text-sm outline-none transition placeholder:text-[#a5afbd] focus:border-[#a87418] focus:ring-4 focus:ring-[#d7a84b]/10"
                       />
                     </div>
                   </div>
 
                   {/* Password */}
                   <div>
-                    <label
-                      htmlFor="password"
-                      className="mb-2 block text-sm font-medium text-slate-700"
-                    >
-                      Password
-                    </label>
+                    <div className="mb-2 flex items-center justify-between">
+                      <label
+                        htmlFor="password"
+                        className="text-sm font-bold text-[#34445d]"
+                      >
+                        Password
+                      </label>
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setError(
+                            "Please contact your academy administrator to reset your password.",
+                          )
+                        }
+                        className="text-xs font-semibold text-[#a87418]"
+                      >
+                        Forgot password?
+                      </button>
+                    </div>
 
                     <div className="relative">
-                      <LockKeyhole className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                      <LockKeyhole
+                        size={17}
+                        className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-[#9aabc2]"
+                      />
 
                       <input
                         id="password"
@@ -405,7 +483,7 @@ export default function LoginPage() {
                           setPassword(event.target.value)
                         }
                         placeholder="Enter your password"
-                        className="w-full rounded-lg border border-slate-200 bg-white py-3 pl-10 pr-11 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-slate-900"
+                        className="w-full rounded-xl border border-[#dfe5ed] bg-white py-3.5 pl-11 pr-12 text-sm outline-none transition placeholder:text-[#a5afbd] focus:border-[#a87418] focus:ring-4 focus:ring-[#d7a84b]/10"
                       />
 
                       <button
@@ -413,17 +491,12 @@ export default function LoginPage() {
                         onClick={() =>
                           setShowPassword((current) => !current)
                         }
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700"
-                        aria-label={
-                          showPassword
-                            ? "Hide password"
-                            : "Show password"
-                        }
+                        className="absolute right-4 top-1/2 -translate-y-1/2 text-[#9aabc2] hover:text-[#34445d]"
                       >
                         {showPassword ? (
-                          <EyeOff className="h-4 w-4" />
+                          <EyeOff size={18} />
                         ) : (
-                          <Eye className="h-4 w-4" />
+                          <Eye size={18} />
                         )}
                       </button>
                     </div>
@@ -433,7 +506,7 @@ export default function LoginPage() {
                   <button
                     type="submit"
                     disabled={loading}
-                    className="flex w-full items-center justify-center gap-2 rounded-lg bg-slate-900 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#101a33] px-4 py-3.5 text-sm font-extrabold text-white shadow-lg transition hover:bg-[#1c2d52] disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {loading ? (
                       <>
@@ -443,21 +516,23 @@ export default function LoginPage() {
                     ) : (
                       <>
                         Sign In
-                        <ArrowRight className="h-4 w-4" />
+                        <ArrowRight size={17} />
                       </>
                     )}
                   </button>
                 </form>
 
-                
-
-                <p className="mt-8 text-center text-xs text-slate-400">
-                  Secure access for DojoFlow users
-                </p>
+                <div className="mt-7 flex items-center gap-3">
+                  <div className="h-px flex-1 bg-[#e4e8ef]" />
+                  <span className="text-xs text-[#9aa5b5]">
+                    Secure access
+                  </span>
+                  <div className="h-px flex-1 bg-[#e4e8ef]" />
+                </div>
               </div>
             )}
           </div>
-        </div>
+        </section>
       </div>
     </main>
   );

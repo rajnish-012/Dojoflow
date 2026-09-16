@@ -4,6 +4,7 @@ const {
   getPerformance,
   getMyPerformance,
   getPerformanceById,
+  getPerformanceByStudent,
   createPerformance,
 } = require("../controllers/performance.controller");
 
@@ -34,6 +35,18 @@ router.get(
   authorize("SUPER_ADMIN", "BRANCH_ADMIN", "COACH"),
   getPerformance
 );
+
+
+// ==============================
+// GET PERFORMANCE BY STUDENT ID
+// ==============================
+router.get(
+  "/student/:studentId",
+  protect,
+  authorize("SUPER_ADMIN", "BRANCH_ADMIN", "COACH"),
+  getPerformanceByStudent
+);
+
 
 // ======================================================
 // GET PERFORMANCE BY ID
