@@ -139,6 +139,7 @@ export default function Sidebar({
   const user = getStoredUser();
 
   const role: UserRole = user?.role || "SUPER_ADMIN";
+  const logoHref = role === "STUDENT" ? "/student-dashboard" : "/dashboard";
 
   const items = role === "STUDENT" ? studentNavigationItems : navigationItems;
 
@@ -194,7 +195,7 @@ export default function Sidebar({
           ].join(" ")}
         >
           <Link
-            href="/dashboard"
+            href={logoHref}
             onClick={onClose}
             className={[
               "flex min-w-0 items-center",
