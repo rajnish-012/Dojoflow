@@ -1,12 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import {
-  FormEvent,
-  useEffect,
-  useState,
-  type ChangeEvent,
-} from "react";
+import Image from "next/image";
+import { FormEvent, useEffect, useState, type ChangeEvent } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -55,8 +51,7 @@ type Plan = {
   }[];
 };
 
-const API_URL =
-  process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api";
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api";
 
 const initialFormData: FormData = {
   fullName: "",
@@ -115,16 +110,10 @@ const experienceOptions = [
   "More than 3 years",
 ];
 
-const batchOptions = [
-  "Morning",
-  "Afternoon",
-  "Evening",
-  "Flexible",
-];
+const batchOptions = ["Morning", "Afternoon", "Evening", "Flexible"];
 
 export default function InquiryPage() {
-  const [formData, setFormData] =
-    useState<FormData>(initialFormData);
+  const [formData, setFormData] = useState<FormData>(initialFormData);
 
   const [plans, setPlans] = useState<Plan[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -146,9 +135,7 @@ export default function InquiryPage() {
       const data = await response.json();
 
       if (!response.ok || !data.success) {
-        throw new Error(
-          data.message || "Unable to load training plans.",
-        );
+        throw new Error(data.message || "Unable to load training plans.");
       }
 
       setPlans(data.plans || []);
@@ -182,9 +169,7 @@ export default function InquiryPage() {
     }));
   };
 
-  const handleSubmit = async (
-    event: FormEvent<HTMLFormElement>,
-  ) => {
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
     setError("");
@@ -214,18 +199,14 @@ export default function InquiryPage() {
         },
         body: JSON.stringify({
           ...formData,
-          age: formData.age
-            ? Number(formData.age)
-            : undefined,
+          age: formData.age ? Number(formData.age) : undefined,
         }),
       });
 
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(
-          data.message || "Unable to submit enquiry.",
-        );
+        throw new Error(data.message || "Unable to submit enquiry.");
       }
 
       setSubmitted(true);
@@ -238,10 +219,7 @@ export default function InquiryPage() {
         behavior: "smooth",
       });
     } catch (submitError) {
-      console.error(
-        "Inquiry submission error:",
-        submitError,
-      );
+      console.error("Inquiry submission error:", submitError);
 
       setError(
         submitError instanceof Error
@@ -267,19 +245,19 @@ export default function InquiryPage() {
   };
 
   return (
-    <main
-      id="top"
-      className="min-h-screen bg-[#f5f7fb] text-slate-900"
-    >
+    <main id="top" className="min-h-screen bg-[#f5f7fb] text-slate-900">
       {/* Header */}
       <header className="sticky top-0 z-50 border-b border-slate-200 bg-white/95 backdrop-blur">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-5 py-4 sm:px-8">
-          <Link
-            href="/"
-            className="flex items-center gap-3"
-          >
+          <Link href="/" className="flex items-center gap-3">
             <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#0b1020] text-[#f59e0b]">
-              <Dumbbell className="h-5 w-5" />
+              <Image
+                src="/logo.png"
+                alt="DojoFlow logo"
+                width={28}
+                height={28}
+                className="h-7 w-7 rounded-md object-contain"
+              />
             </div>
 
             <div>
@@ -287,9 +265,7 @@ export default function InquiryPage() {
                 DojoFlow
               </p>
 
-              <p className="text-xs text-slate-500">
-                Karate Academy
-              </p>
+              <p className="text-xs text-slate-500">Karate Academy</p>
             </div>
           </Link>
 
@@ -325,9 +301,9 @@ export default function InquiryPage() {
               </h1>
 
               <p className="mt-6 max-w-xl text-base leading-8 text-slate-600">
-                Tell us a little about yourself. Our academy
-                team will contact you with suitable programs,
-                batch timings and admission information.
+                Tell us a little about yourself. Our academy team will contact
+                you with suitable programs, batch timings and admission
+                information.
               </p>
 
               <div className="mt-10 grid gap-6 sm:grid-cols-2 lg:grid-cols-1">
@@ -335,10 +311,7 @@ export default function InquiryPage() {
                   const Icon = benefit.icon;
 
                   return (
-                    <div
-                      key={benefit.title}
-                      className="flex items-start gap-4"
-                    >
+                    <div key={benefit.title} className="flex items-start gap-4">
                       <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-orange-50 text-orange-600">
                         <Icon className="h-5 w-5" />
                       </div>
@@ -369,17 +342,12 @@ export default function InquiryPage() {
                     "Our team reviews your details",
                     "Receive suitable batch and plan information",
                   ].map((item, index) => (
-                    <div
-                      key={item}
-                      className="flex items-center gap-3"
-                    >
+                    <div key={item} className="flex items-center gap-3">
                       <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#0b1020] text-xs font-bold text-white">
                         {index + 1}
                       </span>
 
-                      <span className="text-sm text-slate-600">
-                        {item}
-                      </span>
+                      <span className="text-sm text-slate-600">{item}</span>
                     </div>
                   ))}
                 </div>
@@ -402,14 +370,19 @@ export default function InquiryPage() {
                         </h2>
 
                         <p className="mt-3 text-sm leading-6 text-slate-500">
-                          Fill in the details below and our
-                          academy team will get in touch with
-                          you.
+                          Fill in the details below and our academy team will
+                          get in touch with you.
                         </p>
                       </div>
 
                       <div className="hidden h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-[#0b1020] text-orange-400 sm:flex">
-                        <Dumbbell className="h-5 w-5" />
+                        <Image
+                          src="/logo.png"
+                          alt="DojoFlow logo"
+                          width={28}
+                          height={28}
+                          className="h-7 w-7 rounded-md object-contain"
+                        />
                       </div>
                     </div>
                   </div>
@@ -529,10 +502,7 @@ export default function InquiryPage() {
                           className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-sm text-slate-900 outline-none transition focus:border-orange-400 focus:ring-4 focus:ring-orange-500/10"
                         >
                           {beltOptions.map((belt) => (
-                            <option
-                              key={belt}
-                              value={belt}
-                            >
+                            <option key={belt} value={belt}>
                               {belt}
                             </option>
                           ))}
@@ -555,20 +525,13 @@ export default function InquiryPage() {
                           onChange={handleChange}
                           className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-sm text-slate-900 outline-none transition focus:border-orange-400 focus:ring-4 focus:ring-orange-500/10"
                         >
-                          <option value="">
-                            Select experience
-                          </option>
+                          <option value="">Select experience</option>
 
-                          {experienceOptions.map(
-                            (experience) => (
-                              <option
-                                key={experience}
-                                value={experience}
-                              >
-                                {experience}
-                              </option>
-                            ),
-                          )}
+                          {experienceOptions.map((experience) => (
+                            <option key={experience} value={experience}>
+                              {experience}
+                            </option>
+                          ))}
                         </select>
                       </div>
 
@@ -588,15 +551,10 @@ export default function InquiryPage() {
                           onChange={handleChange}
                           className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-sm text-slate-900 outline-none transition focus:border-orange-400 focus:ring-4 focus:ring-orange-500/10"
                         >
-                          <option value="">
-                            Select timing
-                          </option>
+                          <option value="">Select timing</option>
 
                           {batchOptions.map((batch) => (
-                            <option
-                              key={batch}
-                              value={batch}
-                            >
+                            <option key={batch} value={batch}>
                               {batch}
                             </option>
                           ))}
@@ -674,9 +632,8 @@ export default function InquiryPage() {
                     </button>
 
                     <p className="text-center text-xs leading-5 text-slate-400">
-                      By submitting this form, you agree to be
-                      contacted by the academy team regarding
-                      training and admission.
+                      By submitting this form, you agree to be contacted by the
+                      academy team regarding training and admission.
                     </p>
                   </form>
                 </>
@@ -695,10 +652,9 @@ export default function InquiryPage() {
                   </h2>
 
                   <p className="mx-auto mt-4 max-w-md text-sm leading-7 text-slate-500">
-                    Your enquiry has been submitted successfully.
-                    Our academy team will contact you soon with
-                    suitable training options, batch timings and
-                    admission details.
+                    Your enquiry has been submitted successfully. Our academy
+                    team will contact you soon with suitable training options,
+                    batch timings and admission details.
                   </p>
 
                   <button
@@ -733,8 +689,8 @@ export default function InquiryPage() {
             </h2>
 
             <p className="mt-4 text-sm leading-7 text-slate-500">
-              These plans are fetched directly from the academy
-              system. Only currently active plans are displayed.
+              These plans are fetched directly from the academy system. Only
+              currently active plans are displayed.
             </p>
           </div>
 
@@ -754,9 +710,7 @@ export default function InquiryPage() {
                 Unable to load plans
               </h3>
 
-              <p className="mt-2 text-sm text-red-700">
-                {plansError}
-              </p>
+              <p className="mt-2 text-sm text-red-700">{plansError}</p>
 
               <button
                 type="button"
@@ -775,9 +729,9 @@ export default function InquiryPage() {
               </h3>
 
               <p className="mt-2 text-sm leading-6 text-slate-500">
-                Our current training plans are not available at
-                the moment. Please submit an enquiry and our
-                team will share the latest options with you.
+                Our current training plans are not available at the moment.
+                Please submit an enquiry and our team will share the latest
+                options with you.
               </p>
             </div>
           ) : (
@@ -815,9 +769,7 @@ export default function InquiryPage() {
 
                   <div className="mt-8 space-y-4 border-t border-slate-100 pt-6">
                     <div className="flex items-center justify-between gap-4 text-sm">
-                      <span className="text-slate-500">
-                        Classes per week
-                      </span>
+                      <span className="text-slate-500">Classes per week</span>
 
                       <span className="font-semibold text-slate-950">
                         {plan.classesPerWeek}
@@ -825,9 +777,7 @@ export default function InquiryPage() {
                     </div>
 
                     <div className="flex items-center justify-between gap-4 text-sm">
-                      <span className="text-slate-500">
-                        Starting belt
-                      </span>
+                      <span className="text-slate-500">Starting belt</span>
 
                       <span className="font-semibold text-slate-950">
                         {plan.startingBelt}
@@ -835,9 +785,7 @@ export default function InquiryPage() {
                     </div>
 
                     <div className="flex items-center justify-between gap-4 text-sm">
-                      <span className="text-slate-500">
-                        Progress reports
-                      </span>
+                      <span className="text-slate-500">Progress reports</span>
 
                       <span className="text-right font-semibold text-slate-950">
                         {plan.progressReports}
@@ -845,30 +793,25 @@ export default function InquiryPage() {
                     </div>
                   </div>
 
-                  {plan.milestones &&
-                    plan.milestones.length > 0 && (
-                      <div className="mt-8 border-t border-slate-100 pt-6">
-                        <h4 className="text-sm font-bold text-slate-950">
-                          Key milestones
-                        </h4>
+                  {plan.milestones && plan.milestones.length > 0 && (
+                    <div className="mt-8 border-t border-slate-100 pt-6">
+                      <h4 className="text-sm font-bold text-slate-950">
+                        Key milestones
+                      </h4>
 
-                        <ul className="mt-4 space-y-3">
-                          {plan.milestones
-                            .slice(0, 4)
-                            .map((milestone, index) => (
-                              <li
-                                key={`${milestone.title}-${index}`}
-                                className="flex items-start gap-2 text-sm text-slate-600"
-                              >
-                                <Check className="mt-0.5 h-4 w-4 shrink-0 text-orange-500" />
-                                <span>
-                                  {milestone.title}
-                                </span>
-                              </li>
-                            ))}
-                        </ul>
-                      </div>
-                    )}
+                      <ul className="mt-4 space-y-3">
+                        {plan.milestones.slice(0, 4).map((milestone, index) => (
+                          <li
+                            key={`${milestone.title}-${index}`}
+                            className="flex items-start gap-2 text-sm text-slate-600"
+                          >
+                            <Check className="mt-0.5 h-4 w-4 shrink-0 text-orange-500" />
+                            <span>{milestone.title}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
 
                   <a
                     href="#top"
@@ -896,8 +839,8 @@ export default function InquiryPage() {
           </h2>
 
           <p className="mx-auto mt-4 max-w-2xl text-sm leading-7 text-slate-300">
-            Submit your enquiry and our team will help you find
-            the right program, schedule and admission option.
+            Submit your enquiry and our team will help you find the right
+            program, schedule and admission option.
           </p>
 
           <a
@@ -918,9 +861,7 @@ export default function InquiryPage() {
               DojoFlow Karate Academy
             </p>
 
-            <p className="mt-1">
-              Train with discipline. Grow with confidence.
-            </p>
+            <p className="mt-1">Train with discipline. Grow with confidence.</p>
           </div>
 
           <div className="flex flex-wrap gap-5">
