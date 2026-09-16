@@ -80,7 +80,6 @@ app.use((error, req, res, next) => {
 const PORT = process.env.PORT || 5000;
 const URL = process.env.MONGO_URI;
 
-app.listen(PORT,"0.0.0.0", () => {
+app.listen(PORT, "0.0.0.0", () => {
   console.log(`DojoFlow server running on port ${PORT}`);
-  console.log(`API URL: hhg${URL}rjdfghjkmn `);
 });
