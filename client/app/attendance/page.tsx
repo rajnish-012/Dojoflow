@@ -1,12 +1,6 @@
 "use client";
 
-import {
-  ChangeEvent,
-  FormEvent,
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
+import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
 
 import {
   AlertCircle,
@@ -23,8 +17,7 @@ import {
   XCircle,
 } from "lucide-react";
 
-const API_URL =
-  process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api";
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api";
 
 type Student = {
   _id: string;
@@ -84,9 +77,7 @@ function formatDate(date?: string) {
   });
 }
 
-function getStudentName(
-  student: AttendanceRecord["student"],
-) {
+function getStudentName(student: AttendanceRecord["student"]) {
   if (typeof student === "object" && student !== null) {
     return student.name;
   }
@@ -114,13 +105,9 @@ function calculateTrainingDay(
     return null;
   }
 
-  const joiningDate = new Date(
-    `${registrationDate.slice(0, 10)}T00:00:00`,
-  );
+  const joiningDate = new Date(`${registrationDate.slice(0, 10)}T00:00:00`);
 
-  const attendanceDate = new Date(
-    `${selectedDate}T00:00:00`,
-  );
+  const attendanceDate = new Date(`${selectedDate}T00:00:00`);
 
   if (
     Number.isNaN(joiningDate.getTime()) ||
@@ -133,8 +120,7 @@ function calculateTrainingDay(
     attendanceDate.getTime() - joiningDate.getTime();
 
   const differenceInDays = Math.floor(
-    differenceInMilliseconds /
-      (1000 * 60 * 60 * 24),
+    differenceInMilliseconds / (1000 * 60 * 60 * 24),
   );
 
   if (differenceInDays < 0) {
@@ -166,23 +152,15 @@ function SummaryCard({
           <Icon className="h-5 w-5" />
         </div>
 
-        <span className="text-sm font-medium text-slate-400">
-          DojoFlow
-        </span>
+        <span className="text-sm font-medium text-slate-400">DojoFlow</span>
       </div>
 
       <div className="mt-5">
-        <p className="text-sm text-slate-500">
-          {title}
-        </p>
+        <p className="text-sm text-slate-500">{title}</p>
 
-        <p className="mt-1 text-2xl font-bold text-slate-900">
-          {value}
-        </p>
+        <p className="mt-1 text-2xl font-bold text-slate-900">{value}</p>
 
-        <p className="mt-1 text-xs text-slate-400">
-          {description}
-        </p>
+        <p className="mt-1 text-xs text-slate-400">{description}</p>
       </div>
     </div>
   );
@@ -190,9 +168,7 @@ function SummaryCard({
 
 export default function AttendancePage() {
   const [students, setStudents] = useState<Student[]>([]);
-  const [attendance, setAttendance] = useState<
-    AttendanceRecord[]
-  >([]);
+  const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -241,19 +217,18 @@ export default function AttendancePage() {
         selectedDate,
       )}`;
 
-      const [studentResponse, attendanceResponse] =
-        await Promise.all([
-          fetch(studentsUrl, {
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-          }),
-          fetch(attendanceUrl, {
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-          }),
-        ]);
+      const [studentResponse, attendanceResponse] = await Promise.all([
+        fetch(studentsUrl, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }),
+        fetch(attendanceUrl, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }),
+      ]);
 
       if (studentResponse.status === 401) {
         localStorage.removeItem("token");
@@ -268,9 +243,7 @@ export default function AttendancePage() {
       }
 
       if (!studentResponse.ok) {
-        throw new Error(
-          `Failed to load students: ${studentResponse.status}`,
-        );
+        throw new Error(`Failed to load students: ${studentResponse.status}`);
       }
 
       if (!attendanceResponse.ok) {
@@ -280,14 +253,9 @@ export default function AttendancePage() {
       }
 
       const studentsData = await studentResponse.json();
-      const attendanceData =
-        await attendanceResponse.json();
+      const attendanceData = await attendanceResponse.json();
 
-      setStudents(
-        studentsData.students ||
-          studentsData.data ||
-          [],
-      );
+      setStudents(studentsData.students || studentsData.data || []);
 
       setAttendance(
         attendanceData.attendance ||
@@ -309,23 +277,17 @@ export default function AttendancePage() {
     }
   }
 
-  function handleDateChange(
-    event: ChangeEvent<HTMLInputElement>,
-  ) {
+  function handleDateChange(event: ChangeEvent<HTMLInputElement>) {
     setSelectedDate(event.target.value);
   }
 
   function handleFormChange(
-    event:
-      | ChangeEvent<HTMLSelectElement>
-      | ChangeEvent<HTMLInputElement>,
+    event: ChangeEvent<HTMLSelectElement> | ChangeEvent<HTMLInputElement>,
   ) {
     const { name, value, type } = event.target;
 
     if (type === "checkbox") {
-      const checked = (
-        event.target as HTMLInputElement
-      ).checked;
+      const checked = (event.target as HTMLInputElement).checked;
 
       setForm((previous) => ({
         ...previous,
@@ -352,10 +314,12 @@ export default function AttendancePage() {
       return;
     }
 
-    if (
-      form.status === "ABSENT" &&
-      !form.makeupRequired
-    ) {
+    if (!selectedTrainingDay) {
+      setFormError("Training day could not be calculated for this student.");
+      return;
+    }
+
+    if (form.status === "ABSENT" && !form.makeupRequired) {
       const confirmed = window.confirm(
         "This student is absent. Do you want to continue without scheduling a makeup class?",
       );
@@ -375,26 +339,22 @@ export default function AttendancePage() {
         return;
       }
 
-      const response = await fetch(
-        `${API_URL}/attendance`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            student: form.student,
-            date: selectedDate,
-            curriculumTitle: form.curriculumTitle,
-            status: form.status,
-            makeupRequired:
-              form.status === "ABSENT"
-                ? form.makeupRequired
-                : false,
-          }),
+      const response = await fetch(`${API_URL}/attendance`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
         },
-      );
+        body: JSON.stringify({
+          student: form.student,
+          date: selectedDate,
+          planDay: selectedTrainingDay,
+          curriculumTitle: form.curriculumTitle,
+          status: form.status,
+          makeupRequired:
+            form.status === "ABSENT" ? form.makeupRequired : false,
+        }),
+      });
 
       const data = await response.json();
 
@@ -405,15 +365,10 @@ export default function AttendancePage() {
       }
 
       if (!response.ok) {
-        throw new Error(
-          data.message || "Failed to mark attendance.",
-        );
+        throw new Error(data.message || "Failed to mark attendance.");
       }
 
-      setSuccess(
-        data.message ||
-          "Attendance marked successfully.",
-      );
+      setSuccess(data.message || "Attendance marked successfully.");
 
       setForm({
         student: "",
@@ -439,15 +394,11 @@ export default function AttendancePage() {
   }
 
   const presentCount = useMemo(() => {
-    return attendance.filter(
-      (record) => record.status === "PRESENT",
-    ).length;
+    return attendance.filter((record) => record.status === "PRESENT").length;
   }, [attendance]);
 
   const absentCount = useMemo(() => {
-    return attendance.filter(
-      (record) => record.status === "ABSENT",
-    ).length;
+    return attendance.filter((record) => record.status === "ABSENT").length;
   }, [attendance]);
 
   const pendingMakeupCount = useMemo(() => {
@@ -518,9 +469,7 @@ export default function AttendancePage() {
             <div className="flex items-start gap-3">
               <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-red-600" />
 
-              <p className="text-sm text-red-700">
-                {error}
-              </p>
+              <p className="text-sm text-red-700">{error}</p>
             </div>
 
             <button
@@ -538,9 +487,7 @@ export default function AttendancePage() {
             <div className="flex items-start gap-3">
               <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
 
-              <p className="text-sm text-emerald-700">
-                {success}
-              </p>
+              <p className="text-sm text-emerald-700">{success}</p>
             </div>
 
             <button
@@ -595,9 +542,7 @@ export default function AttendancePage() {
                 className="flex h-12 w-12 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 transition hover:bg-slate-50 disabled:opacity-60"
               >
                 <RefreshCw
-                  className={
-                    refreshing ? "animate-spin" : ""
-                  }
+                  className={refreshing ? "animate-spin" : ""}
                   size={18}
                 />
               </button>
@@ -693,12 +638,9 @@ export default function AttendancePage() {
 
                   <tbody className="divide-y divide-slate-100">
                     {attendance.map((record) => {
-                      const studentName = getStudentName(
-                        record.student,
-                      );
+                      const studentName = getStudentName(record.student);
 
-                      const isPresent =
-                        record.status === "PRESENT";
+                      const isPresent = record.status === "PRESENT";
 
                       return (
                         <tr
@@ -747,9 +689,7 @@ export default function AttendancePage() {
                                 <XCircle size={14} />
                               )}
 
-                              {isPresent
-                                ? "Present"
-                                : "Absent"}
+                              {isPresent ? "Present" : "Absent"}
                             </span>
                           </td>
 
@@ -767,9 +707,7 @@ export default function AttendancePage() {
                                   : "Pending"}
                               </span>
                             ) : (
-                              <span className="text-sm text-slate-400">
-                                —
-                              </span>
+                              <span className="text-sm text-slate-400">—</span>
                             )}
                           </td>
                         </tr>
@@ -812,9 +750,7 @@ export default function AttendancePage() {
                   background:
                     attendance.length > 0
                       ? `conic-gradient(#16a34a ${
-                          (presentCount /
-                            attendance.length) *
-                          100
+                          (presentCount / attendance.length) * 100
                         }%, #e2e8f0 0)`
                       : "#e2e8f0",
                 }}
@@ -822,18 +758,12 @@ export default function AttendancePage() {
                 <div className="flex h-36 w-36 flex-col items-center justify-center rounded-full bg-white">
                   <span className="text-3xl font-bold text-slate-900">
                     {attendance.length > 0
-                      ? Math.round(
-                          (presentCount /
-                            attendance.length) *
-                            100,
-                        )
+                      ? Math.round((presentCount / attendance.length) * 100)
                       : 0}
                     %
                   </span>
 
-                  <span className="mt-1 text-sm text-slate-500">
-                    Present
-                  </span>
+                  <span className="mt-1 text-sm text-slate-500">Present</span>
                 </div>
               </div>
             </div>
@@ -842,9 +772,7 @@ export default function AttendancePage() {
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
-                  <span className="text-sm text-slate-600">
-                    Present
-                  </span>
+                  <span className="text-sm text-slate-600">Present</span>
                 </div>
 
                 <span className="text-sm font-semibold text-slate-900">
@@ -855,9 +783,7 @@ export default function AttendancePage() {
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <span className="h-2.5 w-2.5 rounded-full bg-red-500" />
-                  <span className="text-sm text-slate-600">
-                    Absent
-                  </span>
+                  <span className="text-sm text-slate-600">Absent</span>
                 </div>
 
                 <span className="text-sm font-semibold text-slate-900">
@@ -879,9 +805,7 @@ export default function AttendancePage() {
               </div>
 
               <div className="flex items-center justify-between border-t border-slate-100 pt-5">
-                <span className="text-sm text-slate-600">
-                  Total Marked
-                </span>
+                <span className="text-sm text-slate-600">Total Marked</span>
 
                 <span className="text-sm font-semibold text-slate-900">
                   {attendance.length}
@@ -916,10 +840,7 @@ export default function AttendancePage() {
               </button>
             </div>
 
-            <form
-              onSubmit={handleSubmit}
-              className="space-y-5 p-6"
-            >
+            <form onSubmit={handleSubmit} className="space-y-5 p-6">
               {formError && (
                 <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
                   {formError}
@@ -941,15 +862,10 @@ export default function AttendancePage() {
                   onChange={handleFormChange}
                   className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none focus:border-slate-400 focus:ring-4 focus:ring-slate-100"
                 >
-                  <option value="">
-                    Select student
-                  </option>
+                  <option value="">Select student</option>
 
                   {students.map((student) => (
-                    <option
-                      key={student._id}
-                      value={student._id}
-                    >
+                    <option key={student._id} value={student._id}>
                       {student.name}
                     </option>
                   ))}
@@ -1010,13 +926,9 @@ export default function AttendancePage() {
                   onChange={handleFormChange}
                   className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none focus:border-slate-400 focus:ring-4 focus:ring-slate-100"
                 >
-                  <option value="PRESENT">
-                    Present
-                  </option>
+                  <option value="PRESENT">Present</option>
 
-                  <option value="ABSENT">
-                    Absent
-                  </option>
+                  <option value="ABSENT">Absent</option>
                 </select>
               </div>
 
@@ -1056,16 +968,9 @@ export default function AttendancePage() {
                   disabled={saving}
                   className="inline-flex items-center gap-2 rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {saving && (
-                    <RefreshCw
-                      size={16}
-                      className="animate-spin"
-                    />
-                  )}
+                  {saving && <RefreshCw size={16} className="animate-spin" />}
 
-                  {saving
-                    ? "Saving..."
-                    : "Save Attendance"}
+                  {saving ? "Saving..." : "Save Attendance"}
                 </button>
               </div>
             </form>
