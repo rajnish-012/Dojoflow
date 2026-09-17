@@ -11,10 +11,10 @@ import {
   Mail,
   MapPin,
   Menu,
-  Sparkles ,
-  Award ,
-  Check ,
-  Clock3 ,
+  Sparkles,
+  Award,
+  Check,
+  Clock3,
   ChevronDown,
   Dumbbell,
   Phone,
@@ -102,7 +102,7 @@ export default function HomePage() {
       {/* Navigation */}
       <header className="fixed left-0 right-0 top-0 z-50 border-b border-white/10 bg-[#101a33]/90 backdrop-blur-xl">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-5 py-5 sm:px-8 lg:px-10">
-          <Link href="/dashboard" className="flex min-w-0 items-center">
+          <Link href="/dashboard" className="flex min-w-0 items-center gap-3">
             {/* Logo */}
             <div className="relative flex shrink-0 items-center justify-center overflow-hidden">
               <Image
@@ -116,11 +116,11 @@ export default function HomePage() {
             </div>
 
             {/* Brand name */}
-
             <div className="min-w-0">
               <p className="text-lg font-extrabold tracking-[0.18em] text-white">
                 Dojo<span className="text-[#d7a84b]">Flow</span>
               </p>
+
               <p className="-mt-1 text-[9px] font-semibold uppercase tracking-[0.3em] text-[#d7a84b]">
                 Martial Arts Academy
               </p>

@@ -190,7 +190,7 @@ export default function Sidebar({
         {/* Brand */}
         <div
           className={[
-            "flex h-[76px] shrink-0 items-center border-b border-white/10",
+            "flex h-[76px] shrink-0 items-center border-b border-white/10 gap-1",
             collapsed ? "justify-center px-3" : "justify-between px-5",
           ].join(" ")}
         >
