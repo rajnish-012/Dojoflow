@@ -5,8 +5,9 @@ type BadgeVariant =
   | "success"
   | "warning"
   | "danger"
-  | "info";
-
+  | "info"
+  | "neutral"
+  | "accent";
 type BadgeProps = {
   children: ReactNode;
   variant?: BadgeVariant;
@@ -18,10 +19,7 @@ export default function Badge({
   variant = "default",
   className = "",
 }: BadgeProps) {
-  const variants: Record<
-    BadgeVariant,
-    string
-  > = {
+  const variants: Record<BadgeVariant, string> = {
     default: `
       bg-(--hover-bg)
       text-(--ink-muted)
@@ -47,6 +45,17 @@ export default function Badge({
     info: `
       bg-(--info-soft)
       text-(--info)
+    `,
+    neutral: `
+      bg-(--hover-bg)
+      text-(--ink-muted)
+      border
+      border-(--line)
+    `,
+
+    accent: `
+      bg-(--accent-soft)
+      text-(--accent)
     `,
   };
 

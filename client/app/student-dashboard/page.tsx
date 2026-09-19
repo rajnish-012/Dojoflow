@@ -956,7 +956,7 @@ export default function StudentDashboard() {
     return (
       <div className="min-h-[70vh] bg-(--background) px-4 py-8 text-(--foreground) transition-colors duration-300 sm:px-6 lg:px-8">
         <div className="mx-auto flex min-h-[480px] max-w-[1440px] items-center justify-center">
-          <LoadingSpinner label="Loading your dashboard..." />
+          <LoadingSpinner text="Loading your dashboard..." />
         </div>
       </div>
     );

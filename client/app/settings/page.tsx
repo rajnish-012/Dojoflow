@@ -558,7 +558,7 @@ export default function StaffManagementPage() {
         "
       >
         <div className="mx-auto flex min-h-[480px] max-w-[1440px] items-center justify-center">
-          <LoadingSpinner label="Loading staff management..." />
+          <LoadingSpinner text="Loading staff management..." />
         </div>
       </div>
     );

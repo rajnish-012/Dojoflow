@@ -1,11 +1,6 @@
 "use client";
 
-import {
-  useEffect,
-  useMemo,
-  useState,
-  type ReactNode,
-} from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
   ArrowLeft,
@@ -136,15 +131,9 @@ type ProgressData = {
   };
 };
 
-function numberValue(
-  ...values: unknown[]
-): number {
+function numberValue(...values: unknown[]): number {
   for (const value of values) {
-    if (
-      value !== undefined &&
-      value !== null &&
-      value !== ""
-    ) {
+    if (value !== undefined && value !== null && value !== "") {
       const parsed = Number(value);
 
       if (Number.isFinite(parsed)) {
@@ -180,14 +169,11 @@ function formatDate(date?: string) {
     return "—";
   }
 
-  return parsed.toLocaleDateString(
-    "en-IN",
-    {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    },
-  );
+  return parsed.toLocaleDateString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
 }
 
 function statusOf(status?: string) {
@@ -196,10 +182,7 @@ function statusOf(status?: string) {
     .toUpperCase();
 }
 
-function extractArray<T = any>(
-  source: any,
-  keys: string[] = [],
-): T[] {
+function extractArray<T = any>(source: any, keys: string[] = []): T[] {
   if (Array.isArray(source)) {
     return source;
   }
@@ -213,9 +196,7 @@ function extractArray<T = any>(
   return [];
 }
 
-function unwrapProgress(
-  response: any,
-) {
+function unwrapProgress(response: any) {
   return (
     response?.progress ??
     response?.data?.progress ??
@@ -225,32 +206,22 @@ function unwrapProgress(
   );
 }
 
-function normalizeAttendance(
-  response: any,
-): AttendanceItem[] {
-  return extractArray<AttendanceItem>(
-    response,
-    [
-      "attendance",
-      "records",
-      "items",
-      "data",
-    ],
-  );
+function normalizeAttendance(response: any): AttendanceItem[] {
+  return extractArray<AttendanceItem>(response, [
+    "attendance",
+    "records",
+    "items",
+    "data",
+  ]);
 }
 
-function normalizePerformance(
-  response: any,
-): PerformanceItem[] {
-  return extractArray<PerformanceItem>(
-    response,
-    [
-      "performance",
-      "records",
-      "items",
-      "data",
-    ],
-  );
+function normalizePerformance(response: any): PerformanceItem[] {
+  return extractArray<PerformanceItem>(response, [
+    "performance",
+    "records",
+    "items",
+    "data",
+  ]);
 }
 
 function normalizePerformanceFromProgress(
@@ -262,10 +233,12 @@ function normalizePerformanceFromProgress(
     return performanceSource;
   }
 
-  const nested = extractArray<PerformanceItem>(
-    performanceSource,
-    ["performance", "records", "items", "data"],
-  );
+  const nested = extractArray<PerformanceItem>(performanceSource, [
+    "performance",
+    "records",
+    "items",
+    "data",
+  ]);
 
   if (nested.length) {
     return nested;
@@ -278,9 +251,7 @@ function normalizePerformanceFromProgress(
   return [];
 }
 
-function normalizeCurriculum(
-  source: any,
-): CurriculumItem[] {
+function normalizeCurriculum(source: any): CurriculumItem[] {
   if (Array.isArray(source)) return source;
   return extractArray<CurriculumItem>(source, [
     "curriculum",
@@ -290,15 +261,9 @@ function normalizeCurriculum(
   ]);
 }
 
-function normalizeMilestones(
-  source: any,
-): Milestone[] {
+function normalizeMilestones(source: any): Milestone[] {
   if (Array.isArray(source)) return source;
-  return extractArray<Milestone>(source, [
-    "milestones",
-    "items",
-    "data",
-  ]);
+  return extractArray<Milestone>(source, ["milestones", "items", "data"]);
 }
 
 function SectionHeading({
@@ -495,11 +460,7 @@ function MiniMetric({
   );
 }
 
-function StarRating({
-  rating,
-}: {
-  rating: number;
-}) {
+function StarRating({ rating }: { rating: number }) {
   return (
     <div
       className="
@@ -507,20 +468,17 @@ function StarRating({
       "
       aria-label={`${rating.toFixed(1)} out of 5`}
     >
-      {[1, 2, 3, 4, 5].map(
-        (star) => (
-          <Star
-            key={star}
-            size={17}
-            className={
-              star <=
-              Math.round(rating)
-                ? "fill-(--gold) text-(--gold)"
-                : "text-(--line)"
-            }
-          />
-        ),
-      )}
+      {[1, 2, 3, 4, 5].map((star) => (
+        <Star
+          key={star}
+          size={17}
+          className={
+            star <= Math.round(rating)
+              ? "fill-(--gold) text-(--gold)"
+              : "text-(--line)"
+          }
+        />
+      ))}
     </div>
   );
 }
@@ -529,27 +487,19 @@ export default function StudentProgressPage() {
   const params = useParams();
   const router = useRouter();
 
-  const studentId = String(
-    params.id || "",
-  );
+  const studentId = String(params.id || "");
 
-  const [student, setStudent] =
-    useState<Student | null>(null);
+  const [student, setStudent] = useState<Student | null>(null);
 
-  const [progress, setProgress] =
-    useState<ProgressData | null>(null);
+  const [progress, setProgress] = useState<ProgressData | null>(null);
 
-  const [attendance, setAttendance] =
-    useState<AttendanceItem[]>([]);
+  const [attendance, setAttendance] = useState<AttendanceItem[]>([]);
 
-  const [performance, setPerformance] =
-    useState<PerformanceItem[]>([]);
+  const [performance, setPerformance] = useState<PerformanceItem[]>([]);
 
-  const [loading, setLoading] =
-    useState(true);
+  const [loading, setLoading] = useState(true);
 
-  const [error, setError] =
-    useState("");
+  const [error, setError] = useState("");
 
   async function loadProgress() {
     if (!studentId) {
@@ -560,10 +510,7 @@ export default function StudentProgressPage() {
       setLoading(true);
       setError("");
 
-      const [
-        studentResponse,
-        progressResponse,
-      ] = await Promise.all([
+      const [studentResponse, progressResponse] = await Promise.all([
         getStudentById(studentId),
         getStudentProgress(studentId),
       ]);
@@ -574,70 +521,41 @@ export default function StudentProgressPage() {
         studentResponse?.data ??
         studentResponse;
 
-      const progressResult =
-        unwrapProgress(
-          progressResponse,
-        );
+      const progressResult = unwrapProgress(progressResponse);
 
-      let attendanceResult: AttendanceItem[] =
-        [];
+      let attendanceResult: AttendanceItem[] = [];
 
-      let performanceResult: PerformanceItem[] =
-        [];
+      let performanceResult: PerformanceItem[] = [];
 
       try {
-        attendanceResult =
-          normalizeAttendance(
-            await getStudentAttendance(
-              studentId,
-            ),
-          );
-      } catch (attendanceError) {
-        console.error(
-          "Attendance API failed:",
-          attendanceError,
+        attendanceResult = normalizeAttendance(
+          await getStudentAttendance(studentId),
         );
+      } catch (attendanceError) {
+        console.error("Attendance API failed:", attendanceError);
       }
 
       try {
-        performanceResult =
-          normalizePerformance(
-            await getStudentPerformance(
-              studentId,
-            ),
-          );
-      } catch (performanceError) {
-        console.error(
-          "Performance API failed:",
-          performanceError,
+        performanceResult = normalizePerformance(
+          await getStudentPerformance(studentId),
         );
+      } catch (performanceError) {
+        console.error("Performance API failed:", performanceError);
       }
 
       if (!attendanceResult.length) {
-        attendanceResult =
-          normalizeAttendance(
-            progressResult?.attendance,
-          );
+        attendanceResult = normalizeAttendance(progressResult?.attendance);
 
         if (!attendanceResult.length) {
-          attendanceResult =
-            normalizeAttendance(
-              progressResult,
-            );
+          attendanceResult = normalizeAttendance(progressResult);
         }
       }
 
       if (!performanceResult.length) {
-        performanceResult =
-          normalizePerformanceFromProgress(
-            progressResult,
-          );
+        performanceResult = normalizePerformanceFromProgress(progressResult);
 
         if (!performanceResult.length) {
-          performanceResult =
-            normalizePerformance(
-              progressResult,
-            );
+          performanceResult = normalizePerformance(progressResult);
         }
       }
 
@@ -653,103 +571,79 @@ export default function StudentProgressPage() {
        *
        * Normalize that API contract into the flat shape used by this page.
        */
-      const training =
-        progressResult?.training ?? {};
+      const training = progressResult?.training ?? {};
 
-      const performanceSummary =
-        progressResult?.performance ?? {};
+      const performanceSummary = progressResult?.performance ?? {};
 
-      const milestone =
-        progressResult?.milestone ?? {};
+      const milestone = progressResult?.milestone ?? {};
 
       const normalized: ProgressData = {
         ...progressResult,
 
-        currentTrainingDay:
-          numberValue(
-            training.currentTrainingDay,
-            progressResult.currentTrainingDay,
-            progressResult.trainingDay,
-            progressResult.currentDay,
-          ),
+        currentTrainingDay: numberValue(
+          training.currentTrainingDay,
+          progressResult.currentTrainingDay,
+          progressResult.trainingDay,
+          progressResult.currentDay,
+        ),
 
-        completedDays:
-          numberValue(
-            training.completedDays,
-            progressResult.completedDays,
-          ),
+        completedDays: numberValue(
+          training.completedDays,
+          progressResult.completedDays,
+        ),
 
-        totalCurriculumDays:
-          numberValue(
-            training.totalCurriculumDays,
-            progressResult.totalCurriculumDays,
-            progressResult.curriculumDays,
-          ),
+        totalCurriculumDays: numberValue(
+          training.totalCurriculumDays,
+          progressResult.totalCurriculumDays,
+          progressResult.curriculumDays,
+        ),
 
-        presentClasses:
-          numberValue(
-            training.presentClasses,
-            progressResult.presentClasses,
-            progressResult.present,
-            progressResult.totalPresent,
-          ),
+        presentClasses: numberValue(
+          training.presentClasses,
+          progressResult.presentClasses,
+          progressResult.present,
+          progressResult.totalPresent,
+        ),
 
-        absentClasses:
-          numberValue(
-            training.absentClasses,
-            progressResult.absentClasses,
-            progressResult.absent,
-            progressResult.totalAbsent,
-          ),
+        absentClasses: numberValue(
+          training.absentClasses,
+          progressResult.absentClasses,
+          progressResult.absent,
+          progressResult.totalAbsent,
+        ),
 
-        pendingMakeups:
-          numberValue(
-            training.pendingMakeups,
-            progressResult.pendingMakeups,
-          ),
+        pendingMakeups: numberValue(
+          training.pendingMakeups,
+          progressResult.pendingMakeups,
+        ),
 
-        completedMakeups:
-          numberValue(
-            training.completedMakeups,
-            progressResult.completedMakeups,
-          ),
+        completedMakeups: numberValue(
+          training.completedMakeups,
+          progressResult.completedMakeups,
+        ),
 
-        averageRating:
-          numberValue(
-            performanceSummary.averageRating,
-            progressResult.averageRating,
-            progressResult.avgRating,
-            progressResult.averagePerformance,
-          ),
+        averageRating: numberValue(
+          performanceSummary.averageRating,
+          progressResult.averageRating,
+          progressResult.avgRating,
+          progressResult.averagePerformance,
+        ),
 
-        currentCurriculum:
-          progressResult.currentCurriculum ?? null,
+        currentCurriculum: progressResult.currentCurriculum ?? null,
 
-        nextMilestone:
-          milestone.next ??
-          progressResult.nextMilestone ??
-          null,
+        nextMilestone: milestone.next ?? progressResult.nextMilestone ?? null,
 
         achievedMilestone:
-          milestone.achieved ??
-          progressResult.achievedMilestone ??
-          null,
+          milestone.achieved ?? progressResult.achievedMilestone ?? null,
 
-        attendance:
-          attendanceResult,
+        attendance: attendanceResult,
 
-        performance:
-          performanceResult,
+        performance: performanceResult,
 
         performanceSummary: {
-          totalEvaluations:
-            performanceSummary.totalEvaluations,
-          averageRating:
-            performanceSummary.averageRating,
-          latest:
-            performanceSummary.latest ??
-            performanceResult[0] ??
-            null,
+          totalEvaluations: performanceSummary.totalEvaluations,
+          averageRating: performanceSummary.averageRating,
+          latest: performanceSummary.latest ?? performanceResult[0] ?? null,
         },
       };
 
@@ -758,10 +652,7 @@ export default function StudentProgressPage() {
       setAttendance(attendanceResult);
       setPerformance(performanceResult);
     } catch (loadError) {
-      console.error(
-        "Failed to load student progress:",
-        loadError,
-      );
+      console.error("Failed to load student progress:", loadError);
 
       setError(
         loadError instanceof Error
@@ -777,158 +668,97 @@ export default function StudentProgressPage() {
     loadProgress();
   }, [studentId]);
 
-  const attendanceStats =
-    useMemo(() => {
-      const presentFromRecords =
-        attendance.filter(
-          (item) =>
-            statusOf(item.status) ===
-            "PRESENT",
-        ).length;
+  const attendanceStats = useMemo(() => {
+    const presentFromRecords = attendance.filter(
+      (item) => statusOf(item.status) === "PRESENT",
+    ).length;
 
-      const absentFromRecords =
-        attendance.filter(
-          (item) =>
-            statusOf(item.status) ===
-            "ABSENT",
-        ).length;
+    const absentFromRecords = attendance.filter(
+      (item) => statusOf(item.status) === "ABSENT",
+    ).length;
 
-      const hasRecords =
-        presentFromRecords +
-          absentFromRecords >
-        0;
+    const hasRecords = presentFromRecords + absentFromRecords > 0;
 
-      const presentClasses =
-        hasRecords
-          ? presentFromRecords
-          : numberValue(
-              progress?.presentClasses,
-            );
+    const presentClasses = hasRecords
+      ? presentFromRecords
+      : numberValue(progress?.presentClasses);
 
-      const absentClasses =
-        hasRecords
-          ? absentFromRecords
-          : numberValue(
-              progress?.absentClasses,
-            );
+    const absentClasses = hasRecords
+      ? absentFromRecords
+      : numberValue(progress?.absentClasses);
 
-      const totalClasses =
-        presentClasses +
-        absentClasses;
+    const totalClasses = presentClasses + absentClasses;
 
-      const attendancePercentage =
-        totalClasses > 0
-          ? Math.round(
-              (presentClasses /
-                totalClasses) *
-                100,
-            )
-          : 0;
+    const attendancePercentage =
+      totalClasses > 0 ? Math.round((presentClasses / totalClasses) * 100) : 0;
 
-      return {
-        presentClasses,
-        absentClasses,
-        totalClasses,
-        attendancePercentage,
-      };
-    }, [
-      attendance,
-      progress,
-    ]);
-
-  const makeupStats =
-    useMemo(() => {
-      const completedFromRecords =
-        attendance.filter(
-          (item) =>
-            item.makeupRequired === true &&
-            item.makeupCompleted === true,
-        ).length;
-
-      const pendingFromRecords =
-        attendance.filter(
-          (item) =>
-            item.makeupRequired === true &&
-            item.makeupCompleted !== true,
-        ).length;
-
-      const completed =
-        completedFromRecords > 0
-          ? completedFromRecords
-          : numberValue(
-              progress?.completedMakeups,
-            );
-
-      const pending =
-        pendingFromRecords > 0
-          ? pendingFromRecords
-          : numberValue(
-              progress?.pendingMakeups,
-            );
-
-      return {
-        completed,
-        pending,
-      };
-    }, [
-      attendance,
-      progress,
-    ]);
-
-  const summary =
-    useMemo(() => {
-      /*
-       * Use the backend's canonical progress values for training
-       * progress. Attendance records are still used for the live
-       * attendance percentage and makeup details.
-       */
-
-      const trainingDay =
-        numberValue(
-          progress?.currentTrainingDay,
-        );
-
-      const completedDays =
-        numberValue(
-          progress?.completedDays,
-        );
-
-      const totalCurriculumDays =
-        numberValue(
-          progress?.totalCurriculumDays,
-        );
-
-      return {
-        trainingDay,
-        completedDays,
-        totalCurriculumDays,
-        attendancePercentage:
-          attendanceStats.attendancePercentage,
-      };
-    }, [
-      progress,
-      attendanceStats.attendancePercentage,
-    ]);
-
-  const performanceSummary =
-    (progress?.performanceSummary ||
-      (progress as any)?.performance ||
-      {}) as {
-      totalEvaluations?: number | string;
-      averageRating?: number | string | null;
-      latest?: PerformanceItem | null;
+    return {
+      presentClasses,
+      absentClasses,
+      totalClasses,
+      attendancePercentage,
     };
+  }, [attendance, progress]);
+
+  const makeupStats = useMemo(() => {
+    const completedFromRecords = attendance.filter(
+      (item) => item.makeupRequired === true && item.makeupCompleted === true,
+    ).length;
+
+    const pendingFromRecords = attendance.filter(
+      (item) => item.makeupRequired === true && item.makeupCompleted !== true,
+    ).length;
+
+    const completed =
+      completedFromRecords > 0
+        ? completedFromRecords
+        : numberValue(progress?.completedMakeups);
+
+    const pending =
+      pendingFromRecords > 0
+        ? pendingFromRecords
+        : numberValue(progress?.pendingMakeups);
+
+    return {
+      completed,
+      pending,
+    };
+  }, [attendance, progress]);
+
+  const summary = useMemo(() => {
+    /*
+     * Use the backend's canonical progress values for training
+     * progress. Attendance records are still used for the live
+     * attendance percentage and makeup details.
+     */
+
+    const trainingDay = numberValue(progress?.currentTrainingDay);
+
+    const completedDays = numberValue(progress?.completedDays);
+
+    const totalCurriculumDays = numberValue(progress?.totalCurriculumDays);
+
+    return {
+      trainingDay,
+      completedDays,
+      totalCurriculumDays,
+      attendancePercentage: attendanceStats.attendancePercentage,
+    };
+  }, [progress, attendanceStats.attendancePercentage]);
+
+  const performanceSummary = (progress?.performanceSummary ||
+    (progress as any)?.performance ||
+    {}) as {
+    totalEvaluations?: number | string;
+    averageRating?: number | string | null;
+    latest?: PerformanceItem | null;
+  };
 
   const evaluationCount = useMemo(() => {
     if (performance.length) return performance.length;
 
-    return numberValue(
-      performanceSummary.totalEvaluations,
-    );
-  }, [
-    performance,
-    performanceSummary.totalEvaluations,
-  ]);
+    return numberValue(performanceSummary.totalEvaluations);
+  }, [performance, performanceSummary.totalEvaluations]);
 
   const averageRating = useMemo(() => {
     const ratings = performance
@@ -936,12 +766,7 @@ export default function StudentProgressPage() {
       .filter((rating) => rating >= 1 && rating <= 5);
 
     if (ratings.length) {
-      return (
-        ratings.reduce(
-          (sum, rating) => sum + rating,
-          0,
-        ) / ratings.length
-      );
+      return ratings.reduce((sum, rating) => sum + rating, 0) / ratings.length;
     }
 
     const raw = performanceSummary.averageRating;
@@ -952,47 +777,32 @@ export default function StudentProgressPage() {
 
     const parsed = Number(raw);
     return Number.isFinite(parsed) ? parsed : null;
-  }, [
-    performance,
-    performanceSummary.averageRating,
-  ]);
+  }, [performance, performanceSummary.averageRating]);
 
   const progressPercentage =
-    summary.totalCurriculumDays >
-    0
+    summary.totalCurriculumDays > 0
       ? Math.min(
           100,
           Math.round(
-            (summary.completedDays /
-              summary.totalCurriculumDays) *
-              100,
+            (summary.completedDays / summary.totalCurriculumDays) * 100,
           ),
         )
       : 0;
 
-  const planCurriculum = normalizeCurriculum(
-    student?.plan?.curriculum,
-  );
+  const planCurriculum = normalizeCurriculum(student?.plan?.curriculum);
 
-  const planMilestones = normalizeMilestones(
-    student?.plan?.milestones,
-  );
+  const planMilestones = normalizeMilestones(student?.plan?.milestones);
 
   const currentCurriculum =
     progress?.currentCurriculum ??
     planCurriculum.find(
-      (lesson) =>
-        numberValue(
-          lesson.day,
-        ) === summary.trainingDay + 1,
+      (lesson) => numberValue(lesson.day) === summary.trainingDay + 1,
     ) ??
     null;
 
   const latestAttendanceWithCurriculum =
-    attendance.find(
-      (record) =>
-        Boolean(record.curriculumTitle?.trim()),
-    ) ?? null;
+    attendance.find((record) => Boolean(record.curriculumTitle?.trim())) ??
+    null;
 
   const curriculumToDisplay =
     currentCurriculum ??
@@ -1008,31 +818,15 @@ export default function StudentProgressPage() {
   const nextMilestone =
     progress?.nextMilestone ??
     planMilestones
-      .filter(
-        (milestone) =>
-          numberValue(milestone.day) >
-          summary.trainingDay,
-      )
-      .sort(
-        (a, b) =>
-          numberValue(a.day) -
-          numberValue(b.day),
-      )[0] ??
+      .filter((milestone) => numberValue(milestone.day) > summary.trainingDay)
+      .sort((a, b) => numberValue(a.day) - numberValue(b.day))[0] ??
     null;
 
   const achievedMilestone =
     progress?.achievedMilestone ??
     planMilestones
-      .filter(
-        (milestone) =>
-          numberValue(milestone.day) <=
-          summary.trainingDay,
-      )
-      .sort(
-        (a, b) =>
-          numberValue(b.day) -
-          numberValue(a.day),
-      )[0] ??
+      .filter((milestone) => numberValue(milestone.day) <= summary.trainingDay)
+      .sort((a, b) => numberValue(b.day) - numberValue(a.day))[0] ??
     null;
 
   if (loading) {
@@ -1045,10 +839,7 @@ export default function StudentProgressPage() {
           px-4
         "
       >
-        <LoadingSpinner
-          size="md"
-          text="Loading student progress..."
-        />
+        <LoadingSpinner size="md" text="Loading student progress..." />
       </main>
     );
   }
@@ -1065,12 +856,7 @@ export default function StudentProgressPage() {
         "
       >
         <div className="mx-auto max-w-[1500px]">
-          <Button
-            variant="ghost"
-            onClick={() =>
-              router.back()
-            }
-          >
+          <Button variant="ghost" onClick={() => router.back()}>
             <ArrowLeft size={17} />
             Back to Student
           </Button>
@@ -1078,17 +864,9 @@ export default function StudentProgressPage() {
           <div className="mt-5">
             <ErrorState
               title="Unable to load progress"
-              message={
-                error ||
-                "Student could not be found."
-              }
+              message={error || "Student could not be found."}
               action={
-                <Button
-                  variant="outline"
-                  onClick={
-                    loadProgress
-                  }
-                >
+                <Button variant="outline" onClick={loadProgress}>
                   Try again
                 </Button>
               }
@@ -1124,30 +902,19 @@ export default function StudentProgressPage() {
             justify-between gap-3
           "
         >
-          <Button
-            variant="ghost"
-            onClick={() =>
-              router.back()
-            }
-          >
+          <Button variant="ghost" onClick={() => router.back()}>
             <ArrowLeft size={17} />
             Back to Student
           </Button>
 
-          <Button
-            variant="outline"
-            onClick={loadProgress}
-          >
+          <Button variant="outline" onClick={loadProgress}>
             <RefreshCw size={15} />
             Refresh
           </Button>
         </div>
 
         {/* Student Header */}
-        <Card
-          padding="lg"
-          className="overflow-hidden"
-        >
+        <Card padding="lg" className="overflow-hidden">
           <div
             className="
               flex flex-col gap-5
@@ -1175,9 +942,7 @@ export default function StudentProgressPage() {
                   sm:text-2xl
                 "
               >
-                {getInitials(
-                  student.name,
-                )}
+                {getInitials(student.name)}
               </div>
 
               <div className="min-w-0">
@@ -1201,15 +966,12 @@ export default function StudentProgressPage() {
 
                   <Badge
                     variant={
-                      statusOf(
-                        student.status,
-                      ) === "ACTIVE"
+                      statusOf(student.status) === "ACTIVE"
                         ? "success"
                         : "default"
                     }
                   >
-                    {student.status ||
-                      "ACTIVE"}
+                    {student.status || "ACTIVE"}
                   </Badge>
                 </div>
 
@@ -1219,12 +981,9 @@ export default function StudentProgressPage() {
                     text-(--ink-muted)
                   "
                 >
-                  {student.currentBelt ||
-                    "White Belt"}
+                  {student.currentBelt || "White Belt"}
 
-                  {student.plan?.name
-                    ? ` • ${student.plan.name}`
-                    : ""}
+                  {student.plan?.name ? ` • ${student.plan.name}` : ""}
                 </p>
 
                 <div
@@ -1248,11 +1007,7 @@ export default function StudentProgressPage() {
                     </span>
                   )}
 
-                  {student.phone && (
-                    <span>
-                      {student.phone}
-                    </span>
-                  )}
+                  {student.phone && <span>{student.phone}</span>}
 
                   {student.joinDate && (
                     <span
@@ -1261,13 +1016,8 @@ export default function StudentProgressPage() {
                         items-center gap-1.5
                       "
                     >
-                      <CalendarCheck
-                        size={13}
-                      />
-                      Joined{" "}
-                      {formatDate(
-                        student.joinDate,
-                      )}
+                      <CalendarCheck size={13} />
+                      Joined {formatDate(student.joinDate)}
                     </span>
                   )}
                 </div>
@@ -1300,9 +1050,7 @@ export default function StudentProgressPage() {
                   text-(--foreground)
                 "
               >
-                Day{" "}
-                {progress?.currentTrainingDay ??
-                  summary.trainingDay}
+                Day {progress?.currentTrainingDay ?? summary.trainingDay}
               </p>
             </div>
           </div>
@@ -1318,46 +1066,30 @@ export default function StudentProgressPage() {
         >
           <SummaryCard
             title="Training Day"
-            value={
-              summary.trainingDay
-            }
+            value={summary.trainingDay}
             subtitle="Present + absent classes"
-            icon={
-              <Target size={20} />
-            }
+            icon={<Target size={20} />}
           />
 
           <SummaryCard
             title="Attendance"
             value={`${summary.attendancePercentage}%`}
             subtitle={`${attendanceStats.presentClasses} present of ${attendanceStats.totalClasses} classes`}
-            icon={
-              <CheckCircle2
-                size={20}
-              />
-            }
+            icon={<CheckCircle2 size={20} />}
           />
 
           <SummaryCard
             title="Completed Days"
             value={`${summary.completedDays}/${summary.totalCurriculumDays}`}
             subtitle={`${makeupStats.completed} completed makeups included`}
-            icon={
-              <CalendarCheck
-                size={20}
-              />
-            }
+            icon={<CalendarCheck size={20} />}
           />
 
           <SummaryCard
             title="Pending Makeups"
-            value={
-              makeupStats.pending
-            }
+            value={makeupStats.pending}
             subtitle="Classes requiring attention"
-            icon={
-              <Clock3 size={20} />
-            }
+            icon={<Clock3 size={20} />}
           />
         </div>
 
@@ -1368,10 +1100,7 @@ export default function StudentProgressPage() {
             lg:grid-cols-3
           "
         >
-          <Card
-            padding="lg"
-            className="lg:col-span-2"
-          >
+          <Card padding="lg" className="lg:col-span-2">
             <SectionHeading
               eyebrow="Development"
               title="Training Progress"
@@ -1379,9 +1108,7 @@ export default function StudentProgressPage() {
                 Track completed curriculum days and
                 overall training progression.
               "
-              icon={
-                <TrendingUp size={19} />
-              }
+              icon={<TrendingUp size={19} />}
             />
 
             <div className="mt-7">
@@ -1420,11 +1147,7 @@ export default function StudentProgressPage() {
                     text-(--ink-muted)
                   "
                 >
-                  of{" "}
-                  {
-                    summary.totalCurriculumDays
-                  }{" "}
-                  days
+                  of {summary.totalCurriculumDays} days
                 </p>
               </div>
 
@@ -1483,9 +1206,7 @@ export default function StudentProgressPage() {
               >
                 <MiniMetric
                   label="Present"
-                  value={
-                    attendanceStats.presentClasses
-                  }
+                  value={attendanceStats.presentClasses}
                   valueClassName="
                     text-(--green)
                   "
@@ -1493,9 +1214,7 @@ export default function StudentProgressPage() {
 
                 <MiniMetric
                   label="Absent"
-                  value={
-                    attendanceStats.absentClasses
-                  }
+                  value={attendanceStats.absentClasses}
                   valueClassName="
                     text-(--red)
                   "
@@ -1503,9 +1222,7 @@ export default function StudentProgressPage() {
 
                 <MiniMetric
                   label="Makeups"
-                  value={
-                    makeupStats.completed
-                  }
+                  value={makeupStats.completed}
                   valueClassName="
                     text-(--blue)
                   "
@@ -1513,9 +1230,7 @@ export default function StudentProgressPage() {
 
                 <MiniMetric
                   label="Pending"
-                  value={
-                    makeupStats.pending
-                  }
+                  value={makeupStats.pending}
                   valueClassName="
                     text-(--orange)
                   "
@@ -1530,9 +1245,7 @@ export default function StudentProgressPage() {
               eyebrow="Evaluation"
               title="Average Rating"
               description="Overall performance rating."
-              icon={
-                <Star size={19} />
-              }
+              icon={<Star size={19} />}
             />
 
             <div className="mt-7">
@@ -1548,9 +1261,7 @@ export default function StudentProgressPage() {
                     text-(--foreground)
                   "
                 >
-                  {averageRating !== null
-                    ? averageRating.toFixed(1)
-                    : "—"}
+                  {averageRating !== null ? averageRating.toFixed(1) : "—"}
                 </span>
 
                 <span
@@ -1597,12 +1308,8 @@ export default function StudentProgressPage() {
                     text-(--foreground)
                   "
                 >
-                  {performance.length}{" "}
-                  evaluation
-                  {performance.length ===
-                  1
-                    ? ""
-                    : "s"}
+                  {performance.length} evaluation
+                  {performance.length === 1 ? "" : "s"}
                 </p>
               </div>
             </div>
@@ -1617,15 +1324,10 @@ export default function StudentProgressPage() {
             description="
               A complete summary of the student's class attendance.
             "
-            icon={
-              <CalendarCheck size={19} />
-            }
+            icon={<CalendarCheck size={19} />}
             action={
               <Badge variant="success">
-                {
-                  attendanceStats.attendancePercentage
-                }
-                %
+                {attendanceStats.attendancePercentage}%
               </Badge>
             }
           />
@@ -1638,67 +1340,47 @@ export default function StudentProgressPage() {
             "
           >
             <MetricRow
-              icon={
-                <CheckCircle2
-                  size={18}
-                />
-              }
+              icon={<CheckCircle2 size={18} />}
               iconClassName="
                 bg-(--green-soft)
                 text-(--green)
               "
               label="Present Classes"
               description="Successfully attended"
-              value={
-                attendanceStats.presentClasses
-              }
+              value={attendanceStats.presentClasses}
             />
 
             <MetricRow
-              icon={
-                <XCircle size={18} />
-              }
+              icon={<XCircle size={18} />}
               iconClassName="
                 bg-(--red-soft)
                 text-(--red)
               "
               label="Absent Classes"
               description="Missed training sessions"
-              value={
-                attendanceStats.absentClasses
-              }
+              value={attendanceStats.absentClasses}
             />
 
             <MetricRow
-              icon={
-                <Clock3 size={18} />
-              }
+              icon={<Clock3 size={18} />}
               iconClassName="
                 bg-(--orange-soft)
                 text-(--orange)
               "
               label="Pending Makeups"
               description="Classes still to complete"
-              value={
-                makeupStats.pending
-              }
+              value={makeupStats.pending}
             />
 
             <MetricRow
-              icon={
-                <CheckCircle2
-                  size={18}
-                />
-              }
+              icon={<CheckCircle2 size={18} />}
               iconClassName="
                 bg-(--blue-soft)
                 text-(--blue)
               "
               label="Completed Makeups"
               description="Recovered classes"
-              value={
-                makeupStats.completed
-              }
+              value={makeupStats.completed}
             />
           </div>
         </Card>
@@ -1715,19 +1397,10 @@ export default function StudentProgressPage() {
             description="
               The student's current learning stage and skill focus.
             "
-            icon={
-              <GraduationCap
-                size={19}
-              />
-            }
+            icon={<GraduationCap size={19} />}
             action={
               curriculumToDisplay ? (
-                <Badge variant="warning">
-                  Day{" "}
-                  {
-                    curriculumToDisplay.day
-                  }
-                </Badge>
+                <Badge variant="warning">Day {curriculumToDisplay.day}</Badge>
               ) : undefined
             }
           />
@@ -1755,9 +1428,7 @@ export default function StudentProgressPage() {
                     text-(--accent)
                   "
                 >
-                  Day{" "}
-                  {curriculumToDisplay.day ??
-                    summary.trainingDay}
+                  Day {curriculumToDisplay.day ?? summary.trainingDay}
                 </p>
 
                 <h3
@@ -1767,8 +1438,7 @@ export default function StudentProgressPage() {
                     text-(--foreground)
                   "
                 >
-                  {curriculumToDisplay.title ||
-                    "Training curriculum"}
+                  {curriculumToDisplay.title || "Training curriculum"}
                 </h3>
 
                 {curriculumToDisplay.description && (
@@ -1779,9 +1449,7 @@ export default function StudentProgressPage() {
                       text-(--ink-muted)
                     "
                   >
-                    {
-                      curriculumToDisplay.description
-                    }
+                    {curriculumToDisplay.description}
                   </p>
                 )}
 
@@ -1803,9 +1471,7 @@ export default function StudentProgressPage() {
                         text-sm font-bold
                       "
                     >
-                      {
-                        curriculumToDisplay.skill
-                      }
+                      {curriculumToDisplay.skill}
                     </span>
                   </div>
                 )}
@@ -1838,10 +1504,8 @@ export default function StudentProgressPage() {
                     text-(--foreground-soft)
                   "
                 >
-                  Stay consistent with the
-                  current curriculum and focus
-                  on mastering the assigned
-                  skills.
+                  Stay consistent with the current curriculum and focus on
+                  mastering the assigned skills.
                 </p>
               </div>
             </div>
@@ -1853,11 +1517,7 @@ export default function StudentProgressPage() {
                 Curriculum information will appear once
                 training progress is recorded.
               "
-              icon={
-                <GraduationCap
-                  size={22}
-                />
-              }
+              icon={<GraduationCap size={22} />}
             />
           )}
         </Card>
@@ -1870,9 +1530,7 @@ export default function StudentProgressPage() {
             description="
               Track the student's current achievement path and upcoming milestone.
             "
-            icon={
-              <Award size={19} />
-            }
+            icon={<Award size={19} />}
           />
 
           {nextMilestone ? (
@@ -1927,11 +1585,7 @@ export default function StudentProgressPage() {
                         text-(--foreground)
                       "
                     >
-                      {
-                        nextMilestone
-                          .belt
-                      }{" "}
-                      Belt
+                      {nextMilestone.belt} Belt
                     </h3>
 
                     <p
@@ -1940,11 +1594,7 @@ export default function StudentProgressPage() {
                         text-(--ink-muted)
                       "
                     >
-                      Target Day{" "}
-                      {
-                        nextMilestone
-                          .day
-                      }
+                      Target Day {nextMilestone.day}
                     </p>
                   </div>
                 </div>
@@ -1966,9 +1616,7 @@ export default function StudentProgressPage() {
                     {nextMilestone.skill || "Milestone requirement"}
                   </p>
 
-                  {progress
-                    .nextMilestone
-                    .description && (
+                  {nextMilestone.description && (
                     <p
                       className="
                         mt-2 text-sm
@@ -1976,10 +1624,7 @@ export default function StudentProgressPage() {
                         text-(--ink-muted)
                       "
                     >
-                      {
-                        nextMilestone
-                          .description
-                      }
+                      {nextMilestone.description}
                     </p>
                   )}
                 </div>
@@ -2021,9 +1666,7 @@ export default function StudentProgressPage() {
                         text-(--foreground-soft)
                       "
                     >
-                      {achievedMilestone.belt || "Achievement"}{" "}
-                      Belt
-
+                      {achievedMilestone.belt || "Achievement"} Belt
                       {achievedMilestone.skill
                         ? ` • ${achievedMilestone.skill}`
                         : ""}
@@ -2040,9 +1683,7 @@ export default function StudentProgressPage() {
                 Belt progression details will appear as the
                 student advances through the curriculum.
               "
-              icon={
-                <Award size={22} />
-              }
+              icon={<Award size={22} />}
             />
           )}
         </Card>
@@ -2059,16 +1700,9 @@ export default function StudentProgressPage() {
             <SectionHeading
               eyebrow="Class Records"
               title="Attendance History"
-              icon={
-                <CalendarCheck
-                  size={19}
-                />
-              }
+              icon={<CalendarCheck size={19} />}
               action={
-                <Badge variant="warning">
-                  {attendance.length}{" "}
-                  Records
-                </Badge>
+                <Badge variant="warning">{attendance.length} Records</Badge>
               }
             />
 
@@ -2080,24 +1714,13 @@ export default function StudentProgressPage() {
                   overflow-y-auto pr-1
                 "
               >
-                {attendance.map(
-                  (
-                    item,
-                    index,
-                  ) => {
-                    const present =
-                      statusOf(
-                        item.status,
-                      ) ===
-                      "PRESENT";
+                {attendance.map((item, index) => {
+                  const present = statusOf(item.status) === "PRESENT";
 
-                    return (
-                      <div
-                        key={
-                          item._id ||
-                          `${item.date}-${index}`
-                        }
-                        className="
+                  return (
+                    <div
+                      key={item._id || `${item.date}-${index}`}
+                      className="
                           flex items-center
                           justify-between gap-3
                           rounded-xl
@@ -2105,15 +1728,15 @@ export default function StudentProgressPage() {
                           bg-(--surface)
                           p-3.5
                         "
-                      >
-                        <div
-                          className="
+                    >
+                      <div
+                        className="
                             flex min-w-0
                             items-center gap-3
                           "
-                        >
-                          <div
-                            className={`
+                      >
+                        <div
+                          className={`
                               flex h-9 w-9
                               shrink-0
                               items-center
@@ -2125,83 +1748,70 @@ export default function StudentProgressPage() {
                                   : "bg-(--red-soft) text-(--red)"
                               }
                             `}
-                          >
-                            {present ? (
-                              <CheckCircle2
-                                size={17}
-                              />
-                            ) : (
-                              <XCircle
-                                size={17}
-                              />
-                            )}
-                          </div>
+                        >
+                          {present ? (
+                            <CheckCircle2 size={17} />
+                          ) : (
+                            <XCircle size={17} />
+                          )}
+                        </div>
 
-                          <div className="min-w-0">
-                            <p
-                              className="
+                        <div className="min-w-0">
+                          <p
+                            className="
                                 truncate
                                 text-sm font-bold
                                 text-(--foreground-soft)
                               "
-                            >
-                              {item.curriculumTitle ||
-                                `Training Day ${
-                                  item.planDay ??
-                                  "—"
-                                }`}
-                            </p>
+                          >
+                            {item.curriculumTitle ||
+                              `Training Day ${item.planDay ?? "—"}`}
+                          </p>
 
-                            <p
-                              className="
+                          <p
+                            className="
                                 mt-1 text-xs
                                 text-(--ink-faint)
                               "
-                            >
-                              {formatDate(
-                                item.date,
-                              )}
-                            </p>
-                          </div>
+                          >
+                            {formatDate(item.date)}
+                          </p>
                         </div>
+                      </div>
 
-                        <div
-                          className="
+                      <div
+                        className="
                             shrink-0 text-right
                           "
-                        >
-                          <p
-                            className="
+                      >
+                        <p
+                          className="
                               text-[10px]
                               font-black
                               uppercase
                               text-(--foreground-soft)
                             "
-                          >
-                            {statusOf(
-                              item.status,
-                            ) ||
-                              "UNKNOWN"}
-                          </p>
+                        >
+                          {statusOf(item.status) || "UNKNOWN"}
+                        </p>
 
-                          {item.makeupRequired && (
-                            <p
-                              className="
+                        {item.makeupRequired && (
+                          <p
+                            className="
                                 mt-1 text-[10px]
                                 font-bold
                                 text-(--orange)
                               "
-                            >
-                              {item.makeupCompleted
-                                ? "Makeup completed"
-                                : "Makeup pending"}
-                            </p>
-                          )}
-                        </div>
+                          >
+                            {item.makeupCompleted
+                              ? "Makeup completed"
+                              : "Makeup pending"}
+                          </p>
+                        )}
                       </div>
-                    );
-                  },
-                )}
+                    </div>
+                  );
+                })}
               </div>
             ) : (
               <EmptyState
@@ -2211,11 +1821,7 @@ export default function StudentProgressPage() {
                   Attendance records will appear after classes
                   are marked.
                 "
-                icon={
-                  <CalendarCheck
-                    size={22}
-                  />
-                }
+                icon={<CalendarCheck size={22} />}
               />
             )}
           </Card>
@@ -2225,15 +1831,8 @@ export default function StudentProgressPage() {
             <SectionHeading
               eyebrow="Evaluation History"
               title="Performance Records"
-              icon={
-                <Award size={19} />
-              }
-              action={
-                <Badge variant="info">
-                  {evaluationCount}{" "}
-                  Reports
-                </Badge>
-              }
+              icon={<Award size={19} />}
+              action={<Badge variant="info">{evaluationCount} Reports</Badge>}
             />
 
             {performance.length ? (
@@ -2244,117 +1843,94 @@ export default function StudentProgressPage() {
                   overflow-y-auto pr-1
                 "
               >
-                {performance.map(
-                  (
-                    item,
-                    index,
-                  ) => {
-                    const rating =
-                      numberValue(
-                        item.rating,
-                      );
+                {performance.map((item, index) => {
+                  const rating = numberValue(item.rating);
 
-                    return (
-                      <div
-                        key={
-                          item._id ||
-                          `${item.evaluationDate}-${index}`
-                        }
-                        className="
+                  return (
+                    <div
+                      key={item._id || `${item.evaluationDate}-${index}`}
+                      className="
                           rounded-xl
                           border border-(--line)
                           bg-(--surface)
                           p-4
                         "
-                      >
-                        <div
-                          className="
+                    >
+                      <div
+                        className="
                             flex items-start
                             justify-between gap-4
                           "
-                        >
-                          <div className="min-w-0">
-                            <p
-                              className="
+                      >
+                        <div className="min-w-0">
+                          <p
+                            className="
                                 truncate
                                 text-sm font-bold
                                 text-(--foreground-soft)
                               "
-                            >
-                              {item.curriculumTitle ||
-                                item.skill ||
-                                `Evaluation ${
-                                  index + 1
-                                }`}
-                            </p>
+                          >
+                            {item.curriculumTitle ||
+                              item.skill ||
+                              `Evaluation ${index + 1}`}
+                          </p>
 
-                            <p
-                              className="
+                          <p
+                            className="
                                 mt-1 text-xs
                                 text-(--ink-faint)
                               "
-                            >
-                              {formatDate(
-                                item.evaluationDate,
-                              )}
-                            </p>
-                          </div>
+                          >
+                            {formatDate(item.evaluationDate)}
+                          </p>
+                        </div>
 
-                          <div
-                            className="
+                        <div
+                          className="
                               shrink-0
                               text-right
                             "
-                          >
-                            <p
-                              className="
+                        >
+                          <p
+                            className="
                                 text-sm font-black
                                 text-(--foreground)
                               "
-                            >
-                              {rating.toFixed(
-                                1,
-                              )}
-                              /5
-                            </p>
+                          >
+                            {rating.toFixed(1)}
+                            /5
+                          </p>
 
-                            <div className="mt-1">
-                              <StarRating
-                                rating={
-                                  rating
-                                }
-                              />
-                            </div>
+                          <div className="mt-1">
+                            <StarRating rating={rating} />
                           </div>
                         </div>
+                      </div>
 
-                        {item.remarks && (
-                          <div
-                            className="
+                      {item.remarks && (
+                        <div
+                          className="
                               mt-3 rounded-lg
                               border
                               border-(--line)
                               bg-(--card)
                               p-3
                             "
-                          >
-                            <p
-                              className="
+                        >
+                          <p
+                            className="
                                 text-sm
                                 leading-5
                                 text-(--ink-muted)
                               "
-                            >
-                              {
-                                item.remarks
-                              }
-                            </p>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  },
-                )}
+                          >
+                            {item.remarks}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             ) : (
               <EmptyState
@@ -2364,9 +1940,7 @@ export default function StudentProgressPage() {
                   Performance evaluations will appear after
                   an instructor submits them.
                 "
-                icon={
-                  <Award size={22} />
-                }
+                icon={<Award size={22} />}
               />
             )}
           </Card>

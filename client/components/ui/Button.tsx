@@ -1,27 +1,25 @@
 "use client";
 
-import {
-  ButtonHTMLAttributes,
-  ReactNode,
-} from "react";
+import { ButtonHTMLAttributes, ReactNode } from "react";
 
 type ButtonVariant =
   | "primary"
   | "secondary"
   | "outline"
   | "danger"
+  | "success"
   | "ghost";
 
 type ButtonSize = "sm" | "md" | "lg";
 
-type ButtonProps =
-  ButtonHTMLAttributes<HTMLButtonElement> & {
-    children: ReactNode;
-    variant?: ButtonVariant;
-    size?: ButtonSize;
-    loading?: boolean;
-    fullWidth?: boolean;
-  };
+type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
+  children: ReactNode;
+  variant?: ButtonVariant;
+  size?: ButtonSize;
+  loading?: boolean;
+  fullWidth?: boolean;
+  leftIcon?: ReactNode;
+};
 
 export default function Button({
   children,
@@ -29,6 +27,7 @@ export default function Button({
   size = "md",
   loading = false,
   fullWidth = false,
+  leftIcon,
   className = "",
   disabled,
   type = "button",
@@ -62,6 +61,12 @@ export default function Button({
     danger: `
       border-(--danger)
       bg-(--danger)
+      text-white
+      hover:opacity-90
+    `,
+    success: `
+      border-(--success)
+      bg-(--success)
       text-white
       hover:opacity-90
     `,
@@ -136,7 +141,7 @@ export default function Button({
           "
         />
       )}
-
+      {!loading && leftIcon}
       {children}
     </button>
   );

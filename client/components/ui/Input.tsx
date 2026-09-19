@@ -1,20 +1,25 @@
 import {
-  InputHTMLAttributes,
   forwardRef,
+  type ForwardedRef,
+  type InputHTMLAttributes,
+  type ReactNode,
 } from "react";
 
-const Input = forwardRef<
-  HTMLInputElement,
-  InputHTMLAttributes<HTMLInputElement>
->(function Input(
+type InputProps =
+  InputHTMLAttributes<HTMLInputElement> & {
+    leftIcon?: ReactNode;
+  };
+
+const Input = forwardRef(function Input(
   {
     className = "",
     type = "text",
+    leftIcon,
     ...props
-  },
-  ref,
+  }: InputProps,
+  ref: ForwardedRef<HTMLInputElement>,
 ) {
-  return (
+  const field = (
     <input
       ref={ref}
       {...props}
@@ -47,9 +52,22 @@ const Input = forwardRef<
         disabled:opacity-60
         disabled:bg-(--surface)
 
+        ${leftIcon ? "pl-10" : ""}
         ${className}
       `}
     />
+  );
+
+  if (!leftIcon) return field;
+
+  return (
+    <div className="relative w-full">
+      <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-(--ink-faint)">
+        {leftIcon}
+      </span>
+
+      {field}
+    </div>
   );
 });
 

@@ -311,7 +311,7 @@ export default function BranchesPage() {
           <div className="p-5 sm:p-6">
             {loading ? (
               <div className="flex min-h-64 items-center justify-center">
-                <LoadingSpinner label="Loading branches..." />
+                <LoadingSpinner text="Loading branches..." />
               </div>
             ) : filteredBranches.length === 0 ? (
               <EmptyState

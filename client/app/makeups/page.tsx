@@ -7,7 +7,6 @@ import {
   CalendarDays,
   Check,
   CheckCircle2,
-  ClipboardCheck,
   Clock3,
   RefreshCw,
   Search,
@@ -305,7 +304,7 @@ export default function MakeupsPage() {
     return (
       <div className="flex min-h-[70vh] items-center justify-center px-6">
         <LoadingSpinner
-          label="Loading makeup classes..."
+          text="Loading makeup classes..."
         />
       </div>
     );
@@ -330,8 +329,7 @@ export default function MakeupsPage() {
           eyebrow="Academy Management"
           title="Makeup Classes"
           description="Manage scheduled, completed, and cancelled makeup classes."
-          icon={ClipboardCheck}
-          action={
+          actions={
             <Button
               variant="secondary"
               onClick={() => void loadMakeups(true)}
@@ -424,28 +422,28 @@ export default function MakeupsPage() {
           <SummaryCard
             title="Total Makeups"
             value={statistics.total}
-            description="All makeup class records"
+            subtitle="All makeup class records"
             icon={<Users size={20} />}
           />
 
           <SummaryCard
             title="Scheduled"
             value={statistics.scheduled}
-            description="Upcoming makeup classes"
+            subtitle="Upcoming makeup classes"
             icon={<Clock3 size={20} />}
           />
 
           <SummaryCard
             title="Completed"
             value={statistics.completed}
-            description="Successfully completed classes"
+            subtitle="Successfully completed classes"
             icon={<CheckCircle2 size={20} />}
           />
 
           <SummaryCard
             title="Cancelled"
             value={statistics.cancelled}
-            description="Cancelled makeup classes"
+            subtitle="Cancelled makeup classes"
             icon={<XCircle size={20} />}
           />
         </div>
@@ -533,7 +531,7 @@ export default function MakeupsPage() {
 
             {filteredMakeups.length === 0 ? (
               <EmptyState
-                icon={CalendarDays}
+                icon={<CalendarDays size={26} />}
                 title="No makeup classes found"
                 description="Try changing the filter or search term."
               />
