@@ -3,6 +3,8 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
+
 import {
   BarChart3,
   BookOpen,
@@ -12,15 +14,23 @@ import {
   FileText,
   LayoutDashboard,
   LogOut,
+  RefreshCw,
   Settings,
-  ShieldCheck,
   Trophy,
   Users,
-  RefreshCw,
   X,
 } from "lucide-react";
 
-type UserRole = "SUPER_ADMIN" | "BRANCH_ADMIN" | "COACH" | "STUDENT" | string;
+/* =========================================================
+   TYPES
+   ========================================================= */
+
+type UserRole =
+  | "SUPER_ADMIN"
+  | "BRANCH_ADMIN"
+  | "COACH"
+  | "STUDENT"
+  | string;
 
 type SidebarProps = {
   isOpen?: boolean;
@@ -35,6 +45,25 @@ type NavigationItem = {
   icon: React.ElementType;
   roles?: UserRole[];
 };
+
+type StoredUser = {
+  name?: string;
+  email?: string;
+  role?: string;
+};
+
+/* =========================================================
+   CONSTANTS
+   ========================================================= */
+
+const SIDEBAR_WIDTH = {
+  expanded: 260,
+  collapsed: 84,
+} as const;
+
+/* =========================================================
+   MAIN NAVIGATION
+   ========================================================= */
 
 const navigationItems: NavigationItem[] = [
   {
@@ -99,6 +128,10 @@ const navigationItems: NavigationItem[] = [
   },
 ];
 
+/* =========================================================
+   STUDENT NAVIGATION
+   ========================================================= */
+
 const studentNavigationItems: NavigationItem[] = [
   {
     label: "My Dashboard",
@@ -108,7 +141,11 @@ const studentNavigationItems: NavigationItem[] = [
   },
 ];
 
-function getStoredUser() {
+/* =========================================================
+   USER HELPERS
+   ========================================================= */
+
+function getStoredUser(): StoredUser | null {
   if (typeof window === "undefined") {
     return null;
   }
@@ -123,11 +160,33 @@ function getStoredUser() {
       return null;
     }
 
-    return JSON.parse(storedUser);
+    const parsedUser = JSON.parse(storedUser);
+
+    if (
+      !parsedUser ||
+      typeof parsedUser !== "object"
+    ) {
+      return null;
+    }
+
+    return parsedUser as StoredUser;
   } catch {
     return null;
   }
 }
+
+function formatRole(role: string) {
+  return role
+    .replaceAll("_", " ")
+    .toLowerCase()
+    .replace(/\b\w/g, (letter) =>
+      letter.toUpperCase()
+    );
+}
+
+/* =========================================================
+   SIDEBAR
+   ========================================================= */
 
 export default function Sidebar({
   isOpen = false,
@@ -136,20 +195,98 @@ export default function Sidebar({
   onToggleCollapse,
 }: SidebarProps) {
   const pathname = usePathname();
-  const user = getStoredUser();
 
-  const role: UserRole = user?.role || "SUPER_ADMIN";
-  const logoHref = role === "STUDENT" ? "/student-dashboard" : "/dashboard";
+  const [user, setUser] =
+    useState<StoredUser | null>(null);
 
-  const items = role === "STUDENT" ? studentNavigationItems : navigationItems;
+  /* =======================================================
+     LOAD USER
+     ======================================================= */
 
-  const visibleItems = items.filter((item) => {
-    if (!item.roles || item.roles.length === 0) {
-      return true;
+  useEffect(() => {
+    const loadUser = () => {
+      setUser(getStoredUser());
+    };
+
+    loadUser();
+
+    window.addEventListener(
+      "storage",
+      loadUser
+    );
+
+    return () => {
+      window.removeEventListener(
+        "storage",
+        loadUser
+      );
+    };
+  }, []);
+
+  /* =======================================================
+     ROLE
+     ======================================================= */
+
+  const role = String(
+    user?.role || "SUPER_ADMIN"
+  ).toUpperCase() as UserRole;
+
+  /* =======================================================
+     LOGO DESTINATION
+     ======================================================= */
+
+  const logoHref =
+    role === "STUDENT"
+      ? "/student-dashboard"
+      : "/dashboard";
+
+  /* =======================================================
+     NAVIGATION ITEMS
+     ======================================================= */
+
+  const visibleItems = useMemo(() => {
+    const items =
+      role === "STUDENT"
+        ? studentNavigationItems
+        : navigationItems;
+
+    return items.filter((item) => {
+      if (
+        !item.roles ||
+        item.roles.length === 0
+      ) {
+        return true;
+      }
+
+      return item.roles.some(
+        (allowedRole) =>
+          String(allowedRole).toUpperCase() ===
+          String(role).toUpperCase()
+      );
+    });
+  }, [role]);
+
+  /* =======================================================
+     ACTIVE ROUTE
+     ======================================================= */
+
+  const isActive = (href: string) => {
+    if (
+      href === "/dashboard" ||
+      href === "/student-dashboard"
+    ) {
+      return pathname === href;
     }
 
-    return item.roles.includes(role);
-  });
+    return (
+      pathname === href ||
+      pathname.startsWith(`${href}/`)
+    );
+  };
+
+  /* =======================================================
+     LOGOUT
+     ======================================================= */
 
   const handleLogout = () => {
     localStorage.removeItem("token");
@@ -157,204 +294,530 @@ export default function Sidebar({
     localStorage.removeItem("dojoUser");
     localStorage.removeItem("currentUser");
 
+    onClose?.();
+
     window.location.href = "/login";
   };
 
-  const isActive = (href: string) => {
-    if (href === "/dashboard" || href === "/student-dashboard") {
-      return pathname === href;
-    }
+  /* =======================================================
+     CLOSE MOBILE SIDEBAR AFTER NAVIGATION
+     ======================================================= */
 
-    return pathname === href || pathname.startsWith(`${href}/`);
+  const handleNavigation = () => {
+    onClose?.();
   };
+
+  /* =======================================================
+     RENDER
+     ======================================================= */
 
   return (
     <>
-      {/* Mobile overlay */}
+      {/* ===================================================
+          MOBILE OVERLAY
+          =================================================== */}
+
       {isOpen && (
         <button
           type="button"
           aria-label="Close sidebar"
           onClick={onClose}
-          className="fixed inset-0 z-40 bg-[#071126]/55 backdrop-blur-sm md:hidden"
+          className="
+            fixed
+            inset-0
+            z-40
+            cursor-default
+            bg-black/40
+            backdrop-blur-[2px]
+            md:hidden
+          "
         />
       )}
 
+      {/* ===================================================
+          SIDEBAR
+          =================================================== */}
+
       <aside
+        aria-label="Main navigation"
         className={[
-          "fixed left-0 top-0 z-50 flex h-screen flex-col border-r border-white/10 bg-[#0b142b] text-white shadow-2xl transition-all duration-300",
-          collapsed ? "w-[84px]" : "w-[260px]",
-          isOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0",
+          "fixed left-0 top-0 z-50 flex h-screen flex-col",
+          "border-r border-(--line)",
+          "bg-(--sidebar-bg)",
+          "text-(--sidebar-text)",
+          "shadow-[10px_0_40px_rgba(15,23,42,0.08)]",
+          "transition-[width,transform] duration-300 ease-out",
+          isOpen
+            ? "translate-x-0"
+            : "-translate-x-full md:translate-x-0",
         ].join(" ")}
+        style={{
+          width: collapsed
+            ? SIDEBAR_WIDTH.collapsed
+            : SIDEBAR_WIDTH.expanded,
+        }}
       >
-        {/* Brand */}
+        {/* =================================================
+            BRAND HEADER
+            ================================================= */}
+
         <div
           className={[
-            "flex h-[76px] shrink-0 items-center border-b border-white/10 gap-1",
-            collapsed ? "justify-center px-3" : "justify-between px-5",
+            "flex h-[72px] shrink-0 items-center",
+            "border-b border-(--line)",
+            collapsed
+              ? "justify-center px-3"
+              : "justify-between px-5",
           ].join(" ")}
         >
+          {/* Brand */}
+
           <Link
             href={logoHref}
-            onClick={onClose}
+            onClick={handleNavigation}
+            aria-label="Go to dashboard"
             className={[
               "flex min-w-0 items-center",
-              collapsed ? "justify-center" : "gap-3",
+              "transition-opacity duration-200",
+              "hover:opacity-90",
+              collapsed
+                ? "justify-center"
+                : "gap-3",
             ].join(" ")}
           >
             {/* Logo */}
+
             <div
-              className={[
-                "relative flex shrink-0 items-center justify-center overflow-hidden",
-                collapsed ? "h-11 w-11" : "h-11 w-11",
-              ].join(" ")}
+              className="
+                flex
+                h-10
+                w-10
+                shrink-0
+                items-center
+                justify-center
+                overflow-hidden
+                rounded-xl
+                border
+                border-(--line)
+                bg-(--sidebar-logo-bg)
+                shadow-sm
+              "
             >
               <Image
                 src="/logo.png"
                 alt="DojoFlow Logo"
-                width={44}
-                height={44}
+                width={40}
+                height={40}
                 priority
-                className="h-full w-full object-contain"
+                className="
+                  h-full
+                  w-full
+                  object-contain
+                "
               />
             </div>
 
-            {/* Brand name */}
+            {/* Brand text */}
+
             {!collapsed && (
               <div className="min-w-0">
-                <p className="truncate text-[17px] font-extrabold tracking-tight">
-                  Dojo<span className="text-[#d7a84b]">Flow</span>
+                <p
+                  className="
+                    truncate
+                    text-[17px]
+                    font-extrabold
+                    tracking-tight
+                    text-(--sidebar-text)
+                  "
+                >
+                  Dojo
+                  <span className="text-(--gold)">
+                    Flow
+                  </span>
                 </p>
 
-                <p className="mt-0.5 text-[9px] font-bold uppercase tracking-[0.18em] text-slate-400">
+                <p
+                  className="
+                    mt-0.5
+                    truncate
+                    text-[9px]
+                    font-bold
+                    uppercase
+                    tracking-[0.18em]
+                    text-(--sidebar-muted)
+                  "
+                >
                   Martial Arts OS
                 </p>
               </div>
             )}
           </Link>
 
+          {/* Mobile close button */}
+
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg p-2 text-slate-400 hover:bg-white/10 hover:text-white md:hidden"
             aria-label="Close navigation"
+            title="Close navigation"
+            className="
+              rounded-lg
+              p-2
+              text-(--sidebar-muted)
+              transition-all
+              duration-200
+              hover:bg-(--sidebar-hover)
+              hover:text-(--sidebar-text)
+              active:scale-95
+              md:hidden
+            "
           >
-            <X size={19} />
+            <X
+              size={18}
+              strokeWidth={2}
+            />
           </button>
         </div>
 
-        {/* Workspace label */}
+        {/* =================================================
+            WORKSPACE LABEL
+            ================================================= */}
+
         {!collapsed && (
           <div className="px-5 pb-2 pt-6">
-            <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">
+            <p
+              className="
+                text-[9px]
+                font-bold
+                uppercase
+                tracking-[0.18em]
+                text-(--sidebar-muted)
+              "
+            >
               Workspace
             </p>
           </div>
         )}
 
-        {/* Navigation */}
-        <nav className="flex-1 overflow-y-auto px-3 py-3">
+        {/* =================================================
+            NAVIGATION
+            ================================================= */}
+
+        <nav
+          aria-label="Primary"
+          className="
+            flex-1
+            overflow-y-auto
+            px-3
+            py-3
+            [scrollbar-width:thin]
+          "
+        >
           <div className="space-y-1">
             {visibleItems.map((item) => {
               const Icon = item.icon;
-              const active = isActive(item.href);
+              const active = isActive(
+                item.href
+              );
 
               return (
                 <Link
                   key={item.href}
                   href={item.href}
-                  onClick={onClose}
-                  title={collapsed ? item.label : undefined}
-                  className={[
-                    "group relative flex items-center rounded-xl py-3 text-[13px] font-semibold",
-                    collapsed ? "justify-center px-3" : "gap-3 px-3.5",
+                  onClick={handleNavigation}
+                  title={
+                    collapsed
+                      ? item.label
+                      : undefined
+                  }
+                  aria-current={
                     active
-                      ? "bg-[#d7a84b] text-[#101a33] shadow-lg shadow-[#d7a84b]/10"
-                      : "text-slate-300 hover:bg-white/[0.07] hover:text-white",
+                      ? "page"
+                      : undefined
+                  }
+                  className={[
+                    "group relative flex min-h-11",
+                    "items-center rounded-xl",
+                    "py-2.5 text-[13px] font-semibold",
+                    "transition-all duration-200",
+                    "focus-visible:outline-none",
+                    "focus-visible:ring-2",
+                    "focus-visible:ring-(--gold)",
+                    collapsed
+                      ? "justify-center px-3"
+                      : "gap-3 px-3.5",
+
+                    active
+                      ? [
+                          "bg-(--gold)",
+                          "text-(--sidebar-active-text)",
+                          "shadow-[0_6px_20px_rgba(0,0,0,0.12)]",
+                        ].join(" ")
+                      : [
+                          "text-(--sidebar-text)",
+                          "opacity-80",
+                          "hover:bg-(--sidebar-hover)",
+                          "hover:opacity-100",
+                        ].join(" "),
                   ].join(" ")}
                 >
+                  {/* Active indicator */}
+
                   {active && (
-                    <span className="absolute -left-3 top-1/2 h-6 w-1 -translate-y-1/2 rounded-r-full bg-[#d7a84b]" />
+                    <span
+                      aria-hidden="true"
+                      className="
+                        absolute
+                        -left-3
+                        top-1/2
+                        h-5
+                        w-0.5
+                        -translate-y-1/2
+                        rounded-r-full
+                        bg-(--gold)
+                      "
+                    />
                   )}
+
+                  {/* Icon */}
 
                   <Icon
                     size={18}
-                    strokeWidth={active ? 2.5 : 2}
+                    strokeWidth={
+                      active
+                        ? 2.3
+                        : 1.9
+                    }
                     className={[
                       "shrink-0",
+                      "transition-colors duration-200",
                       active
-                        ? "text-[#101a33]"
-                        : "text-slate-400 group-hover:text-[#d7a84b]",
+                        ? "text-(--sidebar-active-text)"
+                        : [
+                            "text-(--sidebar-muted)",
+                            "group-hover:text-(--gold)",
+                          ].join(" "),
                     ].join(" ")}
                   />
 
-                  {!collapsed && <span className="truncate">{item.label}</span>}
+                  {/* Label */}
 
-                  {!collapsed && active && (
-                    <span className="ml-auto h-1.5 w-1.5 rounded-full bg-[#101a33]" />
+                  {!collapsed && (
+                    <span className="truncate">
+                      {item.label}
+                    </span>
                   )}
+
+                  {/* Active indicator dot */}
+
+                  {!collapsed &&
+                    active && (
+                      <span
+                        aria-hidden="true"
+                        className="
+                          ml-auto
+                          h-1.5
+                          w-1.5
+                          shrink-0
+                          rounded-full
+                          bg-(--sidebar-active-text)
+                        "
+                      />
+                    )}
                 </Link>
               );
             })}
           </div>
         </nav>
 
-        {/* Bottom section */}
-        <div className="border-t border-white/10 p-3">
+        {/* =================================================
+            BOTTOM AREA
+            ================================================= */}
+
+        <div
+          className="
+            shrink-0
+            border-t
+            border-(--line)
+            p-3
+          "
+        >
+          {/* =================================================
+              USER INFORMATION
+              ================================================= */}
+
           {!collapsed && (
-            <div className="mb-3 rounded-xl border border-white/10 bg-white/[0.04] p-3">
+            <div
+              className="
+                mb-3
+                rounded-xl
+                border
+                border-(--line)
+                bg-(--sidebar-user-bg)
+                p-3
+              "
+            >
               <div className="flex items-center gap-3">
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#d7a84b]/15 text-[#d7a84b]">
-                  <ShieldCheck size={17} />
+                {/* Avatar */}
+
+                <div
+                  className="
+                    flex
+                    h-9
+                    w-9
+                    shrink-0
+                    items-center
+                    justify-center
+                    rounded-full
+                    border
+                    border-(--line)
+                    bg-(--sidebar-avatar-bg)
+                    text-[11px]
+                    font-extrabold
+                    text-(--gold)
+                  "
+                >
+                  {user?.name
+                    ?.trim()
+                    ?.charAt(0)
+                    ?.toUpperCase() ||
+                    "D"}
                 </div>
 
+                {/* User details */}
+
                 <div className="min-w-0">
-                  <p className="truncate text-xs font-bold text-white">
-                    {user?.name || "Dojo Administrator"}
+                  <p
+                    className="
+                      truncate
+                      text-xs
+                      font-bold
+                      text-(--sidebar-text)
+                    "
+                  >
+                    {user?.name ||
+                      "Dojo Administrator"}
                   </p>
 
-                  <p className="mt-0.5 truncate text-[10px] text-slate-500">
-                    {String(role).replaceAll("_", " ")}
+                  <p
+                    className="
+                      mt-0.5
+                      truncate
+                      text-[9px]
+                      font-medium
+                      uppercase
+                      tracking-wide
+                      text-(--sidebar-muted)
+                    "
+                  >
+                    {formatRole(
+                      String(role)
+                    )}
                   </p>
                 </div>
               </div>
             </div>
           )}
 
+          {/* =================================================
+              LOGOUT
+              ================================================= */}
+
           <button
             type="button"
             onClick={handleLogout}
-            title={collapsed ? "Logout" : undefined}
+            title={
+              collapsed
+                ? "Logout"
+                : undefined
+            }
+            aria-label="Logout"
             className={[
-              "group flex w-full items-center rounded-xl py-3 text-[13px] font-semibold text-slate-400 hover:bg-red-500/10 hover:text-red-300",
-              collapsed ? "justify-center px-3" : "gap-3 px-3.5",
+              "group flex min-h-11 w-full",
+              "items-center rounded-xl",
+              "py-2.5 text-[13px] font-semibold",
+              "text-(--sidebar-muted)",
+              "transition-all duration-200",
+              "hover:bg-(--sidebar-danger-bg)",
+              "hover:text-(--sidebar-danger)",
+              "focus-visible:outline-none",
+              "focus-visible:ring-2",
+              "focus-visible:ring-(--gold)",
+              collapsed
+                ? "justify-center px-3"
+                : "gap-3 px-3.5",
             ].join(" ")}
           >
-            <LogOut size={18} className="shrink-0 group-hover:text-red-300" />
+            <LogOut
+              size={18}
+              strokeWidth={2}
+              className="
+                shrink-0
+                transition-colors
+                duration-200
+                group-hover:text-(--sidebar-danger)
+              "
+            />
 
-            {!collapsed && <span>Logout</span>}
+            {!collapsed && (
+              <span>Logout</span>
+            )}
           </button>
 
-          {/* Collapse button - desktop only */}
+          {/* =================================================
+              COLLAPSE BUTTON
+              ================================================= */}
+
           {onToggleCollapse && (
             <button
               type="button"
-              onClick={onToggleCollapse}
-              title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+              onClick={
+                onToggleCollapse
+              }
+              title={
+                collapsed
+                  ? "Expand sidebar"
+                  : "Collapse sidebar"
+              }
+              aria-label={
+                collapsed
+                  ? "Expand sidebar"
+                  : "Collapse sidebar"
+              }
               className={[
-                "mt-2 hidden w-full items-center rounded-xl py-3 text-[13px] font-semibold text-slate-500 hover:bg-white/[0.06] hover:text-white md:flex",
-                collapsed ? "justify-center px-3" : "gap-3 px-3.5",
+                "mt-2 hidden min-h-11 w-full",
+                "items-center rounded-xl",
+                "py-2.5 text-[13px] font-semibold",
+                "text-(--sidebar-muted)",
+                "transition-all duration-200",
+                "hover:bg-(--sidebar-hover)",
+                "hover:text-(--sidebar-text)",
+                "focus-visible:outline-none",
+                "focus-visible:ring-2",
+                "focus-visible:ring-(--gold)",
+                "md:flex",
+                collapsed
+                  ? "justify-center px-3"
+                  : "gap-3 px-3.5",
               ].join(" ")}
             >
               <ChevronLeft
                 size={18}
+                strokeWidth={2}
                 className={[
-                  "shrink-0 transition-transform duration-300",
-                  collapsed ? "rotate-180" : "",
+                  "shrink-0",
+                  "transition-transform duration-300",
+                  collapsed
+                    ? "rotate-180"
+                    : "",
                 ].join(" ")}
               />
 
-              {!collapsed && <span>Collapse sidebar</span>}
+              {!collapsed && (
+                <span>
+                  Collapse sidebar
+                </span>
+              )}
             </button>
           )}
         </div>

@@ -1,15 +1,19 @@
 "use client";
 
-import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
+import {
+  ChangeEvent,
+  FormEvent,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 
 import {
   AlertCircle,
   CalendarDays,
-  Check,
   CheckCircle2,
   ClipboardCheck,
   Clock3,
-  Loader2,
   Plus,
   RefreshCw,
   Users,
@@ -17,7 +21,25 @@ import {
   XCircle,
 } from "lucide-react";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api";
+import {
+  Badge,
+  Button,
+  Card,
+  EmptyState,
+  ErrorState,
+  Input,
+  LoadingSpinner,
+  Modal,
+  PageHeader,
+  Select,
+  SummaryCard,
+} from "@/components/ui";
+
+import { getStudentAttendance } from "@/lib/api";
+
+const API_URL =
+  process.env.NEXT_PUBLIC_API_URL ||
+  "http://localhost:5000/api";
 
 type Student = {
   _id: string;
@@ -60,26 +82,29 @@ type AttendanceForm = {
 };
 
 function formatDate(date?: string) {
-  if (!date) {
+  if (!date) return "—";
+
+  const parsed = new Date(date);
+
+  if (Number.isNaN(parsed.getTime())) {
     return "—";
   }
 
-  const parsedDate = new Date(date);
-
-  if (Number.isNaN(parsedDate.getTime())) {
-    return "—";
-  }
-
-  return parsedDate.toLocaleDateString("en-IN", {
+  return parsed.toLocaleDateString("en-IN", {
     day: "2-digit",
     month: "short",
     year: "numeric",
   });
 }
 
-function getStudentName(student: AttendanceRecord["student"]) {
-  if (typeof student === "object" && student !== null) {
-    return student.name;
+function getStudentName(
+  student: AttendanceRecord["student"],
+) {
+  if (
+    typeof student === "object" &&
+    student !== null
+  ) {
+    return student.name || "Unknown Student";
   }
 
   return "Unknown Student";
@@ -97,78 +122,13 @@ function getInitials(name: string) {
   );
 }
 
-function calculateTrainingDay(
-  registrationDate?: string,
-  selectedDate?: string,
-) {
-  if (!registrationDate || !selectedDate) {
-    return null;
-  }
-
-  const joiningDate = new Date(`${registrationDate.slice(0, 10)}T00:00:00`);
-
-  const attendanceDate = new Date(`${selectedDate}T00:00:00`);
-
-  if (
-    Number.isNaN(joiningDate.getTime()) ||
-    Number.isNaN(attendanceDate.getTime())
-  ) {
-    return null;
-  }
-
-  const differenceInMilliseconds =
-    attendanceDate.getTime() - joiningDate.getTime();
-
-  const differenceInDays = Math.floor(
-    differenceInMilliseconds / (1000 * 60 * 60 * 24),
-  );
-
-  if (differenceInDays < 0) {
-    return null;
-  }
-
-  return differenceInDays + 1;
-}
-
-function SummaryCard({
-  title,
-  value,
-  description,
-  icon: Icon,
-  iconClass,
-}: {
-  title: string;
-  value: string | number;
-  description: string;
-  icon: React.ElementType;
-  iconClass: string;
-}) {
-  return (
-    <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-[0_4px_18px_rgba(16,26,51,0.035)]">
-      <div className="flex items-start justify-between">
-        <div
-          className={`flex h-10 w-10 items-center justify-center rounded-lg ${iconClass}`}
-        >
-          <Icon className="h-5 w-5" />
-        </div>
-
-        <span className="text-sm font-medium text-slate-400">DojoFlow</span>
-      </div>
-
-      <div className="mt-5">
-        <p className="text-sm text-slate-500">{title}</p>
-
-        <p className="mt-1 text-2xl font-bold text-slate-900">{value}</p>
-
-        <p className="mt-1 text-xs text-slate-400">{description}</p>
-      </div>
-    </div>
-  );
-}
-
 export default function AttendancePage() {
-  const [students, setStudents] = useState<Student[]>([]);
-  const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
+  const [students, setStudents] = useState<Student[]>(
+    [],
+  );
+  const [attendance, setAttendance] = useState<
+    AttendanceRecord[]
+  >([]);
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -191,11 +151,75 @@ export default function AttendancePage() {
     makeupRequired: false,
   });
 
+  const [studentTrainingDay, setStudentTrainingDay] =
+    useState<number | null>(null);
+  const [loadingTrainingDay, setLoadingTrainingDay] =
+    useState(false);
+
   useEffect(() => {
-    loadData();
+    void loadData();
   }, [selectedDate]);
 
-  async function loadData(showRefreshLoader = false) {
+  // The next training day for a student is whatever comes
+  // after their highest already-marked planDay — not a
+  // function of the calendar date being viewed. Fetch their
+  // real history whenever the selected student changes.
+  useEffect(() => {
+    if (!form.student) {
+      setStudentTrainingDay(null);
+      setLoadingTrainingDay(false);
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadNextTrainingDay(studentId: string) {
+      try {
+        setLoadingTrainingDay(true);
+
+        const data = await getStudentAttendance(studentId);
+
+        const history: AttendanceRecord[] = Array.isArray(
+          data?.attendance,
+        )
+          ? data.attendance
+          : [];
+
+        const highestMarkedDay = history.reduce(
+          (max, record) =>
+            Math.max(max, Number(record.planDay) || 0),
+          0,
+        );
+
+        if (!cancelled) {
+          setStudentTrainingDay(highestMarkedDay + 1);
+        }
+      } catch (trainingDayError) {
+        console.error(
+          "Failed to load student's attendance history:",
+          trainingDayError,
+        );
+
+        if (!cancelled) {
+          setStudentTrainingDay(null);
+        }
+      } finally {
+        if (!cancelled) {
+          setLoadingTrainingDay(false);
+        }
+      }
+    }
+
+    void loadNextTrainingDay(form.student);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [form.student]);
+
+  async function loadData(
+    showRefreshLoader = false,
+  ) {
     try {
       if (showRefreshLoader) {
         setRefreshing(true);
@@ -212,38 +236,38 @@ export default function AttendancePage() {
         return;
       }
 
-      const studentsUrl = `${API_URL}/students`;
-      const attendanceUrl = `${API_URL}/attendance?date=${encodeURIComponent(
-        selectedDate,
-      )}`;
+      const [studentResponse, attendanceResponse] =
+        await Promise.all([
+          fetch(`${API_URL}/students`, {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          }),
+          fetch(
+            `${API_URL}/attendance?date=${encodeURIComponent(
+              selectedDate,
+            )}`,
+            {
+              headers: {
+                Authorization: `Bearer ${token}`,
+              },
+            },
+          ),
+        ]);
 
-      const [studentResponse, attendanceResponse] = await Promise.all([
-        fetch(studentsUrl, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }),
-        fetch(attendanceUrl, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }),
-      ]);
-
-      if (studentResponse.status === 401) {
-        localStorage.removeItem("token");
-        window.location.href = "/login";
-        return;
-      }
-
-      if (attendanceResponse.status === 401) {
+      if (
+        studentResponse.status === 401 ||
+        attendanceResponse.status === 401
+      ) {
         localStorage.removeItem("token");
         window.location.href = "/login";
         return;
       }
 
       if (!studentResponse.ok) {
-        throw new Error(`Failed to load students: ${studentResponse.status}`);
+        throw new Error(
+          `Failed to load students: ${studentResponse.status}`,
+        );
       }
 
       if (!attendanceResponse.ok) {
@@ -252,19 +276,33 @@ export default function AttendancePage() {
         );
       }
 
-      const studentsData = await studentResponse.json();
-      const attendanceData = await attendanceResponse.json();
+      const studentsData =
+        await studentResponse.json();
+      const attendanceData =
+        await attendanceResponse.json();
 
-      setStudents(studentsData.students || studentsData.data || []);
+      setStudents(
+        Array.isArray(studentsData?.students)
+          ? studentsData.students
+          : Array.isArray(studentsData?.data)
+            ? studentsData.data
+            : [],
+      );
 
       setAttendance(
-        attendanceData.attendance ||
-          attendanceData.records ||
-          attendanceData.data ||
-          [],
+        Array.isArray(attendanceData?.attendance)
+          ? attendanceData.attendance
+          : Array.isArray(attendanceData?.records)
+            ? attendanceData.records
+            : Array.isArray(attendanceData?.data)
+              ? attendanceData.data
+              : [],
       );
     } catch (loadError) {
-      console.error("Attendance loading error:", loadError);
+      console.error(
+        "Attendance loading error:",
+        loadError,
+      );
 
       setError(
         loadError instanceof Error
@@ -277,23 +315,26 @@ export default function AttendancePage() {
     }
   }
 
-  function handleDateChange(event: ChangeEvent<HTMLInputElement>) {
+  function handleDateChange(
+    event: ChangeEvent<HTMLInputElement>,
+  ) {
     setSelectedDate(event.target.value);
   }
 
   function handleFormChange(
-    event: ChangeEvent<HTMLSelectElement> | ChangeEvent<HTMLInputElement>,
+    event:
+      | ChangeEvent<HTMLSelectElement>
+      | ChangeEvent<HTMLInputElement>,
   ) {
     const { name, value, type } = event.target;
 
     if (type === "checkbox") {
-      const checked = (event.target as HTMLInputElement).checked;
-
       setForm((previous) => ({
         ...previous,
-        [name]: checked,
+        [name]: (
+          event.target as HTMLInputElement
+        ).checked,
       }));
-
       return;
     }
 
@@ -303,7 +344,9 @@ export default function AttendancePage() {
     }));
   }
 
-  async function handleSubmit(event: FormEvent) {
+  async function handleSubmit(
+    event: FormEvent<HTMLFormElement>,
+  ) {
     event.preventDefault();
 
     setFormError("");
@@ -314,19 +357,36 @@ export default function AttendancePage() {
       return;
     }
 
-    if (!selectedTrainingDay) {
-      setFormError("Training day could not be calculated for this student.");
+    if (!form.curriculumTitle.trim()) {
+      setFormError(
+        "Please enter the curriculum for this training day.",
+      );
       return;
     }
 
-    if (form.status === "ABSENT" && !form.makeupRequired) {
+    if (loadingTrainingDay) {
+      setFormError(
+        "Still checking this student's training history — please wait a moment.",
+      );
+      return;
+    }
+
+    if (!studentTrainingDay) {
+      setFormError(
+        "Training day could not be determined for this student.",
+      );
+      return;
+    }
+
+    if (
+      form.status === "ABSENT" &&
+      !form.makeupRequired
+    ) {
       const confirmed = window.confirm(
         "This student is absent. Do you want to continue without scheduling a makeup class?",
       );
 
-      if (!confirmed) {
-        return;
-      }
+      if (!confirmed) return;
     }
 
     try {
@@ -339,22 +399,28 @@ export default function AttendancePage() {
         return;
       }
 
-      const response = await fetch(`${API_URL}/attendance`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
+      const response = await fetch(
+        `${API_URL}/attendance`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            student: form.student,
+            date: selectedDate,
+            planDay: studentTrainingDay,
+            curriculumTitle:
+              form.curriculumTitle,
+            status: form.status,
+            makeupRequired:
+              form.status === "ABSENT"
+                ? form.makeupRequired
+                : false,
+          }),
         },
-        body: JSON.stringify({
-          student: form.student,
-          date: selectedDate,
-          planDay: selectedTrainingDay,
-          curriculumTitle: form.curriculumTitle,
-          status: form.status,
-          makeupRequired:
-            form.status === "ABSENT" ? form.makeupRequired : false,
-        }),
-      });
+      );
 
       const data = await response.json();
 
@@ -365,10 +431,16 @@ export default function AttendancePage() {
       }
 
       if (!response.ok) {
-        throw new Error(data.message || "Failed to mark attendance.");
+        throw new Error(
+          data?.message ||
+            "Failed to mark attendance.",
+        );
       }
 
-      setSuccess(data.message || "Attendance marked successfully.");
+      setSuccess(
+        data?.message ||
+          "Attendance marked successfully.",
+      );
 
       setForm({
         student: "",
@@ -378,10 +450,12 @@ export default function AttendancePage() {
       });
 
       setShowForm(false);
-
       await loadData();
     } catch (submitError) {
-      console.error("Attendance submit error:", submitError);
+      console.error(
+        "Attendance submit error:",
+        submitError,
+      );
 
       setFormError(
         submitError instanceof Error
@@ -393,590 +467,716 @@ export default function AttendancePage() {
     }
   }
 
-  const presentCount = useMemo(() => {
-    return attendance.filter((record) => record.status === "PRESENT").length;
-  }, [attendance]);
+  const presentCount = useMemo(
+    () =>
+      attendance.filter(
+        (record) => record.status === "PRESENT",
+      ).length,
+    [attendance],
+  );
 
-  const absentCount = useMemo(() => {
-    return attendance.filter((record) => record.status === "ABSENT").length;
-  }, [attendance]);
+  const absentCount = useMemo(
+    () =>
+      attendance.filter(
+        (record) => record.status === "ABSENT",
+      ).length,
+    [attendance],
+  );
 
-  const pendingMakeupCount = useMemo(() => {
-    return attendance.filter(
-      (record) =>
-        record.status === "ABSENT" &&
-        record.makeupRequired &&
-        !record.makeupCompleted,
-    ).length;
-  }, [attendance]);
+  const pendingMakeupCount = useMemo(
+    () =>
+      attendance.filter(
+        (record) =>
+          record.status === "ABSENT" &&
+          record.makeupRequired &&
+          !record.makeupCompleted,
+      ).length,
+    [attendance],
+  );
+
+  const attendancePercentage =
+    attendance.length > 0
+      ? Math.round(
+          (presentCount / attendance.length) * 100,
+        )
+      : 0;
 
   const selectedStudent = students.find(
     (student) => student._id === form.student,
   );
 
-  const selectedTrainingDay = calculateTrainingDay(
-    selectedStudent?.registrationDate,
-    selectedDate,
+  const markedStudentIds = useMemo(
+    () =>
+      new Set(
+        attendance.map((record) =>
+          typeof record.student === "object" &&
+          record.student !== null
+            ? record.student._id
+            : record.student,
+        ),
+      ),
+    [attendance],
+  );
+
+  const availableStudents = useMemo(
+    () =>
+      students.filter((student) => {
+        if (markedStudentIds.has(student._id)) {
+          return false;
+        }
+
+        if (!student.registrationDate) {
+          return true;
+        }
+
+        const registration = new Date(
+          `${student.registrationDate.slice(0, 10)}T00:00:00`,
+        );
+        const attendanceDate = new Date(
+          `${selectedDate}T00:00:00`,
+        );
+
+        if (
+          Number.isNaN(registration.getTime()) ||
+          Number.isNaN(attendanceDate.getTime())
+        ) {
+          return true;
+        }
+
+        return registration <= attendanceDate;
+      }),
+    [students, markedStudentIds, selectedDate],
   );
 
   if (loading) {
     return (
-      <div className="flex min-h-[70vh] items-center justify-center">
-        <div className="flex items-center gap-3 text-slate-600">
-          <Loader2 className="h-5 w-5 animate-spin" />
-          <span>Loading attendance...</span>
-        </div>
+      <div className="df-page">
+        <Card className="min-h-[420px]">
+          <LoadingSpinner
+            size="lg"
+            text="Loading attendance..."
+            fullPage
+          />
+        </Card>
       </div>
     );
   }
 
   return (
-    <main className="min-h-screen bg-slate-50 px-4 py-6 sm:px-6 lg:px-8">
-      <div className="mx-auto max-w-7xl">
-        {/* Header */}
-        <div className="mb-8 flex flex-col justify-between gap-5 md:flex-row md:items-end">
-          <div>
-            <div className="mb-2 flex items-center gap-2 text-sm font-medium text-orange-600">
-              <ClipboardCheck className="h-4 w-4" />
-              Academy Management
+    <div className="df-page">
+      <PageHeader
+        eyebrow="Academy Management"
+        title="Attendance"
+        description="Track daily student attendance, training days, and missed-class makeups."
+        actions={
+          <Button
+            variant="primary"
+            size="lg"
+            onClick={() => {
+              setFormError("");
+              setShowForm(true);
+            }}
+          >
+            <Plus size={17} />
+            Mark Attendance
+          </Button>
+        }
+      />
+
+      {error && (
+        <div className="mb-5">
+          <ErrorState
+            title="Attendance data could not be loaded"
+            message={error}
+            action={
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() =>
+                  void loadData(true)
+                }
+              >
+                <RefreshCw size={15} />
+                Try Again
+              </Button>
+            }
+          />
+        </div>
+      )}
+
+      {success && (
+        <div className="mb-5 flex items-center justify-between gap-4 rounded-2xl border border-(--green)/25 bg-(--green-soft) px-4 py-3.5">
+          <div className="flex items-center gap-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-(--green-soft) text-(--green)">
+              <CheckCircle2 size={18} />
             </div>
-
-            <h1 className="text-3xl font-bold tracking-tight text-slate-950">
-              Attendance
-            </h1>
-
-            <p className="mt-2 text-sm text-slate-500">
-              Track student attendance and manage missed-class makeups.
+            <p className="text-sm font-semibold text-(--green)">
+              {success}
             </p>
           </div>
 
           <button
             type="button"
-            onClick={() => {
-              setFormError("");
-              setShowForm(true);
-            }}
-            className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800"
+            onClick={() => setSuccess("")}
+            className="rounded-lg p-1.5 text-(--green) transition hover:bg-(--green)/10"
+            aria-label="Dismiss success message"
           >
-            <Plus className="h-5 w-5" />
-            Mark Attendance
+            <X size={16} />
           </button>
         </div>
+      )}
 
-        {/* Alerts */}
-        {error && (
-          <div className="mb-5 flex items-start justify-between gap-4 rounded-xl border border-red-200 bg-red-50 p-4">
-            <div className="flex items-start gap-3">
-              <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-red-600" />
-
-              <p className="text-sm text-red-700">{error}</p>
+      <Card padding="md">
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex min-w-0 items-center gap-4">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-(--accent-soft) text-(--accent)">
+              <CalendarDays size={22} />
             </div>
 
-            <button
-              type="button"
-              onClick={() => setError("")}
-              className="text-red-500 hover:text-red-700"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-        )}
-
-        {success && (
-          <div className="mb-5 flex items-start justify-between gap-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
-            <div className="flex items-start gap-3">
-              <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
-
-              <p className="text-sm text-emerald-700">{success}</p>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => setSuccess("")}
-              className="text-emerald-600 hover:text-emerald-800"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-        )}
-
-        {/* Date Selector */}
-        <div className="mb-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
-            <div className="flex items-center gap-4">
-              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-slate-100 text-slate-700">
-                <CalendarDays className="h-6 w-6" />
-              </div>
-
-              <div>
-                <h2 className="font-semibold text-slate-900">
-                  Attendance Date
-                </h2>
-
-                <p className="mt-1 text-sm text-slate-500">
-                  Select a date to view or manage attendance.
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-3">
-              <label
-                htmlFor="attendance-date"
-                className="text-sm font-medium text-slate-500"
-              >
-                Selected date
-              </label>
-
-              <input
-                id="attendance-date"
-                type="date"
-                value={selectedDate}
-                onChange={handleDateChange}
-                className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none transition focus:border-slate-400 focus:ring-4 focus:ring-slate-100"
-              />
-
-              <button
-                type="button"
-                onClick={() => loadData(true)}
-                disabled={refreshing}
-                className="flex h-12 w-12 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 transition hover:bg-slate-50 disabled:opacity-60"
-              >
-                <RefreshCw
-                  className={refreshing ? "animate-spin" : ""}
-                  size={18}
-                />
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* Summary Cards */}
-        <div className="mb-6 grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
-          <SummaryCard
-            title="Total Marked"
-            value={attendance.length}
-            description="Attendance records for this date"
-            icon={Users}
-            iconClass="bg-slate-100 text-slate-700"
-          />
-
-          <SummaryCard
-            title="Present"
-            value={presentCount}
-            description="Students present today"
-            icon={CheckCircle2}
-            iconClass="bg-emerald-50 text-emerald-600"
-          />
-
-          <SummaryCard
-            title="Absent"
-            value={absentCount}
-            description="Students absent today"
-            icon={XCircle}
-            iconClass="bg-red-50 text-red-600"
-          />
-
-          <SummaryCard
-            title="Pending Makeups"
-            value={pendingMakeupCount}
-            description="Absences requiring makeup classes"
-            icon={Clock3}
-            iconClass="bg-amber-50 text-amber-600"
-          />
-        </div>
-
-        {/* Main Content */}
-        <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
-          {/* Attendance Records */}
-          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
-              <div>
-                <p className="text-sm font-medium text-orange-600">
-                  Recent Records
-                </p>
-
-                <h2 className="mt-1 text-lg font-bold text-slate-950">
-                  Attendance Records
-                </h2>
-
-                <p className="mt-1 text-sm text-slate-500">
-                  Records for {formatDate(selectedDate)}
-                </p>
-              </div>
-
-              <span className="w-fit rounded-full bg-orange-50 px-3 py-1.5 text-xs font-bold text-orange-700">
-                {attendance.length} Records
-              </span>
-            </div>
-
-            {attendance.length > 0 ? (
-              <div className="mt-5 overflow-x-auto">
-                <table className="min-w-[700px] w-full">
-                  <thead>
-                    <tr className="border-b border-slate-200 bg-slate-50">
-                      <th className="px-4 py-4 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                        Student
-                      </th>
-
-                      <th className="px-4 py-4 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                        Training Day
-                      </th>
-
-                      <th className="px-4 py-4 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                        Curriculum
-                      </th>
-
-                      <th className="px-4 py-4 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                        Status
-                      </th>
-
-                      <th className="px-4 py-4 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                        Makeup
-                      </th>
-                    </tr>
-                  </thead>
-
-                  <tbody className="divide-y divide-slate-100">
-                    {attendance.map((record) => {
-                      const studentName = getStudentName(record.student);
-
-                      const isPresent = record.status === "PRESENT";
-
-                      return (
-                        <tr
-                          key={record._id}
-                          className="transition hover:bg-slate-50"
-                        >
-                          <td className="px-4 py-4">
-                            <div className="flex items-center gap-3">
-                              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-xs font-bold text-slate-700">
-                                {getInitials(studentName)}
-                              </div>
-
-                              <div>
-                                <p className="text-sm font-semibold text-slate-800">
-                                  {studentName}
-                                </p>
-
-                                <p className="mt-1 text-xs text-slate-400">
-                                  {formatDate(record.date)}
-                                </p>
-                              </div>
-                            </div>
-                          </td>
-
-                          <td className="px-4 py-4 text-sm text-slate-600">
-                            Day {record.planDay ?? "—"}
-                          </td>
-
-                          <td className="max-w-[180px] px-4 py-4 text-sm text-slate-600">
-                            <span className="block truncate">
-                              {record.curriculumTitle || "—"}
-                            </span>
-                          </td>
-
-                          <td className="px-4 py-4">
-                            <span
-                              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold ${
-                                isPresent
-                                  ? "bg-emerald-50 text-emerald-700"
-                                  : "bg-red-50 text-red-600"
-                              }`}
-                            >
-                              {isPresent ? (
-                                <CheckCircle2 size={14} />
-                              ) : (
-                                <XCircle size={14} />
-                              )}
-
-                              {isPresent ? "Present" : "Absent"}
-                            </span>
-                          </td>
-
-                          <td className="px-4 py-4">
-                            {record.makeupRequired ? (
-                              <span
-                                className={`text-xs font-semibold ${
-                                  record.makeupCompleted
-                                    ? "text-emerald-600"
-                                    : "text-amber-600"
-                                }`}
-                              >
-                                {record.makeupCompleted
-                                  ? "Completed"
-                                  : "Pending"}
-                              </span>
-                            ) : (
-                              <span className="text-sm text-slate-400">—</span>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
-              <div className="mt-5 rounded-xl border border-dashed border-slate-200 bg-slate-50 p-10 text-center">
-                <CalendarDays className="mx-auto h-9 w-9 text-slate-300" />
-
-                <p className="mt-3 text-sm font-semibold text-slate-600">
-                  No attendance records found
-                </p>
-
-                <p className="mt-1 text-xs text-slate-400">
-                  Attendance records will appear after classes are marked.
-                </p>
-              </div>
-            )}
-          </div>
-
-          {/* Daily Overview */}
-          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
             <div>
-              <h2 className="text-lg font-bold text-slate-950">
-                Daily Overview
+              <h2 className="text-base font-extrabold text-(--foreground)">
+                Attendance Date
               </h2>
-
-              <p className="mt-1 text-sm text-slate-500">
-                Attendance summary for the selected date
+              <p className="mt-1 text-sm text-(--ink-muted)">
+                Select a date to view or manage
+                attendance.
               </p>
             </div>
+          </div>
 
-            <div className="mt-8 flex justify-center">
-              <div
-                className="relative flex h-44 w-44 items-center justify-center rounded-full"
-                style={{
-                  background:
-                    attendance.length > 0
-                      ? `conic-gradient(#16a34a ${
-                          (presentCount / attendance.length) * 100
-                        }%, #e2e8f0 0)`
-                      : "#e2e8f0",
-                }}
-              >
-                <div className="flex h-36 w-36 flex-col items-center justify-center rounded-full bg-white">
-                  <span className="text-3xl font-bold text-slate-900">
-                    {attendance.length > 0
-                      ? Math.round((presentCount / attendance.length) * 100)
-                      : 0}
-                    %
-                  </span>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <label
+              htmlFor="attendance-date"
+              className="text-xs font-bold uppercase tracking-wide text-(--ink-muted)"
+            >
+              Selected date
+            </label>
 
-                  <span className="mt-1 text-sm text-slate-500">Present</span>
-                </div>
-              </div>
-            </div>
+            <Input
+              id="attendance-date"
+              type="date"
+              value={selectedDate}
+              onChange={handleDateChange}
+              className="h-11 sm:w-48"
+            />
 
-            <div className="mt-8 space-y-5">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
-                  <span className="text-sm text-slate-600">Present</span>
-                </div>
-
-                <span className="text-sm font-semibold text-slate-900">
-                  {presentCount}
-                </span>
-              </div>
-
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <span className="h-2.5 w-2.5 rounded-full bg-red-500" />
-                  <span className="text-sm text-slate-600">Absent</span>
-                </div>
-
-                <span className="text-sm font-semibold text-slate-900">
-                  {absentCount}
-                </span>
-              </div>
-
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <span className="h-2.5 w-2.5 rounded-full bg-amber-500" />
-                  <span className="text-sm text-slate-600">
-                    Pending Makeups
-                  </span>
-                </div>
-
-                <span className="text-sm font-semibold text-slate-900">
-                  {pendingMakeupCount}
-                </span>
-              </div>
-
-              <div className="flex items-center justify-between border-t border-slate-100 pt-5">
-                <span className="text-sm text-slate-600">Total Marked</span>
-
-                <span className="text-sm font-semibold text-slate-900">
-                  {attendance.length}
-                </span>
-              </div>
-            </div>
+            <Button
+              variant="outline"
+              size="md"
+              onClick={() =>
+                void loadData(true)
+              }
+              disabled={refreshing}
+              aria-label="Refresh attendance"
+            >
+              <RefreshCw
+                size={16}
+                className={
+                  refreshing
+                    ? "animate-spin"
+                    : ""
+                }
+              />
+              <span className="hidden sm:inline">
+                Refresh
+              </span>
+            </Button>
           </div>
         </div>
+      </Card>
+
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <SummaryCard
+          title="Total Marked"
+          value={attendance.length}
+          subtitle="Records for selected date"
+          icon={<Users size={19} />}
+        />
+
+        <SummaryCard
+          title="Present"
+          value={presentCount}
+          subtitle="Students present today"
+          icon={<CheckCircle2 size={19} />}
+        />
+
+        <SummaryCard
+          title="Absent"
+          value={absentCount}
+          subtitle="Students absent today"
+          icon={<XCircle size={19} />}
+        />
+
+        <SummaryCard
+          title="Pending Makeups"
+          value={pendingMakeupCount}
+          subtitle="Absences needing attention"
+          icon={<Clock3 size={19} />}
+        />
       </div>
 
-      {/* Mark Attendance Modal */}
-      {showForm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4 py-6">
-          <div className="w-full max-w-lg rounded-2xl bg-white shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-200 px-6 py-5">
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
+        <Card padding="none" className="overflow-hidden">
+          <div className="border-b border-(--line) px-5 py-5 sm:px-6">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <h2 className="text-lg font-bold text-slate-950">
-                  Mark Attendance
+                <p className="text-[10px] font-extrabold uppercase tracking-[0.18em] text-(--accent)">
+                  Daily records
+                </p>
+                <h2 className="mt-1 text-xl font-extrabold tracking-tight text-(--foreground)">
+                  Attendance Records
                 </h2>
-
-                <p className="mt-1 text-sm text-slate-500">
+                <p className="mt-1 text-sm text-(--ink-muted)">
                   {formatDate(selectedDate)}
                 </p>
               </div>
 
-              <button
-                type="button"
-                onClick={() => setShowForm(false)}
-                className="rounded-lg p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
-              >
-                <X size={20} />
-              </button>
+              <Badge variant="default">
+                {attendance.length}{" "}
+                {attendance.length === 1
+                  ? "Record"
+                  : "Records"}
+              </Badge>
+            </div>
+          </div>
+
+          {attendance.length === 0 ? (
+            <EmptyState
+              title="No attendance records"
+              description="There are no attendance records for the selected date. Mark attendance to create the first record."
+              icon={<CalendarDays size={24} />}
+              className="py-20"
+            />
+          ) : (
+            <AttendanceTable
+              attendance={attendance}
+            />
+          )}
+        </Card>
+
+        <Card>
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-(--accent-soft) text-(--accent)">
+              <ClipboardCheck size={18} />
             </div>
 
-            <form onSubmit={handleSubmit} className="space-y-5 p-6">
-              {formError && (
-                <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-                  {formError}
-                </div>
+            <div>
+              <h2 className="text-base font-extrabold text-(--foreground)">
+                Daily Overview
+              </h2>
+              <p className="mt-1 text-xs text-(--ink-muted)">
+                Selected date summary
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-7 flex justify-center">
+            <AttendanceRing
+              percentage={attendancePercentage}
+            />
+          </div>
+
+          <div className="mt-7 space-y-3">
+            <OverviewRow
+              label="Present"
+              value={presentCount}
+              dotClass="bg-(--green)"
+            />
+            <OverviewRow
+              label="Absent"
+              value={absentCount}
+              dotClass="bg-(--red)"
+            />
+            <OverviewRow
+              label="Pending Makeups"
+              value={pendingMakeupCount}
+              dotClass="bg-(--orange)"
+            />
+            <div className="border-t border-(--line) pt-3">
+              <OverviewRow
+                label="Total Marked"
+                value={attendance.length}
+                dotClass="bg-(--accent)"
+              />
+            </div>
+          </div>
+        </Card>
+      </div>
+
+      <Modal
+        open={showForm}
+        onClose={() => {
+          if (!saving) {
+            setShowForm(false);
+            setFormError("");
+          }
+        }}
+        title="Mark Attendance"
+        description={`Create an attendance record for ${formatDate(
+          selectedDate,
+        )}.`}
+        size="md"
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowForm(false);
+                setFormError("");
+              }}
+              disabled={saving}
+            >
+              Cancel
+            </Button>
+
+            <Button
+              variant="primary"
+              type="submit"
+              form="attendance-form"
+              loading={saving}
+              disabled={loadingTrainingDay}
+            >
+              Save Attendance
+            </Button>
+          </div>
+        }
+      >
+        <form
+          id="attendance-form"
+          onSubmit={handleSubmit}
+          className="space-y-5"
+        >
+          {formError && (
+            <div className="flex items-start gap-3 rounded-xl border border-(--red)/25 bg-(--red-soft) p-3.5">
+              <AlertCircle
+                size={17}
+                className="mt-0.5 shrink-0 text-(--red)"
+              />
+              <p className="text-sm font-semibold text-(--red)">
+                {formError}
+              </p>
+            </div>
+          )}
+
+          <div>
+            <label
+              htmlFor="student"
+              className="mb-2 block text-xs font-bold uppercase tracking-wide text-(--foreground-soft)"
+            >
+              Student
+            </label>
+
+            <Select
+              id="student"
+              name="student"
+              value={form.student}
+              onChange={handleFormChange}
+              disabled={availableStudents.length === 0}
+            >
+              <option value="">
+                {availableStudents.length === 0
+                  ? "No eligible students for this date"
+                  : "Select student"}
+              </option>
+
+              {availableStudents.map(
+                (student) => (
+                  <option
+                    key={student._id}
+                    value={student._id}
+                  >
+                    {student.name}
+                    {student.plan?.name
+                      ? ` • ${student.plan.name}`
+                      : ""}
+                  </option>
+                ),
               )}
+            </Select>
+          </div>
 
-              <div>
-                <label
-                  htmlFor="student"
-                  className="mb-2 block text-sm font-semibold text-slate-700"
-                >
-                  Student
-                </label>
+          {selectedStudent && (
+            <StudentContext
+              student={selectedStudent}
+              trainingDay={studentTrainingDay}
+              loading={loadingTrainingDay}
+            />
+          )}
 
-                <select
-                  id="student"
-                  name="student"
-                  value={form.student}
-                  onChange={handleFormChange}
-                  className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none focus:border-slate-400 focus:ring-4 focus:ring-slate-100"
-                >
-                  <option value="">Select student</option>
+          <div>
+            <label
+              htmlFor="curriculumTitle"
+              className="mb-2 block text-xs font-bold uppercase tracking-wide text-(--foreground-soft)"
+            >
+              Curriculum
+              <span className="ml-1 text-(--danger)">
+                *
+              </span>
+            </label>
 
-                  {students.map((student) => (
-                    <option key={student._id} value={student._id}>
-                      {student.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
+            <Input
+              id="curriculumTitle"
+              name="curriculumTitle"
+              value={form.curriculumTitle}
+              onChange={handleFormChange}
+              placeholder="e.g. Warm-up + Basic Stance"
+              required
+            />
+          </div>
 
-              {selectedTrainingDay && (
-                <div className="rounded-xl bg-slate-50 p-4">
+          <div>
+            <label
+              htmlFor="status"
+              className="mb-2 block text-xs font-bold uppercase tracking-wide text-(--foreground-soft)"
+            >
+              Attendance Status
+            </label>
+
+            <Select
+              id="status"
+              name="status"
+              value={form.status}
+              onChange={handleFormChange}
+            >
+              <option value="PRESENT">
+                Present
+              </option>
+              <option value="ABSENT">
+                Absent
+              </option>
+            </Select>
+          </div>
+
+          {form.status === "ABSENT" && (
+            <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-(--orange)/25 bg-(--orange-soft) p-4">
+              <input
+                type="checkbox"
+                name="makeupRequired"
+                checked={form.makeupRequired}
+                onChange={handleFormChange}
+                className="mt-0.5 h-4 w-4 rounded border-(--line-strong) accent-(--orange)"
+              />
+
+              <span>
+                <span className="block text-sm font-bold text-(--foreground)">
+                  Require makeup class
+                </span>
+                <span className="mt-1 block text-xs leading-5 text-(--ink-muted)">
+                  Schedule this missed class for
+                  makeup training.
+                </span>
+              </span>
+            </label>
+          )}
+        </form>
+      </Modal>
+    </div>
+  );
+}
+
+function AttendanceTable({
+  attendance,
+}: {
+  attendance: AttendanceRecord[];
+}) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[760px]">
+        <thead>
+          <tr className="border-b border-(--line) bg-(--surface)">
+            <TableHead>Student</TableHead>
+            <TableHead>Training Day</TableHead>
+            <TableHead>Curriculum</TableHead>
+            <TableHead>Status</TableHead>
+            <TableHead>Makeup</TableHead>
+          </tr>
+        </thead>
+
+        <tbody>
+          {attendance.map((record) => {
+            const studentName =
+              getStudentName(record.student);
+            const isPresent =
+              record.status === "PRESENT";
+
+            return (
+              <tr
+                key={record._id}
+                className="border-b border-(--line) last:border-b-0 transition-colors hover:bg-(--hover-bg)"
+              >
+                <td className="px-4 py-4">
                   <div className="flex items-center gap-3">
-                    <div className="rounded-lg bg-white p-2 text-slate-600">
-                      <CalendarDays size={18} />
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-(--accent-soft) text-xs font-extrabold text-(--accent)">
+                      {getInitials(
+                        studentName,
+                      )}
                     </div>
 
-                    <div>
-                      <p className="text-xs text-slate-500">
-                        Calculated Training Day
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-bold text-(--foreground)">
+                        {studentName}
                       </p>
-
-                      <p className="text-sm font-bold text-slate-900">
-                        Day {selectedTrainingDay}
+                      <p className="mt-0.5 text-xs text-(--ink-muted)">
+                        {formatDate(record.date)}
                       </p>
                     </div>
                   </div>
-                </div>
-              )}
+                </td>
 
-              <div>
-                <label
-                  htmlFor="curriculumTitle"
-                  className="mb-2 block text-sm font-semibold text-slate-700"
-                >
-                  Curriculum
-                </label>
+                <td className="px-4 py-4 text-sm font-semibold text-(--foreground-soft)">
+                  Day {record.planDay ?? "—"}
+                </td>
 
-                <input
-                  id="curriculumTitle"
-                  name="curriculumTitle"
-                  type="text"
-                  value={form.curriculumTitle}
-                  onChange={handleFormChange}
-                  placeholder="Enter curriculum title"
-                  className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none placeholder:text-slate-400 focus:border-slate-400 focus:ring-4 focus:ring-slate-100"
-                />
-              </div>
-
-              <div>
-                <label
-                  htmlFor="status"
-                  className="mb-2 block text-sm font-semibold text-slate-700"
-                >
-                  Status
-                </label>
-
-                <select
-                  id="status"
-                  name="status"
-                  value={form.status}
-                  onChange={handleFormChange}
-                  className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none focus:border-slate-400 focus:ring-4 focus:ring-slate-100"
-                >
-                  <option value="PRESENT">Present</option>
-
-                  <option value="ABSENT">Absent</option>
-                </select>
-              </div>
-
-              {form.status === "ABSENT" && (
-                <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4">
-                  <input
-                    type="checkbox"
-                    name="makeupRequired"
-                    checked={form.makeupRequired}
-                    onChange={handleFormChange}
-                    className="h-4 w-4 rounded border-slate-300 text-amber-600 focus:ring-amber-500"
-                  />
-
-                  <span>
-                    <span className="block text-sm font-semibold text-amber-800">
-                      Require makeup class
-                    </span>
-
-                    <span className="mt-1 block text-xs text-amber-700">
-                      Schedule a makeup class for this absence.
-                    </span>
+                <td className="max-w-[230px] px-4 py-4">
+                  <span className="block truncate text-sm text-(--ink-muted)">
+                    {record.curriculumTitle ||
+                      "No curriculum recorded"}
                   </span>
-                </label>
-              )}
+                </td>
 
-              <div className="flex justify-end gap-3 border-t border-slate-100 pt-5">
-                <button
-                  type="button"
-                  onClick={() => setShowForm(false)}
-                  className="rounded-xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-600 transition hover:bg-slate-50"
-                >
-                  Cancel
-                </button>
+                <td className="px-4 py-4">
+                  {isPresent ? (
+                    <Badge variant="success">
+                      <CheckCircle2 size={13} />
+                      Present
+                    </Badge>
+                  ) : (
+                    <Badge variant="danger">
+                      <XCircle size={13} />
+                      Absent
+                    </Badge>
+                  )}
+                </td>
 
-                <button
-                  type="submit"
-                  disabled={saving}
-                  className="inline-flex items-center gap-2 rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {saving && <RefreshCw size={16} className="animate-spin" />}
+                <td className="px-4 py-4">
+                  {!record.makeupRequired ? (
+                    <span className="text-sm text-(--ink-faint)">
+                      —
+                    </span>
+                  ) : record.makeupCompleted ? (
+                    <Badge variant="success">
+                      Completed
+                    </Badge>
+                  ) : (
+                    <Badge variant="warning">
+                      Pending
+                    </Badge>
+                  )}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
 
-                  {saving ? "Saving..." : "Save Attendance"}
-                </button>
-              </div>
-            </form>
-          </div>
+function TableHead({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
+    <th className="px-4 py-3.5 text-left text-[10px] font-extrabold uppercase tracking-[0.12em] text-(--ink-muted)">
+      {children}
+    </th>
+  );
+}
+
+function AttendanceRing({
+  percentage,
+}: {
+  percentage: number;
+}) {
+  return (
+    <div
+      className="relative flex h-44 w-44 items-center justify-center rounded-full"
+      style={{
+        background: `conic-gradient(var(--green) ${percentage}%, var(--line) 0)`,
+      }}
+    >
+      <div className="flex h-36 w-36 flex-col items-center justify-center rounded-full border border-(--line) bg-(--card)">
+        <span className="text-3xl font-extrabold tracking-tight text-(--foreground)">
+          {percentage}%
+        </span>
+        <span className="mt-1 text-xs font-semibold text-(--ink-muted)">
+          Present
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function OverviewRow({
+  label,
+  value,
+  dotClass,
+}: {
+  label: string;
+  value: number;
+  dotClass: string;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-4">
+      <div className="flex items-center gap-2.5">
+        <span
+          className={`h-2.5 w-2.5 rounded-full ${dotClass}`}
+        />
+        <span className="text-sm text-(--foreground-soft)">
+          {label}
+        </span>
+      </div>
+
+      <span className="text-sm font-extrabold text-(--foreground)">
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function StudentContext({
+  student,
+  trainingDay,
+  loading,
+}: {
+  student: Student;
+  trainingDay: number | null;
+  loading?: boolean;
+}) {
+  return (
+    <div className="rounded-2xl border border-(--line) bg-(--surface) p-4">
+      <div className="flex items-center gap-3">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-(--accent-soft) text-sm font-extrabold text-(--accent)">
+          {getInitials(student.name)}
         </div>
-      )}
-    </main>
+
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-extrabold text-(--foreground)">
+            {student.name}
+          </p>
+
+          <p className="mt-0.5 truncate text-xs text-(--ink-muted)">
+            {student.plan?.name ||
+              "No plan assigned"}
+            {student.currentBelt
+              ? ` • ${student.currentBelt}`
+              : ""}
+          </p>
+        </div>
+
+        {loading ? (
+          <Badge variant="default">
+            Checking...
+          </Badge>
+        ) : (
+          trainingDay && (
+            <Badge variant="default">
+              Day {trainingDay}
+            </Badge>
+          )
+        )}
+      </div>
+    </div>
   );
 }

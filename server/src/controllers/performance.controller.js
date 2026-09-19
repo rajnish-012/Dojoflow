@@ -3,6 +3,7 @@ const mongoose = require("mongoose");
 const Performance = require("../models/Performance");
 const Student = require("../models/Student");
 const Branch = require("../models/Branch");
+const Attendance = require("../models/Attendance");
 
 // ==============================
 // GET ALL PERFORMANCE RECORDS
@@ -341,6 +342,29 @@ const createPerformance = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: "Invalid evaluation date",
+      });
+    }
+
+    // ==============================
+    // A student can only be evaluated for a
+    // training day they were actually present for
+    // ==============================
+    const attendanceForDay = await Attendance.findOne({
+      student: studentRecord._id,
+      planDay: Number(planDay),
+    });
+
+    if (!attendanceForDay) {
+      return res.status(400).json({
+        success: false,
+        message: `Attendance has not been marked for Day ${planDay}. Mark attendance before submitting a performance evaluation.`,
+      });
+    }
+
+    if (attendanceForDay.status !== "PRESENT") {
+      return res.status(400).json({
+        success: false,
+        message: `This student was marked absent for Day ${planDay} and cannot be evaluated for that day.`,
       });
     }
 

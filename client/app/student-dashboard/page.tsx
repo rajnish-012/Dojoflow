@@ -1,21 +1,33 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ElementType } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Award,
+  ArrowUpRight,
   BarChart3,
+  Building2,
   CalendarDays,
   CheckCircle2,
   Clock3,
-  Loader2,
   Mail,
   Phone,
+  RefreshCw,
   ShieldCheck,
   UserRound,
   Users,
   XCircle,
-  ArrowUpRight,
 } from "lucide-react";
+
+import {
+  Badge,
+  Button,
+  Card,
+  EmptyState,
+  ErrorState,
+  LoadingSpinner,
+  PageHeader,
+  SummaryCard,
+} from "@/components/ui";
 
 const API_URL =
   process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api";
@@ -103,15 +115,16 @@ type PerformanceRecord = {
 // ======================================================
 
 function getToken() {
-  if (typeof window === "undefined") {
-    return "";
-  }
-
+  if (typeof window === "undefined") return "";
   return localStorage.getItem("token") || "";
 }
 
 async function fetchJson<T>(url: string): Promise<T> {
   const token = getToken();
+
+  if (!token) {
+    throw new Error("Authentication required. Please log in again.");
+  }
 
   const response = await fetch(url, {
     method: "GET",
@@ -132,9 +145,7 @@ async function fetchJson<T>(url: string): Promise<T> {
 }
 
 function formatDate(date?: string) {
-  if (!date) {
-    return "Not available";
-  }
+  if (!date) return "Not available";
 
   const parsedDate = new Date(date);
 
@@ -158,129 +169,26 @@ function getAttendanceStatus(status?: string) {
 }
 
 function getInitials(name?: string) {
-  if (!name) {
-    return "ST";
-  }
+  if (!name) return "ST";
 
-  return name
-    .split(" ")
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0])
-    .join("")
-    .toUpperCase();
+  return (
+    name
+      .split(" ")
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0])
+      .join("")
+      .toUpperCase() || "ST"
+  );
 }
 
 function getSafeRating(rating?: number) {
-  if (typeof rating !== "number" || Number.isNaN(rating)) {
-    return 0;
-  }
-
+  if (typeof rating !== "number" || Number.isNaN(rating)) return 0;
   return Math.max(0, Math.min(5, rating));
 }
 
 function getRatingPercentage(rating?: number) {
   return (getSafeRating(rating) / 5) * 100;
-}
-
-// ======================================================
-// SHARED COMPONENTS
-// ======================================================
-
-function SectionHeader({
-  title,
-  description,
-  icon: Icon,
-  action,
-}: {
-  title: string;
-  description: string;
-  icon: ElementType;
-  action?: string;
-}) {
-  return (
-    <div className="mb-6 flex items-start justify-between gap-4">
-      <div className="flex min-w-0 items-start gap-3 sm:gap-4">
-        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#fff4e8]">
-          <Icon className="h-5 w-5 text-[#f97316]" />
-        </div>
-
-        <div className="min-w-0">
-          <h2 className="text-lg font-bold text-slate-950 sm:text-xl">
-            {title}
-          </h2>
-
-          <p className="mt-1 text-sm leading-5 text-slate-500">
-            {description}
-          </p>
-        </div>
-      </div>
-
-      {action && (
-        <span className="hidden shrink-0 text-sm font-semibold text-[#f97316] sm:block">
-          {action}
-        </span>
-      )}
-    </div>
-  );
-}
-
-function EmptyState({
-  message,
-  description,
-}: {
-  message: string;
-  description?: string;
-}) {
-  return (
-    <div className="rounded-xl bg-[#f7f9fc] px-4 py-9 text-center sm:px-6">
-      <p className="text-sm font-semibold text-slate-600">{message}</p>
-
-      {description && (
-        <p className="mt-2 text-xs leading-5 text-slate-400">
-          {description}
-        </p>
-      )}
-    </div>
-  );
-}
-
-function StatCard({
-  title,
-  value,
-  description,
-  icon: Icon,
-  iconClassName,
-}: {
-  title: string;
-  value: string;
-  description: string;
-  icon: ElementType;
-  iconClassName: string;
-}) {
-  return (
-    <div className="rounded-2xl border border-[#e3e8f0] bg-white p-5 shadow-[0_3px_12px_rgba(15,23,42,0.025)] sm:p-6">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-sm font-medium text-slate-500">{title}</p>
-
-          <p className="mt-2 truncate text-3xl font-bold tracking-tight text-slate-950 sm:text-4xl">
-            {value}
-          </p>
-
-          <p className="mt-2 text-xs leading-5 text-slate-500 sm:text-sm">
-            {description}
-          </p>
-        </div>
-
-        <div
-          className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl sm:h-12 sm:w-12 ${iconClassName}`}
-        >
-          <Icon className="h-5 w-5 sm:h-6 sm:w-6" />
-        </div>
-      </div>
-    </div>
-  );
 }
 
 // ======================================================
@@ -295,17 +203,31 @@ function AttendanceSection({
   const recentAttendance = attendance.slice(0, 5);
 
   return (
-    <section className="rounded-2xl border border-[#e3e8f0] bg-white p-4 shadow-[0_3px_12px_rgba(15,23,42,0.025)] sm:p-6">
-      <SectionHeader
-        title="Recent Attendance"
-        description="Your latest training attendance records"
-        icon={CalendarDays}
-        action="Attendance"
-      />
+    <Card padding="md">
+      <div className="mb-5 flex items-start justify-between gap-4">
+        <div className="flex min-w-0 items-start gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-(--accent-soft) text-(--accent)">
+            <CalendarDays size={19} />
+          </div>
+
+          <div>
+            <h2 className="text-lg font-extrabold text-(--foreground)">
+              Recent Attendance
+            </h2>
+
+            <p className="mt-1 text-sm text-(--ink-muted)">
+              Your latest training attendance records
+            </p>
+          </div>
+        </div>
+
+        <Badge variant="neutral">Latest 5</Badge>
+      </div>
 
       {recentAttendance.length === 0 ? (
         <EmptyState
-          message="No attendance records available yet."
+          icon={<CalendarDays size={25} />}
+          title="No attendance records yet"
           description="Your attendance will appear here after your coach marks a class."
         />
       ) : (
@@ -317,67 +239,75 @@ function AttendanceSection({
             return (
               <div
                 key={record._id}
-                className="flex flex-col gap-3 rounded-xl border border-[#e7ebf1] bg-[#fbfcfe] p-4 transition hover:border-[#d7dee9] sm:flex-row sm:items-center sm:justify-between"
+                className="
+                  flex
+                  flex-col
+                  gap-3
+                  rounded-xl
+                  border
+                  border-(--line)
+                  bg-(--surface)
+                  p-4
+                  transition-all
+                  duration-200
+                  hover:-translate-y-0.5
+                "
               >
-                <div className="flex min-w-0 items-center gap-3">
-                  <div
-                    className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${
-                      isPresent
-                        ? "bg-emerald-100 text-emerald-600"
-                        : "bg-red-100 text-red-600"
-                    }`}
-                  >
-                    {isPresent ? (
-                      <CheckCircle2 className="h-5 w-5" />
-                    ) : (
-                      <XCircle className="h-5 w-5" />
-                    )}
-                  </div>
-
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold text-slate-800">
-                      {formatDate(record.date)}
-                    </p>
-
-                    <div className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-xs text-slate-500">
-                      {record.planDay !== undefined && (
-                        <span>Day {record.planDay}</span>
-                      )}
-
-                      {record.curriculumTitle && (
-                        <>
-                          <span>•</span>
-
-                          <span className="truncate">
-                            {record.curriculumTitle}
-                          </span>
-                        </>
+                <div className="flex min-w-0 items-center justify-between gap-3">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <div
+                      className={[
+                        "flex h-10 w-10 shrink-0 items-center justify-center rounded-full",
+                        isPresent
+                          ? "bg-(--green-soft) text-(--green)"
+                          : "bg-(--danger-soft) text-(--danger)",
+                      ].join(" ")}
+                    >
+                      {isPresent ? (
+                        <CheckCircle2 size={19} />
+                      ) : (
+                        <XCircle size={19} />
                       )}
                     </div>
 
-                    {record.remarks && (
-                      <p className="mt-1 text-xs text-slate-500">
-                        {record.remarks}
+                    <div className="min-w-0">
+                      <p className="text-sm font-bold text-(--foreground)">
+                        {formatDate(record.date)}
                       </p>
-                    )}
+
+                      <div className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-xs text-(--ink-muted)">
+                        {record.planDay !== undefined && (
+                          <span>Day {record.planDay}</span>
+                        )}
+
+                        {record.curriculumTitle && (
+                          <>
+                            <span>•</span>
+                            <span className="truncate">
+                              {record.curriculumTitle}
+                            </span>
+                          </>
+                        )}
+                      </div>
+                    </div>
                   </div>
+
+                  <Badge variant={isPresent ? "success" : "danger"}>
+                    {isPresent ? "Present" : "Absent"}
+                  </Badge>
                 </div>
 
-                <span
-                  className={`self-start rounded-full px-3 py-1 text-xs font-bold sm:self-auto ${
-                    isPresent
-                      ? "bg-emerald-100 text-emerald-700"
-                      : "bg-red-100 text-red-700"
-                  }`}
-                >
-                  {isPresent ? "PRESENT" : "ABSENT"}
-                </span>
+                {record.remarks && (
+                  <p className="border-t border-(--line) pt-3 text-xs leading-5 text-(--ink-muted)">
+                    {record.remarks}
+                  </p>
+                )}
               </div>
             );
           })}
         </div>
       )}
-    </section>
+    </Card>
   );
 }
 
@@ -389,12 +319,14 @@ function RatingStars({ rating }: { rating?: number }) {
   const safeRating = Math.round(getSafeRating(rating));
 
   return (
-    <div className="flex items-center gap-1">
+    <div className="flex items-center gap-0.5" aria-label={`Rating ${safeRating} out of 5`}>
       {[1, 2, 3, 4, 5].map((star) => (
         <span
           key={star}
           className={
-            star <= safeRating ? "text-amber-400" : "text-slate-300"
+            star <= safeRating
+              ? "text-(--gold)"
+              : "text-(--ink-faint)"
           }
         >
           ★
@@ -412,195 +344,206 @@ function PerformanceSection({
   const latestPerformance = performance[0];
   const previousPerformance = performance.slice(1, 5);
 
-  if (!latestPerformance) {
-    return (
-      <section className="rounded-2xl border border-[#e3e8f0] bg-white p-4 shadow-[0_3px_12px_rgba(15,23,42,0.025)] sm:p-6">
-        <SectionHeader
-          title="Performance Evaluation"
-          description="Your latest skill evaluation and coach feedback"
-          icon={BarChart3}
-        />
-
-        <EmptyState
-          message="No performance evaluation available yet."
-          description="Your coach can add an evaluation after your training session."
-        />
-      </section>
-    );
-  }
-
-  const rating = getSafeRating(latestPerformance.rating);
-  const ratingPercentage = getRatingPercentage(
-    latestPerformance.rating,
-  );
-
   return (
-    <section className="rounded-2xl border border-[#e3e8f0] bg-white p-4 shadow-[0_3px_12px_rgba(15,23,42,0.025)] sm:p-6">
-      <SectionHeader
-        title="Performance Evaluation"
-        description="Your latest skill evaluation and coach feedback"
-        icon={BarChart3}
-        action="Latest Evaluation"
-      />
-
-      <div className="space-y-5">
-        {/* Latest evaluation summary */}
-        <div className="rounded-2xl bg-[#101828] p-5 text-white sm:p-6">
-          <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
-            <div className="min-w-0">
-              <p className="text-sm text-slate-400">
-                Latest Evaluation
-              </p>
-
-              <h3 className="mt-2 break-words text-xl font-bold sm:text-2xl">
-                {latestPerformance.curriculumTitle ||
-                  "Karate Training Evaluation"}
-              </h3>
-
-              {latestPerformance.skill && (
-                <p className="mt-2 text-sm text-slate-300">
-                  Skill: {latestPerformance.skill}
-                </p>
-              )}
-
-              {latestPerformance.planDay !== undefined && (
-                <p className="mt-1 text-sm text-slate-400">
-                  Training Day: {latestPerformance.planDay}
-                </p>
-              )}
-            </div>
-
-            <div className="shrink-0 sm:text-right">
-              <p className="text-xs uppercase tracking-wider text-slate-400">
-                Rating
-              </p>
-
-              <p className="mt-1 text-4xl font-bold">
-                {rating}
-                <span className="text-lg font-medium text-slate-400">
-                  /5
-                </span>
-              </p>
-
-              <div className="mt-2 sm:flex sm:justify-end">
-                <RatingStars rating={rating} />
-              </div>
-            </div>
+    <Card padding="md">
+      <div className="mb-5 flex items-start justify-between gap-4">
+        <div className="flex min-w-0 items-start gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-(--accent-soft) text-(--accent)">
+            <BarChart3 size={19} />
           </div>
 
-          <div className="mt-5">
-            <div className="mb-2 flex items-center justify-between text-xs">
-              <span className="text-slate-400">
-                Performance rating
-              </span>
-
-              <span className="font-semibold text-slate-200">
-                {rating}/5
-              </span>
-            </div>
-
-            <div className="h-2 overflow-hidden rounded-full bg-slate-700">
-              <div
-                className="h-full rounded-full bg-[#f97316] transition-all"
-                style={{ width: `${ratingPercentage}%` }}
-              />
-            </div>
-          </div>
-
-          <p className="mt-4 text-xs text-slate-400">
-            Evaluated on{" "}
-            {formatDate(
-              latestPerformance.evaluationDate ||
-                latestPerformance.createdAt,
-            )}
-          </p>
-        </div>
-
-        {/* Evaluation details */}
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div className="rounded-xl border border-[#e3e8f0] p-4">
-            <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
-              Curriculum
-            </p>
-
-            <p className="mt-2 break-words text-sm font-semibold text-slate-900">
-              {latestPerformance.curriculumTitle || "Not specified"}
-            </p>
-          </div>
-
-          <div className="rounded-xl border border-[#e3e8f0] p-4">
-            <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
-              Skill Evaluated
-            </p>
-
-            <p className="mt-2 break-words text-sm font-semibold text-slate-900">
-              {latestPerformance.skill || "Not specified"}
-            </p>
-          </div>
-        </div>
-
-        {/* Coach remarks */}
-        {latestPerformance.remarks && (
-          <div className="rounded-xl border border-[#e3e8f0] p-4">
-            <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
-              Coach Remarks
-            </p>
-
-            <p className="mt-2 text-sm leading-6 text-slate-600">
-              {latestPerformance.remarks}
-            </p>
-          </div>
-        )}
-
-        {/* Evaluated by */}
-        {latestPerformance.evaluatedBy?.name && (
-          <div className="flex items-center gap-2 text-xs text-slate-500">
-            <ShieldCheck className="h-4 w-4 text-[#f97316]" />
-            Evaluated by {latestPerformance.evaluatedBy.name}
-          </div>
-        )}
-
-        {/* Previous evaluations */}
-        {previousPerformance.length > 0 && (
           <div>
-            <h3 className="mb-3 text-sm font-bold text-slate-900">
-              Previous Evaluations
-            </h3>
+            <h2 className="text-lg font-extrabold text-(--foreground)">
+              Performance Evaluation
+            </h2>
 
-            <div className="space-y-3">
-              {previousPerformance.map((record) => (
-                <div
-                  key={record._id}
-                  className="flex flex-col gap-3 rounded-xl bg-[#f7f9fc] p-4 sm:flex-row sm:items-center sm:justify-between"
-                >
-                  <div className="min-w-0">
-                    <p className="break-words text-sm font-semibold text-slate-900">
-                      {record.skill ||
-                        record.curriculumTitle ||
-                        "Training Evaluation"}
-                    </p>
-
-                    <p className="mt-1 text-xs text-slate-500">
-                      {formatDate(
-                        record.evaluationDate || record.createdAt,
-                      )}
-                    </p>
-                  </div>
-
-                  <div className="flex items-center justify-between gap-3 sm:justify-end">
-                    <RatingStars rating={record.rating} />
-
-                    <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-700">
-                      {getSafeRating(record.rating)}/5
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
+            <p className="mt-1 text-sm text-(--ink-muted)">
+              Your latest skill evaluation and coach feedback
+            </p>
           </div>
+        </div>
+
+        {latestPerformance && (
+          <Badge variant="neutral">Latest</Badge>
         )}
       </div>
-    </section>
+
+      {!latestPerformance ? (
+        <EmptyState
+          icon={<BarChart3 size={25} />}
+          title="No performance evaluation yet"
+          description="Your coach can add an evaluation after your training session."
+        />
+      ) : (
+        <div className="space-y-5">
+          <div
+            className="
+              overflow-hidden
+              rounded-2xl
+              border
+              border-(--dark-card-border)
+              bg-(--dark-card)
+              p-5
+              text-white
+              sm:p-6
+            "
+          >
+            <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-(--dark-muted)">
+                  Latest Evaluation
+                </p>
+
+                <h3 className="mt-2 break-words text-xl font-extrabold sm:text-2xl">
+                  {latestPerformance.curriculumTitle ||
+                    "Karate Training Evaluation"}
+                </h3>
+
+                {latestPerformance.skill && (
+                  <p className="mt-2 text-sm text-(--dark-text)">
+                    Skill: {latestPerformance.skill}
+                  </p>
+                )}
+
+                {latestPerformance.planDay !== undefined && (
+                  <p className="mt-1 text-sm text-(--dark-muted)">
+                    Training Day: {latestPerformance.planDay}
+                  </p>
+                )}
+              </div>
+
+              <div className="shrink-0 sm:text-right">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-(--dark-muted)">
+                  Rating
+                </p>
+
+                <p className="mt-1 text-4xl font-extrabold">
+                  {getSafeRating(latestPerformance.rating)}
+                  <span className="text-lg font-medium text-(--dark-muted)">
+                    /5
+                  </span>
+                </p>
+
+                <div className="mt-2 sm:flex sm:justify-end">
+                  <RatingStars rating={latestPerformance.rating} />
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-5">
+              <div className="mb-2 flex items-center justify-between text-xs">
+                <span className="text-(--dark-muted)">
+                  Performance rating
+                </span>
+
+                <span className="font-semibold text-(--dark-text)">
+                  {getSafeRating(latestPerformance.rating)}/5
+                </span>
+              </div>
+
+              <div className="h-2 overflow-hidden rounded-full bg-(--dark-track)">
+                <div
+                  className="h-full rounded-full bg-(--gold) transition-all duration-500"
+                  style={{
+                    width: `${getRatingPercentage(
+                      latestPerformance.rating,
+                    )}%`,
+                  }}
+                />
+              </div>
+            </div>
+
+            <p className="mt-4 text-xs text-(--dark-muted)">
+              Evaluated on{" "}
+              {formatDate(
+                latestPerformance.evaluationDate ||
+                  latestPerformance.createdAt,
+              )}
+            </p>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <InfoBox
+              label="Curriculum"
+              value={
+                latestPerformance.curriculumTitle || "Not specified"
+              }
+            />
+
+            <InfoBox
+              label="Skill Evaluated"
+              value={latestPerformance.skill || "Not specified"}
+            />
+          </div>
+
+          {latestPerformance.remarks && (
+            <InfoBox
+              label="Coach Remarks"
+              value={latestPerformance.remarks}
+              multiline
+            />
+          )}
+
+          {latestPerformance.evaluatedBy?.name && (
+            <div className="flex items-center gap-2 text-xs font-medium text-(--ink-muted)">
+              <ShieldCheck size={16} className="text-(--accent)" />
+              Evaluated by {latestPerformance.evaluatedBy.name}
+            </div>
+          )}
+
+          {previousPerformance.length > 0 && (
+            <div>
+              <h3 className="mb-3 text-sm font-extrabold text-(--foreground)">
+                Previous Evaluations
+              </h3>
+
+              <div className="space-y-2.5">
+                {previousPerformance.map((record) => (
+                  <div
+                    key={record._id}
+                    className="
+                      flex
+                      flex-col
+                      gap-3
+                      rounded-xl
+                      border
+                      border-(--line)
+                      bg-(--surface)
+                      p-4
+                      sm:flex-row
+                      sm:items-center
+                      sm:justify-between
+                    "
+                  >
+                    <div className="min-w-0">
+                      <p className="break-words text-sm font-semibold text-(--foreground)">
+                        {record.skill ||
+                          record.curriculumTitle ||
+                          "Training Evaluation"}
+                      </p>
+
+                      <p className="mt-1 text-xs text-(--ink-muted)">
+                        {formatDate(
+                          record.evaluationDate || record.createdAt,
+                        )}
+                      </p>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-3 sm:justify-end">
+                      <RatingStars rating={record.rating} />
+
+                      <Badge variant="neutral">
+                        {getSafeRating(record.rating)}/5
+                      </Badge>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </Card>
   );
 }
 
@@ -614,139 +557,119 @@ function ProfileSection({
   student: Student | null;
 }) {
   return (
-    <section className="rounded-2xl border border-[#e3e8f0] bg-white p-4 shadow-[0_3px_12px_rgba(15,23,42,0.025)] sm:p-6">
-      <SectionHeader
-        title="My Profile"
-        description="Your registered academy information"
-        icon={UserRound}
-      />
+    <Card padding="md">
+      <div className="mb-5 flex items-start gap-3">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-(--accent-soft) text-(--accent)">
+          <UserRound size={19} />
+        </div>
 
-      <div className="flex flex-col gap-5 sm:flex-row sm:items-center">
-        <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-[#101828] text-xl font-bold text-white">
+        <div>
+          <h2 className="text-lg font-extrabold text-(--foreground)">
+            My Profile
+          </h2>
+
+          <p className="mt-1 text-sm text-(--ink-muted)">
+            Your registered academy information
+          </p>
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+        <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-(--dark-card) text-xl font-extrabold text-white">
           {getInitials(student?.name)}
         </div>
 
         <div className="min-w-0">
-          <h3 className="break-words text-xl font-bold text-slate-950">
+          <h3 className="break-words text-xl font-extrabold text-(--foreground)">
             {student?.name || "Not available"}
           </h3>
 
-          <p className="mt-1 text-sm text-slate-500">
+          <p className="mt-1 text-sm text-(--ink-muted)">
             Student account
           </p>
 
           {student?.status && (
-            <span
-              className={`mt-3 inline-flex rounded-full px-3 py-1 text-xs font-bold ${
-                student.status === "ACTIVE"
-                  ? "bg-emerald-100 text-emerald-700"
-                  : "bg-slate-100 text-slate-600"
-              }`}
-            >
-              {student.status}
-            </span>
+            <div className="mt-3">
+              <Badge
+                variant={
+                  String(student.status).toUpperCase() === "ACTIVE"
+                    ? "success"
+                    : "neutral"
+                }
+              >
+                {student.status}
+              </Badge>
+            </div>
           )}
         </div>
       </div>
 
-      <div className="mt-6 grid gap-5 sm:grid-cols-2">
-        <div className="flex min-w-0 items-start gap-3">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#f7f9fc]">
-            <Phone className="h-4 w-4 text-slate-500" />
-          </div>
+      <div className="mt-6 grid gap-4 sm:grid-cols-2">
+        <ProfileInfo
+          icon={<Phone size={16} />}
+          label="Phone"
+          value={student?.phone || "Not available"}
+        />
 
-          <div className="min-w-0">
-            <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
-              Phone
-            </p>
+        <ProfileInfo
+          icon={<Mail size={16} />}
+          label="Email"
+          value={student?.email || "Not available"}
+        />
 
-            <p className="mt-1 break-words text-sm font-medium text-slate-800">
-              {student?.phone || "Not available"}
-            </p>
-          </div>
-        </div>
+        <ProfileInfo
+          icon={<UserRound size={16} />}
+          label="Age"
+          value={student?.age ?? "Not available"}
+        />
 
-        <div className="flex min-w-0 items-start gap-3">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#f7f9fc]">
-            <Mail className="h-4 w-4 text-slate-500" />
-          </div>
+        <ProfileInfo
+          icon={<CalendarDays size={16} />}
+          label="Joining Date"
+          value={formatDate(student?.joinDate)}
+        />
 
-          <div className="min-w-0">
-            <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
-              Email
-            </p>
+        <ProfileInfo
+          icon={<Award size={16} />}
+          label="Current Belt"
+          value={student?.currentBelt || student?.belt || "Beginner"}
+        />
 
-            <p className="mt-1 break-words text-sm font-medium text-slate-800">
-              {student?.email || "Not available"}
-            </p>
-          </div>
-        </div>
-
-        <div className="flex min-w-0 items-start gap-3">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#f7f9fc]">
-            <UserRound className="h-4 w-4 text-slate-500" />
-          </div>
-
-          <div className="min-w-0">
-            <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
-              Age
-            </p>
-
-            <p className="mt-1 text-sm font-medium text-slate-800">
-              {student?.age ?? "Not available"}
-            </p>
-          </div>
-        </div>
-
-        <div className="flex min-w-0 items-start gap-3">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#f7f9fc]">
-            <CalendarDays className="h-4 w-4 text-slate-500" />
-          </div>
-
-          <div className="min-w-0">
-            <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
-              Joining Date
-            </p>
-
-            <p className="mt-1 text-sm font-medium text-slate-800">
-              {formatDate(student?.joinDate)}
-            </p>
-          </div>
-        </div>
-
-        <div className="flex min-w-0 items-start gap-3">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#f7f9fc]">
-            <Award className="h-4 w-4 text-slate-500" />
-          </div>
-
-          <div className="min-w-0">
-            <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
-              Current Belt
-            </p>
-
-            <p className="mt-1 text-sm font-semibold text-slate-800">
-              {student?.currentBelt || student?.belt || "Beginner"}
-            </p>
-          </div>
-        </div>
-
-        <div className="flex min-w-0 items-start gap-3">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#f7f9fc]">
-            <ArrowUpRight className="h-4 w-4 text-slate-500" />
-          </div>
-
-          <div className="min-w-0">
-            <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
-              Branch
-            </p>
-
-            <p className="mt-1 break-words text-sm font-medium text-slate-800">
-              {student?.branch?.name || "Not available"}
-            </p>
-          </div>
-        </div>
+        <ProfileInfo
+          icon={<ArrowUpRight size={16} />}
+          label="Branch"
+          value={student?.branch?.name || "Not available"}
+        />
       </div>
-    </section>
+    </Card>
+  );
+}
+
+function ProfileInfo({
+  icon,
+  label,
+  value,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: string | number;
+}) {
+  return (
+    <div className="flex min-w-0 items-start gap-3 rounded-xl border border-(--line) p-3.5">
+      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-(--surface) text-(--ink-muted)">
+        {icon}
+      </div>
+
+      <div className="min-w-0">
+        <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-(--ink-faint)">
+          {label}
+        </p>
+
+        <p className="mt-1 break-words text-sm font-semibold text-(--foreground)">
+          {value}
+        </p>
+      </div>
+    </div>
   );
 }
 
@@ -762,42 +685,59 @@ function PlanSection({
   const plan = student?.plan;
 
   return (
-    <section className="rounded-2xl border border-[#e3e8f0] bg-white p-4 shadow-[0_3px_12px_rgba(15,23,42,0.025)] sm:p-6">
-      <SectionHeader
-        title="Training Plan"
-        description="Your currently assigned academy plan"
-        icon={Award}
-      />
+    <Card padding="md">
+      <div className="mb-5 flex items-start gap-3">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-(--accent-soft) text-(--accent)">
+          <Award size={19} />
+        </div>
+
+        <div>
+          <h2 className="text-lg font-extrabold text-(--foreground)">
+            Training Plan
+          </h2>
+
+          <p className="mt-1 text-sm text-(--ink-muted)">
+            Your currently assigned academy plan
+          </p>
+        </div>
+      </div>
 
       {!plan ? (
         <EmptyState
-          message="No training plan assigned yet."
+          icon={<Award size={25} />}
+          title="No training plan assigned"
           description="Please contact your academy administrator."
         />
       ) : (
         <div className="space-y-5">
-          <div className="rounded-2xl bg-[#101828] p-5 text-white sm:p-6">
+          <div className="rounded-2xl bg-(--dark-card) p-5 text-white sm:p-6">
             <div className="flex items-start justify-between gap-4">
               <div className="min-w-0">
-                <p className="text-sm text-slate-400">Current Plan</p>
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-(--dark-muted)">
+                  Current Plan
+                </p>
 
-                <h3 className="mt-2 break-words text-2xl font-bold">
+                <h3 className="mt-2 break-words text-2xl font-extrabold">
                   {plan.name || "Training Plan"}
                 </h3>
               </div>
 
-              <Award className="h-7 w-7 shrink-0 text-[#f97316]" />
+              <Award
+                size={27}
+                className="shrink-0 text-(--gold)"
+              />
             </div>
 
             {plan.price !== undefined && (
-              <p className="mt-4 text-sm text-slate-300">
+              <p className="mt-4 text-sm text-(--dark-text)">
                 ₹{plan.price}
 
                 {plan.duration && (
                   <span>
                     {" "}
                     / {plan.duration}{" "}
-                    {plan.durationUnit === "MONTHS"
+                    {String(plan.durationUnit).toUpperCase() ===
+                    "MONTHS"
                       ? "months"
                       : "days"}
                   </span>
@@ -807,78 +747,58 @@ function PlanSection({
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2">
-            <div className="rounded-xl border border-[#e3e8f0] p-4">
-              <p className="text-xs uppercase tracking-wide text-slate-400">
-                Starting Belt
-              </p>
+            <InfoBox
+              label="Starting Belt"
+              value={plan.startingBelt || "Not specified"}
+            />
 
-              <p className="mt-2 text-sm font-semibold text-slate-900">
-                {plan.startingBelt || "Not specified"}
-              </p>
-            </div>
+            <InfoBox
+              label="Classes Per Week"
+              value={plan.classesPerWeek ?? "Not specified"}
+            />
 
-            <div className="rounded-xl border border-[#e3e8f0] p-4">
-              <p className="text-xs uppercase tracking-wide text-slate-400">
-                Classes Per Week
-              </p>
+            <InfoBox
+              label="Curriculum"
+              value={`${plan.curriculum?.length || 0} training days`}
+            />
 
-              <p className="mt-2 text-sm font-semibold text-slate-900">
-                {plan.classesPerWeek ?? "Not specified"}
-              </p>
-            </div>
-
-            <div className="rounded-xl border border-[#e3e8f0] p-4">
-              <p className="text-xs uppercase tracking-wide text-slate-400">
-                Curriculum
-              </p>
-
-              <p className="mt-2 text-sm font-semibold text-slate-900">
-                {plan.curriculum?.length || 0} training days
-              </p>
-            </div>
-
-            <div className="rounded-xl border border-[#e3e8f0] p-4">
-              <p className="text-xs uppercase tracking-wide text-slate-400">
-                Milestones
-              </p>
-
-              <p className="mt-2 text-sm font-semibold text-slate-900">
-                {plan.milestones?.length || 0}
-              </p>
-            </div>
+            <InfoBox
+              label="Milestones"
+              value={`${plan.milestones?.length || 0}`}
+            />
           </div>
 
           {plan.curriculum && plan.curriculum.length > 0 && (
             <div>
-              <div className="mb-3 flex items-center justify-between">
-                <h3 className="text-sm font-bold text-slate-900">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <h3 className="text-sm font-extrabold text-(--foreground)">
                   Curriculum Preview
                 </h3>
 
-                <span className="text-xs font-medium text-slate-400">
+                <span className="text-xs font-medium text-(--ink-faint)">
                   {plan.curriculum.length} days
                 </span>
               </div>
 
-              <div className="space-y-3">
+              <div className="space-y-2.5">
                 {plan.curriculum.slice(0, 4).map((item, index) => (
                   <div
                     key={`${item.day || index}-${item.title || index}`}
-                    className="flex items-start gap-3 rounded-xl bg-[#f7f9fc] p-4"
+                    className="flex items-start gap-3 rounded-xl border border-(--line) bg-(--surface) p-3.5"
                   >
-                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white text-xs font-bold text-slate-700">
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-(--card) text-xs font-extrabold text-(--foreground)">
                       {item.day || index + 1}
                     </div>
 
                     <div className="min-w-0">
-                      <p className="break-words text-sm font-semibold text-slate-900">
+                      <p className="break-words text-sm font-bold text-(--foreground)">
                         {item.title ||
                           item.skill ||
                           "Training Session"}
                       </p>
 
                       {item.description && (
-                        <p className="mt-1 break-words text-xs leading-5 text-slate-500">
+                        <p className="mt-1 break-words text-xs leading-5 text-(--ink-muted)">
                           {item.description}
                         </p>
                       )}
@@ -888,7 +808,7 @@ function PlanSection({
               </div>
 
               {plan.curriculum.length > 4 && (
-                <p className="mt-3 text-xs text-slate-400">
+                <p className="mt-3 text-xs font-medium text-(--ink-faint)">
                   +{plan.curriculum.length - 4} more training days
                 </p>
               )}
@@ -896,65 +816,109 @@ function PlanSection({
           )}
         </div>
       )}
-    </section>
+    </Card>
+  );
+}
+
+function InfoBox({
+  label,
+  value,
+  multiline = false,
+}: {
+  label: string;
+  value: string | number;
+  multiline?: boolean;
+}) {
+  return (
+    <div className="rounded-xl border border-(--line) p-4">
+      <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-(--ink-faint)">
+        {label}
+      </p>
+
+      <p
+        className={[
+          "mt-2 break-words text-sm font-semibold text-(--foreground)",
+          multiline ? "leading-6 font-medium" : "",
+        ].join(" ")}
+      >
+        {value}
+      </p>
+    </div>
   );
 }
 
 // ======================================================
-// MAIN DASHBOARD
+// MAIN STUDENT DASHBOARD
 // ======================================================
 
 export default function StudentDashboard() {
   const [student, setStudent] = useState<Student | null>(null);
-  const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
+  const [attendance, setAttendance] = useState<AttendanceRecord[]>(
+    [],
+  );
   const [performance, setPerformance] = useState<PerformanceRecord[]>(
     [],
   );
 
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
 
-  useEffect(() => {
-    const loadDashboard = async () => {
-      try {
+  const loadDashboard = async (refresh = false) => {
+    try {
+      if (refresh) {
+        setRefreshing(true);
+      } else {
         setLoading(true);
-        setError("");
-
-        const [
-          studentResponse,
-          attendanceResponse,
-          performanceResponse,
-        ] = await Promise.all([
-          fetchJson<{ student?: Student }>(
-            `${API_URL}/students/me`,
-          ),
-
-          fetchJson<{ attendance?: AttendanceRecord[] }>(
-            `${API_URL}/attendance/me`,
-          ),
-
-          fetchJson<{ performance?: PerformanceRecord[] }>(
-            `${API_URL}/performance/me`,
-          ),
-        ]);
-
-        setStudent(studentResponse.student || null);
-        setAttendance(attendanceResponse.attendance || []);
-        setPerformance(performanceResponse.performance || []);
-      } catch (dashboardError) {
-        console.error("Student dashboard error:", dashboardError);
-
-        setError(
-          dashboardError instanceof Error
-            ? dashboardError.message
-            : "Unable to load your dashboard.",
-        );
-      } finally {
-        setLoading(false);
       }
-    };
 
-    loadDashboard();
+      setError("");
+
+      const [
+        studentResponse,
+        attendanceResponse,
+        performanceResponse,
+      ] = await Promise.all([
+        fetchJson<{ student?: Student }>(
+          `${API_URL}/students/me`,
+        ),
+        fetchJson<{ attendance?: AttendanceRecord[] }>(
+          `${API_URL}/attendance/me`,
+        ),
+        fetchJson<{ performance?: PerformanceRecord[] }>(
+          `${API_URL}/performance/me`,
+        ),
+      ]);
+
+      setStudent(studentResponse.student || null);
+      setAttendance(attendanceResponse.attendance || []);
+      setPerformance(performanceResponse.performance || []);
+    } catch (dashboardError) {
+      console.error("Student dashboard error:", dashboardError);
+
+      const message =
+        dashboardError instanceof Error
+          ? dashboardError.message
+          : "Unable to load your dashboard.";
+
+      if (
+        message.toLowerCase().includes("authentication") ||
+        message.toLowerCase().includes("unauthorized") ||
+        message.toLowerCase().includes("token")
+      ) {
+        window.location.href = "/login";
+        return;
+      }
+
+      setError(message);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadDashboard();
   }, []);
 
   const attendanceStats = useMemo(() => {
@@ -990,10 +954,9 @@ export default function StudentDashboard() {
 
   if (loading) {
     return (
-      <div className="flex min-h-[70vh] items-center justify-center bg-[#f5f7fb] px-4">
-        <div className="flex items-center gap-3 rounded-2xl border border-[#e3e8f0] bg-white px-6 py-5 text-sm text-slate-600 shadow-sm">
-          <Loader2 className="h-5 w-5 animate-spin text-[#f97316]" />
-          <span>Loading your dashboard...</span>
+      <div className="min-h-[70vh] bg-(--background) px-4 py-8 text-(--foreground) transition-colors duration-300 sm:px-6 lg:px-8">
+        <div className="mx-auto flex min-h-[480px] max-w-[1440px] items-center justify-center">
+          <LoadingSpinner label="Loading your dashboard..." />
         </div>
       </div>
     );
@@ -1001,119 +964,152 @@ export default function StudentDashboard() {
 
   if (error) {
     return (
-      <div className="flex min-h-[70vh] items-center justify-center bg-[#f5f7fb] px-4">
-        <div className="w-full max-w-md rounded-2xl border border-red-200 bg-white p-6 text-center shadow-sm">
-          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-red-100">
-            <XCircle className="h-6 w-6 text-red-600" />
+      <div className="min-h-[70vh] bg-(--background) px-4 py-8 text-(--foreground) transition-colors duration-300 sm:px-6 lg:px-8">
+        <div className="mx-auto flex min-h-[480px] max-w-[1440px] items-center justify-center">
+          <div className="w-full max-w-lg">
+            <ErrorState
+              title="Unable to load your dashboard"
+              message={error}
+              action={
+                <Button
+                  variant="primary"
+                  onClick={() => void loadDashboard(true)}
+                  loading={refreshing}
+                >
+                  <RefreshCw size={17} />
+                  Try again
+                </Button>
+              }
+            />
           </div>
-
-          <p className="mt-4 font-semibold text-red-700">{error}</p>
-
-          <button
-            onClick={() => window.location.reload()}
-            className="mt-5 rounded-xl bg-[#101828] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#f97316]"
-          >
-            Refresh
-          </button>
         </div>
       </div>
     );
   }
 
   return (
-    <main className="min-h-screen bg-[#f5f7fb] px-4 py-5 sm:px-6 lg:px-8">
-      <div className="space-y-8">
-        {/* Page Header */}
-        <div className="flex flex-col justify-between gap-6 lg:flex-row lg:items-end">
-            <div>
-            <div className="mb-2 flex items-center gap-2 text-sm font-medium text-orange-600">
-              <Users size={16}/>
-              Student Portal
+    <div
+      className="
+        min-h-screen
+        bg-(--background)
+        px-4
+        py-6
+        text-(--foreground)
+        transition-colors
+        duration-300
+        sm:px-6
+        lg:px-8
+      "
+    >
+      <div className="mx-auto w-full max-w-[1440px]">
+        <PageHeader
+          eyebrow="Student Portal"
+          title={`Welcome back, ${getStudentName(student)}`}
+          description="Track your karate training, attendance, and performance."
+          actions={
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                variant="secondary"
+                onClick={() => void loadDashboard(true)}
+                disabled={refreshing}
+              >
+                <RefreshCw
+                  size={17}
+                  className={refreshing ? "animate-spin" : ""}
+                />
+                Refresh
+              </Button>
+
+              <div
+                className="
+                  flex
+                  items-center
+                  gap-3
+                  rounded-xl
+                  border
+                  border-(--line)
+                  bg-(--card)
+                  px-3
+                  py-2.5
+                  shadow-[0_4px_18px_var(--shadow-color)]
+                "
+              >
+                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-(--accent-soft) text-(--accent)">
+                  <Award size={18} />
+                </div>
+
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-(--ink-faint)">
+                    Current Belt
+                  </p>
+
+                  <p className="mt-0.5 text-sm font-extrabold text-(--foreground)">
+                    {currentBelt}
+                  </p>
+                </div>
+              </div>
             </div>
+          }
+        />
 
-            <h1 className="text-3xl font-bold tracking-tight text-slate-950">
-              Welcome back, {getStudentName(student)}
-            </h1>
-
-            <p className="mt-2 max-w-xl text-sm text-slate-500">
-              Track your karate training, attendance, and performance.
-            </p>
-          </div>
-
-          <div className="flex w-fit items-center gap-3 rounded-2xl border border-[#e3e8f0] bg-white px-4 py-3 shadow-sm">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#fff4e8]">
-              <Award className="h-5 w-5 text-[#f97316]" />
-            </div>
-
-            <div>
-              <p className="text-[11px] font-medium uppercase tracking-wide text-slate-400">
-                Current Belt
-              </p>
-
-              <p className="mt-0.5 text-sm font-bold text-slate-900">
-                {currentBelt}
-              </p>
-            </div>
-          </div>
-        </div>
-
-        {/* Stats */}
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <StatCard
+        <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <SummaryCard
             title="Current Belt"
             value={currentBelt}
-            description="Your current karate rank"
-            icon={Award}
-            iconClassName="bg-[#fff4e8] text-[#f97316]"
+            subtitle="Your current karate rank"
+            icon={<Award size={20} />}
           />
 
-          <StatCard
+          <SummaryCard
             title="Attendance"
             value={`${attendanceStats.percentage}%`}
-            description={`${attendanceStats.presentCount} present out of ${attendanceStats.totalCount}`}
-            icon={CalendarDays}
-            iconClassName="bg-emerald-100 text-emerald-600"
+            subtitle={`${attendanceStats.presentCount} present out of ${attendanceStats.totalCount}`}
+            icon={<CalendarDays size={20} />}
           />
 
-          <StatCard
+          <SummaryCard
             title="Training Sessions"
-            value={attendanceStats.totalCount.toString()}
-            description={`${attendanceStats.absentCount} absent`}
-            icon={Clock3}
-            iconClassName="bg-blue-100 text-blue-600"
+            value={attendanceStats.totalCount}
+            subtitle={`${attendanceStats.absentCount} absent`}
+            icon={<Clock3 size={20} />}
           />
 
-          <StatCard
+          <SummaryCard
             title="Latest Rating"
             value={
               latestPerformance
                 ? `${getSafeRating(latestPerformance.rating)}/5`
                 : "—"
             }
-            description={
+            subtitle={
               latestPerformance
                 ? "Latest performance evaluation"
                 : "No evaluation available"
             }
-            icon={BarChart3}
-            iconClassName="bg-purple-100 text-purple-600"
+            icon={<BarChart3 size={20} />}
           />
         </div>
 
-        {/* Attendance and Performance */}
-        <div className="mt-6 grid gap-6 xl:grid-cols-2">
+        <div className="grid gap-6 xl:grid-cols-2">
           <AttendanceSection attendance={attendance} />
-
           <PerformanceSection performance={performance} />
         </div>
 
-        {/* Profile and Plan */}
         <div className="mt-6 grid gap-6 xl:grid-cols-2">
           <ProfileSection student={student} />
-
           <PlanSection student={student} />
         </div>
+
+        <div className="mt-5 flex items-center justify-between border-t border-(--line) pt-4">
+          <p className="text-xs font-medium text-(--ink-faint)">
+            DojoFlow Student Portal
+          </p>
+
+          <p className="text-xs text-(--ink-faint)">
+            Training progress at a glance
+          </p>
+        </div>
       </div>
-    </main>
+    </div>
   );
 }

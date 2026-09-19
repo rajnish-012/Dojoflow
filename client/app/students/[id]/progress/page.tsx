@@ -1,18 +1,24 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
   ArrowLeft,
+  Award,
   CalendarCheck,
   CheckCircle2,
-  Clock,
+  Clock3,
   GraduationCap,
   Mail,
+  RefreshCw,
   Star,
   Target,
   TrendingUp,
-  UserRound,
   XCircle,
 } from "lucide-react";
 
@@ -23,6 +29,16 @@ import {
   getStudentPerformance,
 } from "@/lib/api";
 
+import {
+  Badge,
+  Button,
+  Card,
+  EmptyState,
+  ErrorState,
+  LoadingSpinner,
+  SummaryCard,
+} from "@/components/ui";
+
 type Student = {
   _id: string;
   name: string;
@@ -32,11 +48,15 @@ type Student = {
   currentBelt?: string;
   status?: string;
   joinDate?: string;
+
   plan?: {
     _id?: string;
     name?: string;
     duration?: number;
     durationUnit?: string;
+    startingBelt?: string;
+    curriculum?: CurriculumItem[];
+    milestones?: Milestone[];
   } | null;
 };
 
@@ -67,29 +87,72 @@ type CurriculumItem = {
   skill?: string;
 };
 
+type Milestone = {
+  day?: number;
+  belt?: string;
+  skill?: string;
+  description?: string;
+};
+
 type ProgressData = {
   currentTrainingDay?: number | string;
   completedDays?: number | string;
   totalCurriculumDays?: number | string;
+
   presentClasses?: number | string;
   absentClasses?: number | string;
+
   pendingMakeups?: number | string;
   completedMakeups?: number | string;
-  averageRating?: number | string;
+
+  averageRating?: number | string | null;
+
   currentCurriculum?: CurriculumItem | null;
-  nextMilestone?: any;
-  achievedMilestone?: any;
+  nextMilestone?: Milestone | null;
+  achievedMilestone?: Milestone | null;
+
   attendance?: AttendanceItem[];
   performance?: PerformanceItem[];
+
+  // Raw API shape is retained so the page can safely consume
+  // both the current backend contract and older responses.
+  training?: {
+    currentTrainingDay?: number | string;
+    completedDays?: number | string;
+    totalCurriculumDays?: number | string;
+    presentClasses?: number | string;
+    absentClasses?: number | string;
+    pendingMakeups?: number | string;
+    completedMakeups?: number | string;
+  };
+  performanceSummary?: {
+    totalEvaluations?: number | string;
+    averageRating?: number | string | null;
+    latest?: PerformanceItem | null;
+  };
+  milestone?: {
+    next?: Milestone | null;
+    achieved?: Milestone | null;
+  };
 };
 
-function numberValue(...values: unknown[]) {
+function numberValue(
+  ...values: unknown[]
+): number {
   for (const value of values) {
-    if (value !== undefined && value !== null && value !== "") {
+    if (
+      value !== undefined &&
+      value !== null &&
+      value !== ""
+    ) {
       const parsed = Number(value);
-      if (Number.isFinite(parsed)) return parsed;
+
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
     }
   }
+
   return 0;
 }
 
@@ -98,6 +161,7 @@ function getInitials(name = "") {
     name
       .trim()
       .split(/\s+/)
+      .filter(Boolean)
       .map((part) => part[0])
       .join("")
       .slice(0, 2)
@@ -106,15 +170,24 @@ function getInitials(name = "") {
 }
 
 function formatDate(date?: string) {
-  if (!date) return "—";
-  const parsed = new Date(date);
-  if (Number.isNaN(parsed.getTime())) return "—";
+  if (!date) {
+    return "—";
+  }
 
-  return parsed.toLocaleDateString("en-IN", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  });
+  const parsed = new Date(date);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return "—";
+  }
+
+  return parsed.toLocaleDateString(
+    "en-IN",
+    {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    },
+  );
 }
 
 function statusOf(status?: string) {
@@ -123,17 +196,26 @@ function statusOf(status?: string) {
     .toUpperCase();
 }
 
-function extractArray<T = any>(source: any, keys: string[] = []): T[] {
-  if (Array.isArray(source)) return source;
+function extractArray<T = any>(
+  source: any,
+  keys: string[] = [],
+): T[] {
+  if (Array.isArray(source)) {
+    return source;
+  }
 
   for (const key of keys) {
-    if (Array.isArray(source?.[key])) return source[key];
+    if (Array.isArray(source?.[key])) {
+      return source[key];
+    }
   }
 
   return [];
 }
 
-function unwrapProgress(response: any): any {
+function unwrapProgress(
+  response: any,
+) {
   return (
     response?.progress ??
     response?.data?.progress ??
@@ -143,55 +225,302 @@ function unwrapProgress(response: any): any {
   );
 }
 
-function normalizeAttendance(response: any): AttendanceItem[] {
-  return extractArray<AttendanceItem>(response, [
-    "attendance",
-    "records",
+function normalizeAttendance(
+  response: any,
+): AttendanceItem[] {
+  return extractArray<AttendanceItem>(
+    response,
+    [
+      "attendance",
+      "records",
+      "items",
+      "data",
+    ],
+  );
+}
+
+function normalizePerformance(
+  response: any,
+): PerformanceItem[] {
+  return extractArray<PerformanceItem>(
+    response,
+    [
+      "performance",
+      "records",
+      "items",
+      "data",
+    ],
+  );
+}
+
+function normalizePerformanceFromProgress(
+  progressResult: any,
+): PerformanceItem[] {
+  const performanceSource = progressResult?.performance;
+
+  if (Array.isArray(performanceSource)) {
+    return performanceSource;
+  }
+
+  const nested = extractArray<PerformanceItem>(
+    performanceSource,
+    ["performance", "records", "items", "data"],
+  );
+
+  if (nested.length) {
+    return nested;
+  }
+
+  if (performanceSource?.latest) {
+    return [performanceSource.latest];
+  }
+
+  return [];
+}
+
+function normalizeCurriculum(
+  source: any,
+): CurriculumItem[] {
+  if (Array.isArray(source)) return source;
+  return extractArray<CurriculumItem>(source, [
+    "curriculum",
+    "lessons",
     "items",
     "data",
   ]);
 }
 
-function normalizePerformance(response: any): PerformanceItem[] {
-  return extractArray<PerformanceItem>(response, [
-    "performance",
-    "records",
+function normalizeMilestones(
+  source: any,
+): Milestone[] {
+  if (Array.isArray(source)) return source;
+  return extractArray<Milestone>(source, [
+    "milestones",
     "items",
     "data",
   ]);
 }
 
-function SummaryCard({
+function SectionHeading({
+  eyebrow,
   title,
-  value,
   description,
-  icon: Icon,
-  iconClass,
+  icon,
+  action,
 }: {
+  eyebrow?: string;
   title: string;
-  value: string | number;
-  description: string;
-  icon: any;
-  iconClass: string;
+  description?: string;
+  icon: ReactNode;
+  action?: ReactNode;
 }) {
   return (
-    <div className="rounded-2xl border border-[#e1e7ef] bg-white p-5 shadow-[0_2px_10px_rgba(15,23,42,0.04)]">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="text-xs font-bold uppercase tracking-wide text-slate-400">
-            {title}
-          </p>
-          <p className="mt-3 text-4xl font-bold tracking-tight text-slate-950">
-            {value}
-          </p>
+    <div
+      className="
+        flex flex-col gap-4
+        sm:flex-row sm:items-start
+        sm:justify-between
+      "
+    >
+      <div className="flex min-w-0 items-start gap-3">
+        <div
+          className="
+            flex h-10 w-10 shrink-0
+            items-center justify-center
+            rounded-xl
+            bg-(--accent-soft)
+            text-(--accent)
+          "
+        >
+          {icon}
         </div>
 
-        <div className={`rounded-2xl p-3 ${iconClass}`}>
-          <Icon className="h-5 w-5" />
+        <div className="min-w-0">
+          {eyebrow && (
+            <p
+              className="
+                text-[10px] font-black
+                uppercase tracking-[0.16em]
+                text-(--accent)
+              "
+            >
+              {eyebrow}
+            </p>
+          )}
+
+          <h2
+            className="
+              mt-1 text-lg font-black
+              tracking-tight
+              text-(--foreground)
+              sm:text-xl
+            "
+          >
+            {title}
+          </h2>
+
+          {description && (
+            <p
+              className="
+                mt-1 text-sm
+                text-(--ink-muted)
+              "
+            >
+              {description}
+            </p>
+          )}
         </div>
       </div>
 
-      <p className="mt-2 text-sm text-slate-500">{description}</p>
+      {action}
+    </div>
+  );
+}
+
+function MetricRow({
+  icon,
+  iconClassName,
+  label,
+  description,
+  value,
+}: {
+  icon: ReactNode;
+  iconClassName: string;
+  label: string;
+  description: string;
+  value: number;
+}) {
+  return (
+    <div
+      className="
+        flex items-center
+        justify-between gap-4
+        rounded-xl
+        border border-(--line)
+        bg-(--surface)
+        p-4
+        transition-colors
+        hover:bg-(--hover-bg)
+      "
+    >
+      <div
+        className="
+          flex min-w-0
+          items-center gap-3
+        "
+      >
+        <div
+          className={`
+            flex h-10 w-10 shrink-0
+            items-center justify-center
+            rounded-xl
+            ${iconClassName}
+          `}
+        >
+          {icon}
+        </div>
+
+        <div className="min-w-0">
+          <p
+            className="
+              text-sm font-bold
+              text-(--foreground-soft)
+            "
+          >
+            {label}
+          </p>
+
+          <p
+            className="
+              mt-0.5 text-xs
+              text-(--ink-faint)
+            "
+          >
+            {description}
+          </p>
+        </div>
+      </div>
+
+      <span
+        className="
+          shrink-0 text-xl
+          font-black
+          text-(--foreground)
+        "
+      >
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function MiniMetric({
+  label,
+  value,
+  valueClassName = "text-(--foreground)",
+}: {
+  label: string;
+  value: string | number;
+  valueClassName?: string;
+}) {
+  return (
+    <div
+      className="
+        rounded-xl
+        border border-(--line)
+        bg-(--surface)
+        p-4
+      "
+    >
+      <p
+        className="
+          text-[10px] font-bold
+          uppercase tracking-[0.1em]
+          text-(--ink-faint)
+        "
+      >
+        {label}
+      </p>
+
+      <p
+        className={`
+          mt-2 text-2xl
+          font-black tracking-tight
+          ${valueClassName}
+        `}
+      >
+        {value}
+      </p>
+    </div>
+  );
+}
+
+function StarRating({
+  rating,
+}: {
+  rating: number;
+}) {
+  return (
+    <div
+      className="
+        flex items-center gap-1
+      "
+      aria-label={`${rating.toFixed(1)} out of 5`}
+    >
+      {[1, 2, 3, 4, 5].map(
+        (star) => (
+          <Star
+            key={star}
+            size={17}
+            className={
+              star <=
+              Math.round(rating)
+                ? "fill-(--gold) text-(--gold)"
+                : "text-(--line)"
+            }
+          />
+        ),
+      )}
     </div>
   );
 }
@@ -199,25 +528,42 @@ function SummaryCard({
 export default function StudentProgressPage() {
   const params = useParams();
   const router = useRouter();
-  const studentId = String(params.id || "");
 
-  const [student, setStudent] = useState<Student | null>(null);
-  const [progress, setProgress] = useState<ProgressData | null>(null);
-  const [attendance, setAttendance] = useState<AttendanceItem[]>([]);
-  const [performance, setPerformance] = useState<PerformanceItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const studentId = String(
+    params.id || "",
+  );
 
-  useEffect(() => {
-    if (studentId) loadProgress();
-  }, [studentId]);
+  const [student, setStudent] =
+    useState<Student | null>(null);
+
+  const [progress, setProgress] =
+    useState<ProgressData | null>(null);
+
+  const [attendance, setAttendance] =
+    useState<AttendanceItem[]>([]);
+
+  const [performance, setPerformance] =
+    useState<PerformanceItem[]>([]);
+
+  const [loading, setLoading] =
+    useState(true);
+
+  const [error, setError] =
+    useState("");
 
   async function loadProgress() {
+    if (!studentId) {
+      return;
+    }
+
     try {
       setLoading(true);
       setError("");
 
-      const [studentResponse, progressResponse] = await Promise.all([
+      const [
+        studentResponse,
+        progressResponse,
+      ] = await Promise.all([
         getStudentById(studentId),
         getStudentProgress(studentId),
       ]);
@@ -228,545 +574,1803 @@ export default function StudentProgressPage() {
         studentResponse?.data ??
         studentResponse;
 
-      const progressResult = unwrapProgress(progressResponse);
+      const progressResult =
+        unwrapProgress(
+          progressResponse,
+        );
 
-      let attendanceResult: AttendanceItem[] = [];
-      let performanceResult: PerformanceItem[] = [];
+      let attendanceResult: AttendanceItem[] =
+        [];
+
+      let performanceResult: PerformanceItem[] =
+        [];
 
       try {
-        attendanceResult = normalizeAttendance(
-          await getStudentAttendance(studentId),
+        attendanceResult =
+          normalizeAttendance(
+            await getStudentAttendance(
+              studentId,
+            ),
+          );
+      } catch (attendanceError) {
+        console.error(
+          "Attendance API failed:",
+          attendanceError,
         );
-      } catch (err) {
-        console.error("Attendance API failed:", err);
       }
 
       try {
-        performanceResult = normalizePerformance(
-          await getStudentPerformance(studentId),
+        performanceResult =
+          normalizePerformance(
+            await getStudentPerformance(
+              studentId,
+            ),
+          );
+      } catch (performanceError) {
+        console.error(
+          "Performance API failed:",
+          performanceError,
         );
-      } catch (err) {
-        console.error("Performance API failed:", err);
       }
 
-      // Some backend versions return these arrays inside the progress response.
       if (!attendanceResult.length) {
-        attendanceResult = normalizeAttendance(progressResult?.attendance);
+        attendanceResult =
+          normalizeAttendance(
+            progressResult?.attendance,
+          );
+
         if (!attendanceResult.length) {
-          attendanceResult = normalizeAttendance(progressResult);
+          attendanceResult =
+            normalizeAttendance(
+              progressResult,
+            );
         }
       }
 
       if (!performanceResult.length) {
-        performanceResult = normalizePerformance(progressResult?.performance);
+        performanceResult =
+          normalizePerformanceFromProgress(
+            progressResult,
+          );
+
         if (!performanceResult.length) {
-          performanceResult = normalizePerformance(progressResult);
+          performanceResult =
+            normalizePerformance(
+              progressResult,
+            );
         }
       }
 
+      /*
+       * The progress API returns the training and performance values
+       * inside nested objects:
+       *
+       * progress.training.currentTrainingDay
+       * progress.training.completedDays
+       * progress.training.presentClasses
+       * progress.performance.averageRating
+       * progress.milestone.next
+       *
+       * Normalize that API contract into the flat shape used by this page.
+       */
+      const training =
+        progressResult?.training ?? {};
+
+      const performanceSummary =
+        progressResult?.performance ?? {};
+
+      const milestone =
+        progressResult?.milestone ?? {};
+
       const normalized: ProgressData = {
         ...progressResult,
-        currentTrainingDay: numberValue(
-          progressResult.currentTrainingDay,
-          progressResult.trainingDay,
-          progressResult.currentDay,
-        ),
-        completedDays: numberValue(progressResult.completedDays),
-        totalCurriculumDays: numberValue(
-          progressResult.totalCurriculumDays,
-          progressResult.curriculumDays,
-        ),
-        presentClasses: numberValue(
-          progressResult.presentClasses,
-          progressResult.present,
-          progressResult.totalPresent,
-        ),
-        absentClasses: numberValue(
-          progressResult.absentClasses,
-          progressResult.absent,
-          progressResult.totalAbsent,
-        ),
-        pendingMakeups: numberValue(progressResult.pendingMakeups),
-        completedMakeups: numberValue(progressResult.completedMakeups),
-        averageRating: numberValue(
-          progressResult.averageRating,
-          progressResult.avgRating,
-          progressResult.averagePerformance,
-        ),
-        attendance: attendanceResult,
-        performance: performanceResult,
+
+        currentTrainingDay:
+          numberValue(
+            training.currentTrainingDay,
+            progressResult.currentTrainingDay,
+            progressResult.trainingDay,
+            progressResult.currentDay,
+          ),
+
+        completedDays:
+          numberValue(
+            training.completedDays,
+            progressResult.completedDays,
+          ),
+
+        totalCurriculumDays:
+          numberValue(
+            training.totalCurriculumDays,
+            progressResult.totalCurriculumDays,
+            progressResult.curriculumDays,
+          ),
+
+        presentClasses:
+          numberValue(
+            training.presentClasses,
+            progressResult.presentClasses,
+            progressResult.present,
+            progressResult.totalPresent,
+          ),
+
+        absentClasses:
+          numberValue(
+            training.absentClasses,
+            progressResult.absentClasses,
+            progressResult.absent,
+            progressResult.totalAbsent,
+          ),
+
+        pendingMakeups:
+          numberValue(
+            training.pendingMakeups,
+            progressResult.pendingMakeups,
+          ),
+
+        completedMakeups:
+          numberValue(
+            training.completedMakeups,
+            progressResult.completedMakeups,
+          ),
+
+        averageRating:
+          numberValue(
+            performanceSummary.averageRating,
+            progressResult.averageRating,
+            progressResult.avgRating,
+            progressResult.averagePerformance,
+          ),
+
+        currentCurriculum:
+          progressResult.currentCurriculum ?? null,
+
+        nextMilestone:
+          milestone.next ??
+          progressResult.nextMilestone ??
+          null,
+
+        achievedMilestone:
+          milestone.achieved ??
+          progressResult.achievedMilestone ??
+          null,
+
+        attendance:
+          attendanceResult,
+
+        performance:
+          performanceResult,
+
+        performanceSummary: {
+          totalEvaluations:
+            performanceSummary.totalEvaluations,
+          averageRating:
+            performanceSummary.averageRating,
+          latest:
+            performanceSummary.latest ??
+            performanceResult[0] ??
+            null,
+        },
       };
 
       setStudent(studentResult);
       setProgress(normalized);
       setAttendance(attendanceResult);
       setPerformance(performanceResult);
-    } catch (err) {
-      console.error("Failed to load student progress:", err);
+    } catch (loadError) {
+      console.error(
+        "Failed to load student progress:",
+        loadError,
+      );
+
       setError(
-        err instanceof Error ? err.message : "Failed to load student progress",
+        loadError instanceof Error
+          ? loadError.message
+          : "Failed to load student progress.",
       );
     } finally {
       setLoading(false);
     }
   }
 
-  const attendanceStats = useMemo(() => {
-    const presentFromRecords = attendance.filter(
-      (item) => statusOf(item.status) === "PRESENT",
-    ).length;
+  useEffect(() => {
+    loadProgress();
+  }, [studentId]);
 
-    const absentFromRecords = attendance.filter(
-      (item) => statusOf(item.status) === "ABSENT",
-    ).length;
+  const attendanceStats =
+    useMemo(() => {
+      const presentFromRecords =
+        attendance.filter(
+          (item) =>
+            statusOf(item.status) ===
+            "PRESENT",
+        ).length;
 
-    const hasAttendanceRecords = presentFromRecords + absentFromRecords > 0;
+      const absentFromRecords =
+        attendance.filter(
+          (item) =>
+            statusOf(item.status) ===
+            "ABSENT",
+        ).length;
 
-    const presentClasses = hasAttendanceRecords
-      ? presentFromRecords
-      : numberValue(progress?.presentClasses);
+      const hasRecords =
+        presentFromRecords +
+          absentFromRecords >
+        0;
 
-    const absentClasses = hasAttendanceRecords
-      ? absentFromRecords
-      : numberValue(progress?.absentClasses);
+      const presentClasses =
+        hasRecords
+          ? presentFromRecords
+          : numberValue(
+              progress?.presentClasses,
+            );
 
-    const totalClasses = presentClasses + absentClasses;
+      const absentClasses =
+        hasRecords
+          ? absentFromRecords
+          : numberValue(
+              progress?.absentClasses,
+            );
 
-    return {
-      presentClasses,
-      absentClasses,
-      totalClasses,
-      attendancePercentage:
+      const totalClasses =
+        presentClasses +
+        absentClasses;
+
+      const attendancePercentage =
         totalClasses > 0
-          ? Math.round((presentClasses / totalClasses) * 100)
-          : 0,
+          ? Math.round(
+              (presentClasses /
+                totalClasses) *
+                100,
+            )
+          : 0;
+
+      return {
+        presentClasses,
+        absentClasses,
+        totalClasses,
+        attendancePercentage,
+      };
+    }, [
+      attendance,
+      progress,
+    ]);
+
+  const makeupStats =
+    useMemo(() => {
+      const completedFromRecords =
+        attendance.filter(
+          (item) =>
+            item.makeupRequired === true &&
+            item.makeupCompleted === true,
+        ).length;
+
+      const pendingFromRecords =
+        attendance.filter(
+          (item) =>
+            item.makeupRequired === true &&
+            item.makeupCompleted !== true,
+        ).length;
+
+      const completed =
+        completedFromRecords > 0
+          ? completedFromRecords
+          : numberValue(
+              progress?.completedMakeups,
+            );
+
+      const pending =
+        pendingFromRecords > 0
+          ? pendingFromRecords
+          : numberValue(
+              progress?.pendingMakeups,
+            );
+
+      return {
+        completed,
+        pending,
+      };
+    }, [
+      attendance,
+      progress,
+    ]);
+
+  const summary =
+    useMemo(() => {
+      /*
+       * Use the backend's canonical progress values for training
+       * progress. Attendance records are still used for the live
+       * attendance percentage and makeup details.
+       */
+
+      const trainingDay =
+        numberValue(
+          progress?.currentTrainingDay,
+        );
+
+      const completedDays =
+        numberValue(
+          progress?.completedDays,
+        );
+
+      const totalCurriculumDays =
+        numberValue(
+          progress?.totalCurriculumDays,
+        );
+
+      return {
+        trainingDay,
+        completedDays,
+        totalCurriculumDays,
+        attendancePercentage:
+          attendanceStats.attendancePercentage,
+      };
+    }, [
+      progress,
+      attendanceStats.attendancePercentage,
+    ]);
+
+  const performanceSummary =
+    (progress?.performanceSummary ||
+      (progress as any)?.performance ||
+      {}) as {
+      totalEvaluations?: number | string;
+      averageRating?: number | string | null;
+      latest?: PerformanceItem | null;
     };
-  }, [attendance, progress]);
 
-  const summary = useMemo(() => {
-    const completedMakeupsFromRecords = attendance.filter(
-      (item) => item.makeupRequired === true && item.makeupCompleted === true,
-    ).length;
+  const evaluationCount = useMemo(() => {
+    if (performance.length) return performance.length;
 
-    const pendingMakeupsFromRecords = attendance.filter(
-      (item) => item.makeupRequired === true && item.makeupCompleted !== true,
-    ).length;
-
-    const completedMakeups =
-      completedMakeupsFromRecords > 0
-        ? completedMakeupsFromRecords
-        : numberValue(progress?.completedMakeups);
-
-    const pendingMakeups =
-      pendingMakeupsFromRecords > 0
-        ? pendingMakeupsFromRecords
-        : numberValue(progress?.pendingMakeups);
-
-    // Required business rules:
-    // Training Day = present + absent
-    // Attendance = present / (present + absent)
-    // Completed Days = present + completed makeups
-    // Curriculum Days = present + absent
-    const trainingDay = attendanceStats.totalClasses;
-    const completedDays = attendanceStats.presentClasses + completedMakeups;
-    const totalCurriculumDays = trainingDay;
-
-    return {
-      trainingDay,
-      attendancePercentage: attendanceStats.attendancePercentage,
-      completedDays,
-      totalCurriculumDays,
-      completedMakeups,
-      pendingMakeups,
-    };
-  }, [attendance, progress, attendanceStats]);
+    return numberValue(
+      performanceSummary.totalEvaluations,
+    );
+  }, [
+    performance,
+    performanceSummary.totalEvaluations,
+  ]);
 
   const averageRating = useMemo(() => {
     const ratings = performance
       .map((item) => numberValue(item.rating))
-      .filter((rating) => rating > 0);
+      .filter((rating) => rating >= 1 && rating <= 5);
 
     if (ratings.length) {
-      return ratings.reduce((sum, rating) => sum + rating, 0) / ratings.length;
+      return (
+        ratings.reduce(
+          (sum, rating) => sum + rating,
+          0,
+        ) / ratings.length
+      );
     }
 
-    return numberValue(progress?.averageRating);
-  }, [performance, progress]);
+    const raw = performanceSummary.averageRating;
 
-  const currentCurriculum = progress?.currentCurriculum;
+    if (raw === null || raw === undefined || raw === "") {
+      return null;
+    }
+
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) ? parsed : null;
+  }, [
+    performance,
+    performanceSummary.averageRating,
+  ]);
+
   const progressPercentage =
-    summary.totalCurriculumDays > 0
+    summary.totalCurriculumDays >
+    0
       ? Math.min(
           100,
           Math.round(
-            (summary.completedDays / summary.totalCurriculumDays) * 100,
+            (summary.completedDays /
+              summary.totalCurriculumDays) *
+              100,
           ),
         )
       : 0;
 
-  function renderStars(rating: number) {
-    return (
-      <div className="flex items-center gap-1">
-        {[1, 2, 3, 4, 5].map((star) => (
-          <Star
-            key={star}
-            className={
-              star <= Math.round(rating)
-                ? "fill-amber-400 text-amber-400"
-                : "text-slate-200"
-            }
-            size={18}
-          />
-        ))}
-      </div>
-    );
-  }
+  const planCurriculum = normalizeCurriculum(
+    student?.plan?.curriculum,
+  );
+
+  const planMilestones = normalizeMilestones(
+    student?.plan?.milestones,
+  );
+
+  const currentCurriculum =
+    progress?.currentCurriculum ??
+    planCurriculum.find(
+      (lesson) =>
+        numberValue(
+          lesson.day,
+        ) === summary.trainingDay + 1,
+    ) ??
+    null;
+
+  const latestAttendanceWithCurriculum =
+    attendance.find(
+      (record) =>
+        Boolean(record.curriculumTitle?.trim()),
+    ) ?? null;
+
+  const curriculumToDisplay =
+    currentCurriculum ??
+    (latestAttendanceWithCurriculum
+      ? {
+          day: latestAttendanceWithCurriculum.planDay,
+          title: latestAttendanceWithCurriculum.curriculumTitle,
+          skill: undefined,
+          description: undefined,
+        }
+      : null);
+
+  const nextMilestone =
+    progress?.nextMilestone ??
+    planMilestones
+      .filter(
+        (milestone) =>
+          numberValue(milestone.day) >
+          summary.trainingDay,
+      )
+      .sort(
+        (a, b) =>
+          numberValue(a.day) -
+          numberValue(b.day),
+      )[0] ??
+    null;
+
+  const achievedMilestone =
+    progress?.achievedMilestone ??
+    planMilestones
+      .filter(
+        (milestone) =>
+          numberValue(milestone.day) <=
+          summary.trainingDay,
+      )
+      .sort(
+        (a, b) =>
+          numberValue(b.day) -
+          numberValue(a.day),
+      )[0] ??
+    null;
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#f5f7fb]">
-        <div className="flex items-center gap-3 text-slate-600">
-          <Clock className="h-5 w-5 animate-spin text-orange-500" />
-          Loading student progress...
-        </div>
-      </div>
+      <main
+        className="
+          flex min-h-[calc(100vh-76px)]
+          items-center justify-center
+          bg-(--background)
+          px-4
+        "
+      >
+        <LoadingSpinner
+          size="md"
+          text="Loading student progress..."
+        />
+      </main>
     );
   }
 
   if (error || !student) {
     return (
-      <div className="min-h-screen bg-[#f5f7fb] p-6">
-        <button
-          onClick={() => router.back()}
-          className="mb-5 inline-flex items-center gap-2 text-sm font-semibold text-slate-600 hover:text-slate-950"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          Back to Student
-        </button>
+      <main
+        className="
+          min-h-[calc(100vh-76px)]
+          bg-(--background)
+          px-4 py-6
+          sm:px-6
+          lg:px-8
+        "
+      >
+        <div className="mx-auto max-w-[1500px]">
+          <Button
+            variant="ghost"
+            onClick={() =>
+              router.back()
+            }
+          >
+            <ArrowLeft size={17} />
+            Back to Student
+          </Button>
 
-        <div className="rounded-2xl border border-red-200 bg-red-50 p-6 text-red-700">
-          {error || "Student not found"}
+          <div className="mt-5">
+            <ErrorState
+              title="Unable to load progress"
+              message={
+                error ||
+                "Student could not be found."
+              }
+              action={
+                <Button
+                  variant="outline"
+                  onClick={
+                    loadProgress
+                  }
+                >
+                  Try again
+                </Button>
+              }
+            />
+          </div>
         </div>
-      </div>
+      </main>
     );
   }
 
   return (
-    <main className="min-h-screen bg-[#f5f7fb] px-4 py-6 sm:px-6 lg:px-8">
-      <div className="mx-auto max-w-[1600px] space-y-6">
-        <div className="flex items-center justify-between">
-          <button
-            onClick={() => router.back()}
-            className="inline-flex items-center gap-2 text-sm font-semibold text-slate-600 hover:text-slate-950"
+    <main
+      className="
+        min-h-[calc(100vh-76px)]
+        bg-(--background)
+        px-4 py-6
+        sm:px-6
+        lg:px-8
+        xl:px-10
+      "
+    >
+      <div
+        className="
+          mx-auto max-w-[1500px]
+          space-y-6
+        "
+      >
+        {/* Page Navigation */}
+        <div
+          className="
+            flex flex-wrap
+            items-center
+            justify-between gap-3
+          "
+        >
+          <Button
+            variant="ghost"
+            onClick={() =>
+              router.back()
+            }
           >
-            <ArrowLeft className="h-4 w-4" />
+            <ArrowLeft size={17} />
             Back to Student
-          </button>
+          </Button>
 
-          <button
+          <Button
+            variant="outline"
             onClick={loadProgress}
-            className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-600 hover:border-orange-300 hover:text-orange-600"
           >
+            <RefreshCw size={15} />
             Refresh
-          </button>
+          </Button>
         </div>
 
-        <section className="rounded-2xl border border-[#e1e7ef] bg-white p-5 shadow-sm sm:p-7">
-          <div className="flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
-            <div className="flex items-center gap-4">
-              <div className="flex h-20 w-20 items-center justify-center rounded-2xl bg-orange-50 text-2xl font-bold text-orange-600">
-                {getInitials(student.name)}
+        {/* Student Header */}
+        <Card
+          padding="lg"
+          className="overflow-hidden"
+        >
+          <div
+            className="
+              flex flex-col gap-5
+              md:flex-row
+              md:items-center
+              md:justify-between
+            "
+          >
+            <div
+              className="
+                flex min-w-0
+                items-center gap-4
+              "
+            >
+              <div
+                className="
+                  flex h-16 w-16 shrink-0
+                  items-center justify-center
+                  rounded-2xl
+                  border border-(--line)
+                  bg-(--sidebar-logo-bg)
+                  text-lg font-black
+                  text-(--gold)
+                  sm:h-20 sm:w-20
+                  sm:text-2xl
+                "
+              >
+                {getInitials(
+                  student.name,
+                )}
               </div>
 
-              <div>
-                <div className="flex flex-wrap items-center gap-3">
-                  <h1 className="text-2xl font-bold text-slate-950 sm:text-3xl">
+              <div className="min-w-0">
+                <div
+                  className="
+                    flex flex-wrap
+                    items-center gap-2.5
+                  "
+                >
+                  <h1
+                    className="
+                      truncate text-2xl
+                      font-black
+                      tracking-tight
+                      text-(--foreground)
+                      sm:text-3xl
+                    "
+                  >
                     {student.name}
                   </h1>
-                  <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700">
-                    {student.status || "ACTIVE"}
-                  </span>
+
+                  <Badge
+                    variant={
+                      statusOf(
+                        student.status,
+                      ) === "ACTIVE"
+                        ? "success"
+                        : "default"
+                    }
+                  >
+                    {student.status ||
+                      "ACTIVE"}
+                  </Badge>
                 </div>
 
-                <p className="mt-2 text-sm text-slate-500">
-                  {student.currentBelt || "White Belt"}
-                  {student.plan?.name ? ` • ${student.plan.name}` : ""}
+                <p
+                  className="
+                    mt-2 text-sm
+                    text-(--ink-muted)
+                  "
+                >
+                  {student.currentBelt ||
+                    "White Belt"}
+
+                  {student.plan?.name
+                    ? ` • ${student.plan.name}`
+                    : ""}
                 </p>
 
-                <div className="mt-3 flex flex-wrap gap-4 text-sm text-slate-500">
+                <div
+                  className="
+                    mt-2 flex flex-wrap
+                    items-center gap-x-4
+                    gap-y-1.5
+                    text-xs
+                    text-(--ink-faint)
+                  "
+                >
                   {student.email && (
-                    <span className="inline-flex items-center gap-2">
-                      <Mail className="h-4 w-4" />
+                    <span
+                      className="
+                        inline-flex
+                        items-center gap-1.5
+                      "
+                    >
+                      <Mail size={13} />
                       {student.email}
                     </span>
                   )}
-                  {student.phone && <span>{student.phone}</span>}
+
+                  {student.phone && (
+                    <span>
+                      {student.phone}
+                    </span>
+                  )}
+
+                  {student.joinDate && (
+                    <span
+                      className="
+                        inline-flex
+                        items-center gap-1.5
+                      "
+                    >
+                      <CalendarCheck
+                        size={13}
+                      />
+                      Joined{" "}
+                      {formatDate(
+                        student.joinDate,
+                      )}
+                    </span>
+                  )}
                 </div>
               </div>
             </div>
 
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-6 py-4">
-              <p className="text-xs font-bold uppercase tracking-wide text-slate-400">
+            <div
+              className="
+                shrink-0 rounded-2xl
+                border border-(--line)
+                bg-(--surface)
+                px-5 py-4
+              "
+            >
+              <p
+                className="
+                  text-[10px] font-black
+                  uppercase
+                  tracking-[0.14em]
+                  text-(--ink-faint)
+                "
+              >
                 Current Training Day
               </p>
-              <p className="mt-1 text-3xl font-bold text-slate-950">
-                Day {summary.trainingDay}
+
+              <p
+                className="
+                  mt-1 text-3xl font-black
+                  tracking-tight
+                  text-(--foreground)
+                "
+              >
+                Day{" "}
+                {progress?.currentTrainingDay ??
+                  summary.trainingDay}
               </p>
             </div>
           </div>
-        </section>
+        </Card>
 
-        <section className="grid gap-5 md:grid-cols-2 xl:grid-cols-4">
+        {/* Summary Cards */}
+        <div
+          className="
+            grid gap-4
+            sm:grid-cols-2
+            xl:grid-cols-4
+          "
+        >
           <SummaryCard
             title="Training Day"
-            value={summary.trainingDay}
-            description="Present + absent classes"
-            icon={Target}
-            iconClass="bg-orange-50 text-orange-600"
+            value={
+              summary.trainingDay
+            }
+            subtitle="Present + absent classes"
+            icon={
+              <Target size={20} />
+            }
           />
 
           <SummaryCard
             title="Attendance"
             value={`${summary.attendancePercentage}%`}
-            description={`${Math.round(
-              (summary.attendancePercentage / 100) * summary.trainingDay,
-            )} present of ${summary.trainingDay} classes`}
-            icon={CheckCircle2}
-            iconClass="bg-emerald-50 text-emerald-600"
+            subtitle={`${attendanceStats.presentClasses} present of ${attendanceStats.totalClasses} classes`}
+            icon={
+              <CheckCircle2
+                size={20}
+              />
+            }
           />
 
           <SummaryCard
             title="Completed Days"
             value={`${summary.completedDays}/${summary.totalCurriculumDays}`}
-            description={`${summary.completedMakeups} completed makeups included`}
-            icon={CalendarCheck}
-            iconClass="bg-blue-50 text-blue-600"
+            subtitle={`${makeupStats.completed} completed makeups included`}
+            icon={
+              <CalendarCheck
+                size={20}
+              />
+            }
           />
 
           <SummaryCard
             title="Pending Makeups"
-            value={summary.pendingMakeups}
-            description="Classes requiring attention"
-            icon={XCircle}
-            iconClass="bg-red-50 text-red-600"
+            value={
+              makeupStats.pending
+            }
+            subtitle="Classes requiring attention"
+            icon={
+              <Clock3 size={20} />
+            }
           />
-        </section>
+        </div>
 
-        <section className="grid gap-6 lg:grid-cols-3">
-          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm lg:col-span-2">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-xl font-bold text-slate-950">
-                  Training Progress
-                </h2>
-                <p className="mt-1 text-sm text-slate-500">
-                  Your completed training days and curriculum progress
-                </p>
-              </div>
-              <TrendingUp className="h-5 w-5 text-orange-500" />
-            </div>
+        {/* Main Progress */}
+        <div
+          className="
+            grid gap-5
+            lg:grid-cols-3
+          "
+        >
+          <Card
+            padding="lg"
+            className="lg:col-span-2"
+          >
+            <SectionHeading
+              eyebrow="Development"
+              title="Training Progress"
+              description="
+                Track completed curriculum days and
+                overall training progression.
+              "
+              icon={
+                <TrendingUp size={19} />
+              }
+            />
 
-            <div className="mt-7 flex items-end justify-between">
-              <div>
-                <p className="text-sm text-slate-500">Completed Days</p>
-                <p className="mt-1 text-4xl font-bold text-slate-950">
-                  {summary.completedDays}
-                </p>
-              </div>
-              <p className="text-sm font-semibold text-slate-500">
-                of {summary.totalCurriculumDays} days
-              </p>
-            </div>
-
-            <div className="mt-5 h-3 overflow-hidden rounded-full bg-slate-100">
+            <div className="mt-7">
               <div
-                className="h-full rounded-full bg-orange-500 transition-all"
-                style={{ width: `${progressPercentage}%` }}
+                className="
+                  flex items-end
+                  justify-between gap-4
+                "
+              >
+                <div>
+                  <p
+                    className="
+                      text-[10px] font-black
+                      uppercase
+                      tracking-[0.14em]
+                      text-(--ink-faint)
+                    "
+                  >
+                    Completed Days
+                  </p>
+
+                  <p
+                    className="
+                      mt-2 text-4xl font-black
+                      tracking-tight
+                      text-(--foreground)
+                    "
+                  >
+                    {summary.completedDays}
+                  </p>
+                </div>
+
+                <p
+                  className="
+                    text-sm font-semibold
+                    text-(--ink-muted)
+                  "
+                >
+                  of{" "}
+                  {
+                    summary.totalCurriculumDays
+                  }{" "}
+                  days
+                </p>
+              </div>
+
+              <div
+                className="
+                  mt-5 h-3
+                  overflow-hidden
+                  rounded-full
+                  bg-(--line)
+                "
+              >
+                <div
+                  className="
+                    h-full rounded-full
+                    bg-(--accent)
+                    transition-[width]
+                    duration-700
+                  "
+                  style={{
+                    width: `${progressPercentage}%`,
+                  }}
+                />
+              </div>
+
+              <div
+                className="
+                  mt-2 flex
+                  items-center
+                  justify-between
+                  text-xs
+                "
+              >
+                <span
+                  className="
+                    text-(--ink-faint)
+                  "
+                >
+                  Curriculum progress
+                </span>
+
+                <span
+                  className="
+                    font-black
+                    text-(--accent)
+                  "
+                >
+                  {progressPercentage}%
+                </span>
+              </div>
+
+              <div
+                className="
+                  mt-6 grid gap-3
+                  sm:grid-cols-4
+                "
+              >
+                <MiniMetric
+                  label="Present"
+                  value={
+                    attendanceStats.presentClasses
+                  }
+                  valueClassName="
+                    text-(--green)
+                  "
+                />
+
+                <MiniMetric
+                  label="Absent"
+                  value={
+                    attendanceStats.absentClasses
+                  }
+                  valueClassName="
+                    text-(--red)
+                  "
+                />
+
+                <MiniMetric
+                  label="Makeups"
+                  value={
+                    makeupStats.completed
+                  }
+                  valueClassName="
+                    text-(--blue)
+                  "
+                />
+
+                <MiniMetric
+                  label="Pending"
+                  value={
+                    makeupStats.pending
+                  }
+                  valueClassName="
+                    text-(--orange)
+                  "
+                />
+              </div>
+            </div>
+          </Card>
+
+          {/* Rating */}
+          <Card padding="lg">
+            <SectionHeading
+              eyebrow="Evaluation"
+              title="Average Rating"
+              description="Overall performance rating."
+              icon={
+                <Star size={19} />
+              }
+            />
+
+            <div className="mt-7">
+              <div
+                className="
+                  flex items-end gap-1
+                "
+              >
+                <span
+                  className="
+                    text-5xl font-black
+                    tracking-tight
+                    text-(--foreground)
+                  "
+                >
+                  {averageRating !== null
+                    ? averageRating.toFixed(1)
+                    : "—"}
+                </span>
+
+                <span
+                  className="
+                    mb-1 text-xl
+                    font-semibold
+                    text-(--ink-faint)
+                  "
+                >
+                  /5
+                </span>
+              </div>
+
+              <div className="mt-5">
+                {averageRating !== null ? (
+                  <StarRating rating={averageRating} />
+                ) : (
+                  <p className="text-sm text-(--ink-faint)">
+                    No evaluations yet
+                  </p>
+                )}
+              </div>
+
+              <div
+                className="
+                  mt-6 rounded-xl
+                  border border-(--line)
+                  bg-(--surface)
+                  p-4
+                "
+              >
+                <p
+                  className="
+                    text-xs
+                    text-(--ink-muted)
+                  "
+                >
+                  Based on
+                </p>
+
+                <p
+                  className="
+                    mt-1 text-lg font-black
+                    text-(--foreground)
+                  "
+                >
+                  {performance.length}{" "}
+                  evaluation
+                  {performance.length ===
+                  1
+                    ? ""
+                    : "s"}
+                </p>
+              </div>
+            </div>
+          </Card>
+        </div>
+
+        {/* Attendance Breakdown */}
+        <Card padding="lg">
+          <SectionHeading
+            eyebrow="Attendance"
+            title="Attendance Overview"
+            description="
+              A complete summary of the student's class attendance.
+            "
+            icon={
+              <CalendarCheck size={19} />
+            }
+            action={
+              <Badge variant="success">
+                {
+                  attendanceStats.attendancePercentage
+                }
+                %
+              </Badge>
+            }
+          />
+
+          <div
+            className="
+              mt-5 grid gap-3
+              md:grid-cols-2
+              xl:grid-cols-4
+            "
+          >
+            <MetricRow
+              icon={
+                <CheckCircle2
+                  size={18}
+                />
+              }
+              iconClassName="
+                bg-(--green-soft)
+                text-(--green)
+              "
+              label="Present Classes"
+              description="Successfully attended"
+              value={
+                attendanceStats.presentClasses
+              }
+            />
+
+            <MetricRow
+              icon={
+                <XCircle size={18} />
+              }
+              iconClassName="
+                bg-(--red-soft)
+                text-(--red)
+              "
+              label="Absent Classes"
+              description="Missed training sessions"
+              value={
+                attendanceStats.absentClasses
+              }
+            />
+
+            <MetricRow
+              icon={
+                <Clock3 size={18} />
+              }
+              iconClassName="
+                bg-(--orange-soft)
+                text-(--orange)
+              "
+              label="Pending Makeups"
+              description="Classes still to complete"
+              value={
+                makeupStats.pending
+              }
+            />
+
+            <MetricRow
+              icon={
+                <CheckCircle2
+                  size={18}
+                />
+              }
+              iconClassName="
+                bg-(--blue-soft)
+                text-(--blue)
+              "
+              label="Completed Makeups"
+              description="Recovered classes"
+              value={
+                makeupStats.completed
+              }
+            />
+          </div>
+        </Card>
+
+        {/* Current Curriculum */}
+        <Card padding="lg">
+          <SectionHeading
+            eyebrow="Learning Path"
+            title={
+              currentCurriculum
+                ? "Current Curriculum"
+                : "Latest Curriculum Record"
+            }
+            description="
+              The student's current learning stage and skill focus.
+            "
+            icon={
+              <GraduationCap
+                size={19}
               />
+            }
+            action={
+              curriculumToDisplay ? (
+                <Badge variant="warning">
+                  Day{" "}
+                  {
+                    curriculumToDisplay.day
+                  }
+                </Badge>
+              ) : undefined
+            }
+          />
+
+          {curriculumToDisplay ? (
+            <div
+              className="
+                mt-5 grid gap-4
+                lg:grid-cols-[1fr_300px]
+              "
+            >
+              <div
+                className="
+                  rounded-2xl
+                  border border-(--line)
+                  bg-(--surface)
+                  p-5
+                "
+              >
+                <p
+                  className="
+                    text-[10px] font-black
+                    uppercase
+                    tracking-[0.14em]
+                    text-(--accent)
+                  "
+                >
+                  Day{" "}
+                  {curriculumToDisplay.day ??
+                    summary.trainingDay}
+                </p>
+
+                <h3
+                  className="
+                    mt-2 text-xl
+                    font-black
+                    text-(--foreground)
+                  "
+                >
+                  {curriculumToDisplay.title ||
+                    "Training curriculum"}
+                </h3>
+
+                {curriculumToDisplay.description && (
+                  <p
+                    className="
+                      mt-3 max-w-3xl
+                      text-sm leading-6
+                      text-(--ink-muted)
+                    "
+                  >
+                    {
+                      curriculumToDisplay.description
+                    }
+                  </p>
+                )}
+
+                {curriculumToDisplay.skill && (
+                  <div
+                    className="
+                      mt-5 inline-flex
+                      items-center gap-2
+                      rounded-lg
+                      bg-(--accent-soft)
+                      px-3 py-2
+                      text-(--accent)
+                    "
+                  >
+                    <Award size={15} />
+
+                    <span
+                      className="
+                        text-sm font-bold
+                      "
+                    >
+                      {
+                        curriculumToDisplay.skill
+                      }
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              <div
+                className="
+                  rounded-2xl
+                  border border-(--line)
+                  bg-(--accent-soft)
+                  p-5
+                "
+              >
+                <p
+                  className="
+                    text-[10px] font-black
+                    uppercase
+                    tracking-[0.14em]
+                    text-(--accent)
+                  "
+                >
+                  Training Focus
+                </p>
+
+                <p
+                  className="
+                    mt-2 text-sm
+                    font-semibold
+                    leading-6
+                    text-(--foreground-soft)
+                  "
+                >
+                  Stay consistent with the
+                  current curriculum and focus
+                  on mastering the assigned
+                  skills.
+                </p>
+              </div>
             </div>
+          ) : (
+            <EmptyState
+              className="mt-5 min-h-[220px]"
+              title="No current curriculum"
+              description="
+                Curriculum information will appear once
+                training progress is recorded.
+              "
+              icon={
+                <GraduationCap
+                  size={22}
+                />
+              }
+            />
+          )}
+        </Card>
 
-            <div className="mt-6 grid gap-3 sm:grid-cols-4">
-              <div className="rounded-xl bg-slate-50 p-4">
-                <p className="text-xs text-slate-400">Present</p>
-                <p className="mt-2 text-2xl font-bold text-emerald-600">
-                  {summary.completedDays || 0}
-                </p>
+        {/* Belt Progression */}
+        <Card padding="lg">
+          <SectionHeading
+            eyebrow="Achievement Path"
+            title="Belt Progression"
+            description="
+              Track the student's current achievement path and upcoming milestone.
+            "
+            icon={
+              <Award size={19} />
+            }
+          />
+
+          {nextMilestone ? (
+            <div className="mt-5">
+              <div
+                className="
+                  rounded-2xl
+                  border border-(--line)
+                  bg-(--accent-soft)
+                  p-5 sm:p-6
+                "
+              >
+                <div
+                  className="
+                    flex flex-col gap-5
+                    sm:flex-row
+                    sm:items-center
+                  "
+                >
+                  <div
+                    className="
+                      flex h-16 w-16
+                      shrink-0
+                      items-center
+                      justify-center
+                      rounded-2xl
+                      bg-(--card)
+                      text-(--accent)
+                      shadow-sm
+                    "
+                  >
+                    <Award size={28} />
+                  </div>
+
+                  <div>
+                    <p
+                      className="
+                        text-[10px]
+                        font-black
+                        uppercase
+                        tracking-[0.14em]
+                        text-(--accent)
+                      "
+                    >
+                      Next Milestone
+                    </p>
+
+                    <h3
+                      className="
+                        mt-1 text-2xl
+                        font-black
+                        text-(--foreground)
+                      "
+                    >
+                      {
+                        nextMilestone
+                          .belt
+                      }{" "}
+                      Belt
+                    </h3>
+
+                    <p
+                      className="
+                        mt-1 text-xs
+                        text-(--ink-muted)
+                      "
+                    >
+                      Target Day{" "}
+                      {
+                        nextMilestone
+                          .day
+                      }
+                    </p>
+                  </div>
+                </div>
+
+                <div
+                  className="
+                    mt-5 rounded-xl
+                    border border-(--line)
+                    bg-(--card)
+                    p-4
+                  "
+                >
+                  <p
+                    className="
+                      text-sm font-bold
+                      text-(--foreground-soft)
+                    "
+                  >
+                    {nextMilestone.skill || "Milestone requirement"}
+                  </p>
+
+                  {progress
+                    .nextMilestone
+                    .description && (
+                    <p
+                      className="
+                        mt-2 text-sm
+                        leading-6
+                        text-(--ink-muted)
+                      "
+                    >
+                      {
+                        nextMilestone
+                          .description
+                      }
+                    </p>
+                  )}
+                </div>
               </div>
-              <div className="rounded-xl bg-slate-50 p-4">
-                <p className="text-xs text-slate-400">Absent</p>
-                <p className="mt-2 text-2xl font-bold text-red-500">
-                  {summary.totalCurriculumDays - summary.completedDays}
-                </p>
-              </div>
-              <div className="rounded-xl bg-slate-50 p-4">
-                <p className="text-xs text-slate-400">Completed Makeups</p>
-                <p className="mt-2 text-2xl font-bold text-blue-600">
-                  {summary.completedMakeups}
-                </p>
-              </div>
-              <div className="rounded-xl bg-slate-50 p-4">
-                <p className="text-xs text-slate-400">Pending Makeups</p>
-                <p className="mt-2 text-2xl font-bold text-red-500">
-                  {summary.pendingMakeups}
-                </p>
-              </div>
-            </div>
-          </div>
 
-          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <div className="flex items-center gap-4">
-              <div className="rounded-2xl bg-amber-50 p-3">
-                <Star className="h-6 w-6 text-amber-500" />
-              </div>
-              <div>
-                <h2 className="text-xl font-bold text-slate-950">
-                  Average Rating
-                </h2>
-                <p className="text-sm text-slate-500">Overall performance</p>
-              </div>
-            </div>
+              {achievedMilestone && (
+                <div
+                  className="
+                    mt-4 flex
+                    items-center gap-3
+                    rounded-xl
+                    border border-(--green)/20
+                    bg-(--green-soft)
+                    p-4
+                  "
+                >
+                  <CheckCircle2
+                    size={20}
+                    className="
+                      shrink-0
+                      text-(--green)
+                    "
+                  />
 
-            <div className="mt-8 flex items-end gap-1">
-              <p className="text-5xl font-bold text-slate-950">
-                {averageRating.toFixed(1)}
-              </p>
-              <p className="mb-1 text-xl font-semibold text-slate-400">/5</p>
-            </div>
+                  <div>
+                    <p
+                      className="
+                        text-xs font-black
+                        text-(--green)
+                      "
+                    >
+                      Latest Achievement
+                    </p>
 
-            <div className="mt-5">{renderStars(averageRating)}</div>
+                    <p
+                      className="
+                        mt-1 text-sm
+                        font-semibold
+                        text-(--foreground-soft)
+                      "
+                    >
+                      {achievedMilestone.belt || "Achievement"}{" "}
+                      Belt
 
-            <p className="mt-5 text-sm text-slate-500">
-              Based on {performance.length} performance evaluation
-              {performance.length === 1 ? "" : "s"}.
-            </p>
-          </div>
-        </section>
-
-        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <div className="flex items-center gap-3">
-            <GraduationCap className="h-6 w-6 text-orange-500" />
-            <div>
-              <h2 className="text-xl font-bold text-slate-950">
-                Current Curriculum
-              </h2>
-              <p className="text-sm text-slate-500">
-                The student&apos;s current learning step
-              </p>
-            </div>
-          </div>
-
-          {currentCurriculum ? (
-            <div className="mt-5 rounded-xl bg-slate-50 p-5">
-              <p className="text-xs font-bold uppercase tracking-wide text-orange-500">
-                Day {currentCurriculum.day ?? summary.trainingDay}
-              </p>
-              <h3 className="mt-2 text-lg font-bold text-slate-950">
-                {currentCurriculum.title || "Current training curriculum"}
-              </h3>
-              {currentCurriculum.description && (
-                <p className="mt-2 text-sm text-slate-500">
-                  {currentCurriculum.description}
-                </p>
-              )}
-              {currentCurriculum.skill && (
-                <p className="mt-3 text-sm font-semibold text-slate-700">
-                  Skill: {currentCurriculum.skill}
-                </p>
+                      {achievedMilestone.skill
+                        ? ` • ${achievedMilestone.skill}`
+                        : ""}
+                    </p>
+                  </div>
+                </div>
               )}
             </div>
           ) : (
-            <div className="mt-5 rounded-xl bg-slate-50 p-5 text-sm text-slate-500">
-              No current curriculum data available.
-            </div>
+            <EmptyState
+              className="mt-5 min-h-[240px]"
+              title="No upcoming milestone"
+              description="
+                Belt progression details will appear as the
+                student advances through the curriculum.
+              "
+              icon={
+                <Award size={22} />
+              }
+            />
           )}
-        </section>
+        </Card>
 
-        <section className="grid gap-6 lg:grid-cols-2">
-          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h2 className="text-xl font-bold text-slate-950">
-              Attendance Records
-            </h2>
+        {/* Detailed Records */}
+        <div
+          className="
+            grid gap-5
+            xl:grid-cols-2
+          "
+        >
+          {/* Attendance History */}
+          <Card padding="lg">
+            <SectionHeading
+              eyebrow="Class Records"
+              title="Attendance History"
+              icon={
+                <CalendarCheck
+                  size={19}
+                />
+              }
+              action={
+                <Badge variant="warning">
+                  {attendance.length}{" "}
+                  Records
+                </Badge>
+              }
+            />
 
-            <div className="mt-5 space-y-3">
-              {attendance.length ? (
-                attendance.map((item, index) => (
-                  <div
-                    key={item._id || `${item.date}-${index}`}
-                    className="flex items-center justify-between rounded-xl bg-slate-50 p-4"
-                  >
-                    <div>
-                      <p className="font-semibold text-slate-800">
-                        {item.curriculumTitle ||
-                          `Training Day ${item.planDay ?? "—"}`}
-                      </p>
-                      <p className="mt-1 text-xs text-slate-500">
-                        {formatDate(item.date)}
-                      </p>
-                    </div>
-                    <span
-                      className={`rounded-full px-3 py-1 text-xs font-bold ${
-                        statusOf(item.status) === "PRESENT"
-                          ? "bg-emerald-50 text-emerald-700"
-                          : "bg-red-50 text-red-700"
-                      }`}
-                    >
-                      {statusOf(item.status) || "UNKNOWN"}
-                    </span>
-                  </div>
-                ))
-              ) : (
-                <p className="rounded-xl bg-slate-50 p-5 text-sm text-slate-500">
-                  No attendance records found.
-                </p>
-              )}
-            </div>
-          </div>
+            {attendance.length ? (
+              <div
+                className="
+                  mt-5 max-h-[420px]
+                  space-y-2.5
+                  overflow-y-auto pr-1
+                "
+              >
+                {attendance.map(
+                  (
+                    item,
+                    index,
+                  ) => {
+                    const present =
+                      statusOf(
+                        item.status,
+                      ) ===
+                      "PRESENT";
 
-          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h2 className="text-xl font-bold text-slate-950">
-              Performance Records
-            </h2>
+                    return (
+                      <div
+                        key={
+                          item._id ||
+                          `${item.date}-${index}`
+                        }
+                        className="
+                          flex items-center
+                          justify-between gap-3
+                          rounded-xl
+                          border border-(--line)
+                          bg-(--surface)
+                          p-3.5
+                        "
+                      >
+                        <div
+                          className="
+                            flex min-w-0
+                            items-center gap-3
+                          "
+                        >
+                          <div
+                            className={`
+                              flex h-9 w-9
+                              shrink-0
+                              items-center
+                              justify-center
+                              rounded-lg
+                              ${
+                                present
+                                  ? "bg-(--green-soft) text-(--green)"
+                                  : "bg-(--red-soft) text-(--red)"
+                              }
+                            `}
+                          >
+                            {present ? (
+                              <CheckCircle2
+                                size={17}
+                              />
+                            ) : (
+                              <XCircle
+                                size={17}
+                              />
+                            )}
+                          </div>
 
-            <div className="mt-5 space-y-3">
-              {performance.length ? (
-                performance.map((item, index) => (
-                  <div
-                    key={item._id || `${item.evaluationDate}-${index}`}
-                    className="rounded-xl bg-slate-50 p-4"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="font-semibold text-slate-800">
-                          {item.curriculumTitle ||
-                            item.skill ||
-                            `Evaluation ${index + 1}`}
-                        </p>
-                        <p className="mt-1 text-xs text-slate-500">
-                          {formatDate(item.evaluationDate)}
-                        </p>
+                          <div className="min-w-0">
+                            <p
+                              className="
+                                truncate
+                                text-sm font-bold
+                                text-(--foreground-soft)
+                              "
+                            >
+                              {item.curriculumTitle ||
+                                `Training Day ${
+                                  item.planDay ??
+                                  "—"
+                                }`}
+                            </p>
+
+                            <p
+                              className="
+                                mt-1 text-xs
+                                text-(--ink-faint)
+                              "
+                            >
+                              {formatDate(
+                                item.date,
+                              )}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div
+                          className="
+                            shrink-0 text-right
+                          "
+                        >
+                          <p
+                            className="
+                              text-[10px]
+                              font-black
+                              uppercase
+                              text-(--foreground-soft)
+                            "
+                          >
+                            {statusOf(
+                              item.status,
+                            ) ||
+                              "UNKNOWN"}
+                          </p>
+
+                          {item.makeupRequired && (
+                            <p
+                              className="
+                                mt-1 text-[10px]
+                                font-bold
+                                text-(--orange)
+                              "
+                            >
+                              {item.makeupCompleted
+                                ? "Makeup completed"
+                                : "Makeup pending"}
+                            </p>
+                          )}
+                        </div>
                       </div>
-                      <div className="text-right">
-                        <p className="font-bold text-slate-950">
-                          {numberValue(item.rating).toFixed(1)}/5
-                        </p>
-                        {renderStars(numberValue(item.rating))}
+                    );
+                  },
+                )}
+              </div>
+            ) : (
+              <EmptyState
+                className="mt-5 min-h-[250px]"
+                title="No attendance records"
+                description="
+                  Attendance records will appear after classes
+                  are marked.
+                "
+                icon={
+                  <CalendarCheck
+                    size={22}
+                  />
+                }
+              />
+            )}
+          </Card>
+
+          {/* Performance History */}
+          <Card padding="lg">
+            <SectionHeading
+              eyebrow="Evaluation History"
+              title="Performance Records"
+              icon={
+                <Award size={19} />
+              }
+              action={
+                <Badge variant="info">
+                  {evaluationCount}{" "}
+                  Reports
+                </Badge>
+              }
+            />
+
+            {performance.length ? (
+              <div
+                className="
+                  mt-5 max-h-[420px]
+                  space-y-2.5
+                  overflow-y-auto pr-1
+                "
+              >
+                {performance.map(
+                  (
+                    item,
+                    index,
+                  ) => {
+                    const rating =
+                      numberValue(
+                        item.rating,
+                      );
+
+                    return (
+                      <div
+                        key={
+                          item._id ||
+                          `${item.evaluationDate}-${index}`
+                        }
+                        className="
+                          rounded-xl
+                          border border-(--line)
+                          bg-(--surface)
+                          p-4
+                        "
+                      >
+                        <div
+                          className="
+                            flex items-start
+                            justify-between gap-4
+                          "
+                        >
+                          <div className="min-w-0">
+                            <p
+                              className="
+                                truncate
+                                text-sm font-bold
+                                text-(--foreground-soft)
+                              "
+                            >
+                              {item.curriculumTitle ||
+                                item.skill ||
+                                `Evaluation ${
+                                  index + 1
+                                }`}
+                            </p>
+
+                            <p
+                              className="
+                                mt-1 text-xs
+                                text-(--ink-faint)
+                              "
+                            >
+                              {formatDate(
+                                item.evaluationDate,
+                              )}
+                            </p>
+                          </div>
+
+                          <div
+                            className="
+                              shrink-0
+                              text-right
+                            "
+                          >
+                            <p
+                              className="
+                                text-sm font-black
+                                text-(--foreground)
+                              "
+                            >
+                              {rating.toFixed(
+                                1,
+                              )}
+                              /5
+                            </p>
+
+                            <div className="mt-1">
+                              <StarRating
+                                rating={
+                                  rating
+                                }
+                              />
+                            </div>
+                          </div>
+                        </div>
+
+                        {item.remarks && (
+                          <div
+                            className="
+                              mt-3 rounded-lg
+                              border
+                              border-(--line)
+                              bg-(--card)
+                              p-3
+                            "
+                          >
+                            <p
+                              className="
+                                text-sm
+                                leading-5
+                                text-(--ink-muted)
+                              "
+                            >
+                              {
+                                item.remarks
+                              }
+                            </p>
+                          </div>
+                        )}
                       </div>
-                    </div>
-                    {item.remarks && (
-                      <p className="mt-3 text-sm text-slate-600">
-                        {item.remarks}
-                      </p>
-                    )}
-                  </div>
-                ))
-              ) : (
-                <p className="rounded-xl bg-slate-50 p-5 text-sm text-slate-500">
-                  No performance records found.
-                </p>
-              )}
-            </div>
-          </div>
-        </section>
+                    );
+                  },
+                )}
+              </div>
+            ) : (
+              <EmptyState
+                className="mt-5 min-h-[250px]"
+                title="No performance records"
+                description="
+                  Performance evaluations will appear after
+                  an instructor submits them.
+                "
+                icon={
+                  <Award size={22} />
+                }
+              />
+            )}
+          </Card>
+        </div>
       </div>
     </main>
   );

@@ -1,11 +1,6 @@
 "use client";
 
-import {
-  FormEvent,
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 
 import {
   Building2,
@@ -20,9 +15,19 @@ import {
 } from "lucide-react";
 
 import {
-  createBranch,
-  getBranches,
-} from "@/lib/api";
+  Badge,
+  Button,
+  Card,
+  EmptyState,
+  ErrorState,
+  Input,
+  LoadingSpinner,
+  Modal,
+  PageHeader,
+  SummaryCard,
+} from "@/components/ui";
+
+import { createBranch, getBranches } from "@/lib/api";
 
 type Branch = {
   _id: string;
@@ -47,44 +52,49 @@ const initialForm: BranchForm = {
 export default function BranchesPage() {
   const [branches, setBranches] = useState<Branch[]>([]);
   const [showForm, setShowForm] = useState(false);
-
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   const [error, setError] = useState("");
+  const [formError, setFormError] = useState("");
   const [search, setSearch] = useState("");
 
-  const [form, setForm] =
-    useState<BranchForm>(initialForm);
+  const [form, setForm] = useState<BranchForm>(initialForm);
 
-  const loadBranches = async () => {
+  const loadBranches = async (refresh = false) => {
     try {
-      setLoading(true);
+      if (refresh) {
+        setRefreshing(true);
+      } else {
+        setLoading(true);
+      }
+
       setError("");
 
       const result = await getBranches();
-
       setBranches(result.branches || []);
-    } catch (error) {
-      console.error(error);
+    } catch (caughtError) {
+      console.error(caughtError);
 
       setError(
-        error instanceof Error
-          ? error.message
-          : "Failed to load branches",
+        caughtError instanceof Error
+          ? caughtError.message
+          : "Failed to load branches.",
       );
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   };
 
   useEffect(() => {
-    loadBranches();
+    void loadBranches();
   }, []);
 
   const openForm = () => {
     setForm(initialForm);
-    setError("");
+    setFormError("");
     setShowForm(true);
   };
 
@@ -93,41 +103,43 @@ export default function BranchesPage() {
 
     setShowForm(false);
     setForm(initialForm);
+    setFormError("");
   };
 
-  const handleSubmit = async (
-    event: FormEvent<HTMLFormElement>,
-  ) => {
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
-    if (!form.name.trim() || !form.address.trim()) {
-      setError(
-        "Please enter the branch name and complete address.",
-      );
+    const name = form.name.trim();
+    const address = form.address.trim();
+    const phone = form.phone.trim();
+
+    if (!name || !address) {
+      setFormError("Please enter the branch name and complete address.");
       return;
     }
 
     try {
       setSubmitting(true);
+      setFormError("");
       setError("");
 
       await createBranch({
-        name: form.name.trim(),
-        address: form.address.trim(),
-        phone: form.phone.trim(),
+        name,
+        address,
+        phone,
       });
 
-      setForm(initialForm);
       setShowForm(false);
+      setForm(initialForm);
 
       await loadBranches();
-    } catch (error) {
-      console.error(error);
+    } catch (caughtError) {
+      console.error(caughtError);
 
-      setError(
-        error instanceof Error
-          ? error.message
-          : "Failed to create branch",
+      setFormError(
+        caughtError instanceof Error
+          ? caughtError.message
+          : "Failed to create branch.",
       );
     } finally {
       setSubmitting(false);
@@ -143,454 +155,469 @@ export default function BranchesPage() {
       return (
         branch.name.toLowerCase().includes(query) ||
         branch.address.toLowerCase().includes(query) ||
-        branch.phone?.toLowerCase().includes(query)
+        Boolean(branch.phone?.toLowerCase().includes(query))
       );
     });
   }, [branches, search]);
 
-  const activeBranches = branches.filter(
-    (branch) => branch.isActive,
-  ).length;
+  const activeBranches = useMemo(
+    () => branches.filter((branch) => branch.isActive).length,
+    [branches],
+  );
 
-  const inactiveBranches = branches.filter(
-    (branch) => !branch.isActive,
-  ).length;
+  const inactiveBranches = branches.length - activeBranches;
 
   return (
-    <main className="min-h-screen bg-[#f6f7fb] px-4 py-5 sm:px-6 lg:px-8">
-      {/* Page Header */}
-      <div className="mb-8 flex flex-col justify-between gap-5 sm:flex-row sm:items-center">
-        <div>
-          <div className="mb-2 flex items-center gap-2 text-sm font-medium text-orange-600">
-            <Building2 size={16} />
-            Academy Management
+    <div
+      className="
+        min-h-screen
+        bg-(--background)
+        px-4
+        py-6
+        text-(--foreground)
+        transition-colors
+        duration-300
+        sm:px-6
+        lg:px-8
+      "
+    >
+      <div className="mx-auto w-full max-w-[1440px]">
+        <PageHeader
+          eyebrow="Academy Management"
+          title="Branch Management"
+          description="Create and manage your academy branches, locations, and operational details."
+          actions={
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                variant="outline"
+                onClick={() => void loadBranches(true)}
+                disabled={loading || refreshing}
+              >
+                <RefreshCw
+                  size={17}
+                  className={refreshing ? "animate-spin" : ""}
+                />
+                Refresh
+              </Button>
+
+              <Button variant="primary" onClick={openForm}>
+                <Plus size={18} />
+                Add Branch
+              </Button>
+            </div>
+          }
+        />
+
+        {error && (
+          <div className="mb-6">
+            <ErrorState
+              title="Unable to load branches"
+              message={error}
+              action={
+                <Button
+                  variant="secondary"
+                  onClick={() => void loadBranches(true)}
+                  disabled={refreshing}
+                >
+                  <RefreshCw
+                    size={16}
+                    className={refreshing ? "animate-spin" : ""}
+                  />
+                  Try again
+                </Button>
+              }
+            />
+          </div>
+        )}
+
+        <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          <SummaryCard
+            title="Total Branches"
+            value={branches.length}
+            subtitle="All academy locations"
+            icon={<Building2 size={20} />}
+          />
+
+          <SummaryCard
+            title="Active Branches"
+            value={activeBranches}
+            subtitle="Currently operational"
+            icon={<CheckCircle2 size={20} />}
+          />
+
+          <SummaryCard
+            title="Inactive Branches"
+            value={inactiveBranches}
+            subtitle="Currently unavailable"
+            icon={<Building2 size={20} />}
+          />
+        </div>
+
+        <Card padding="none">
+          <div
+            className="
+              flex
+              flex-col
+              gap-4
+              border-b
+              border-(--line)
+              px-5
+              py-5
+              sm:px-6
+              lg:flex-row
+              lg:items-center
+              lg:justify-between
+            "
+          >
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-lg font-extrabold tracking-tight text-(--foreground)">
+                  Branch Directory
+                </h2>
+
+                <Badge variant="neutral">
+                  {branches.length}
+                </Badge>
+              </div>
+
+              <p className="mt-1 text-sm text-(--ink-muted)">
+                View your academy locations and their operational status.
+              </p>
+            </div>
+
+            <div className="relative w-full lg:max-w-sm">
+              <Search
+                size={17}
+                className="
+                  pointer-events-none
+                  absolute
+                  left-3.5
+                  top-1/2
+                  -translate-y-1/2
+                  text-(--ink-faint)
+                "
+              />
+
+              <Input
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Search branches..."
+                className="pl-10"
+                aria-label="Search branches"
+              />
+            </div>
           </div>
 
-          <h1 className="text-3xl font-bold tracking-tight text-slate-950">
-            Branch Management
-          </h1>
+          <div className="p-5 sm:p-6">
+            {loading ? (
+              <div className="flex min-h-64 items-center justify-center">
+                <LoadingSpinner label="Loading branches..." />
+              </div>
+            ) : filteredBranches.length === 0 ? (
+              <EmptyState
+                icon={<Building2 size={26} />}
+                title={
+                  search
+                    ? "No matching branches found"
+                    : "No branches created yet"
+                }
+                description={
+                  search
+                    ? "Try another branch name, address, or phone number."
+                    : "Create your first branch using the Add Branch button."
+                }
+                action={
+                  !search ? (
+                    <Button variant="primary" onClick={openForm}>
+                      <Plus size={17} />
+                      Create First Branch
+                    </Button>
+                  ) : undefined
+                }
+              />
+            ) : (
+              <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
+                {filteredBranches.map((branch) => (
+                  <BranchCard key={branch._id} branch={branch} />
+                ))}
+              </div>
+            )}
+          </div>
 
-          <p className="mt-2 max-w-xl text-sm text-slate-500">
-            Create and manage your academy branches,
-            locations, and operational details.
+          {!loading && filteredBranches.length > 0 && (
+            <div
+              className="
+                border-t
+                border-(--line)
+                px-5
+                py-4
+                sm:px-6
+              "
+            >
+              <p className="text-xs font-medium text-(--ink-faint)">
+                Showing {filteredBranches.length} of {branches.length}{" "}
+                branches
+              </p>
+            </div>
+          )}
+        </Card>
+      </div>
+
+      <Modal
+        open={showForm}
+        onClose={closeForm}
+        title="Create New Branch"
+        description="Add the details of your new academy branch."
+        size="md"
+        footer={
+          <div className="flex w-full flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={closeForm}
+              disabled={submitting}
+            >
+              Cancel
+            </Button>
+
+            <Button
+              type="submit"
+              form="create-branch-form"
+              variant="primary"
+              loading={submitting}
+            >
+              <Plus size={17} />
+              Create Branch
+            </Button>
+          </div>
+        }
+      >
+        <form
+          id="create-branch-form"
+          onSubmit={handleSubmit}
+          className="space-y-5"
+        >
+          {formError && (
+            <div
+              className="
+                flex
+                items-start
+                gap-3
+                rounded-xl
+                border
+                border-(--danger-border)
+                bg-(--danger-soft)
+                p-4
+                text-sm
+                font-medium
+                text-(--danger)
+              "
+            >
+              <X className="mt-0.5 h-4 w-4 shrink-0" />
+              <p>{formError}</p>
+            </div>
+          )}
+
+          <div className="grid gap-5 sm:grid-cols-2">
+            <div>
+              <label
+                htmlFor="branch-name"
+                className="mb-2 block text-sm font-semibold text-(--foreground)"
+              >
+                Branch Name
+              </label>
+
+              <Input
+                id="branch-name"
+                required
+                value={form.name}
+                onChange={(event) =>
+                  setForm((previous) => ({
+                    ...previous,
+                    name: event.target.value,
+                  }))
+                }
+                placeholder="e.g. Faridabad Main Branch"
+              />
+            </div>
+
+            <div>
+              <label
+                htmlFor="branch-phone"
+                className="mb-2 block text-sm font-semibold text-(--foreground)"
+              >
+                Phone Number
+              </label>
+
+              <Input
+                id="branch-phone"
+                type="tel"
+                value={form.phone}
+                onChange={(event) =>
+                  setForm((previous) => ({
+                    ...previous,
+                    phone: event.target.value,
+                  }))
+                }
+                placeholder="e.g. 9876543210"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label
+              htmlFor="branch-address"
+              className="mb-2 block text-sm font-semibold text-(--foreground)"
+            >
+              Complete Address
+            </label>
+
+            <textarea
+              id="branch-address"
+              required
+              rows={4}
+              value={form.address}
+              onChange={(event) =>
+                setForm((previous) => ({
+                  ...previous,
+                  address: event.target.value,
+                }))
+              }
+              placeholder="Enter complete branch address"
+              className="
+                block
+                w-full
+                resize-none
+                rounded-xl
+                border
+                border-(--input-border)
+                bg-(--input-bg)
+                px-3.5
+                py-3
+                text-sm
+                text-(--foreground)
+                outline-none
+                transition
+                duration-200
+                placeholder:text-(--input-placeholder)
+                focus:border-(--accent)
+                focus:ring-4
+                focus:ring-(--accent-ring)
+              "
+            />
+          </div>
+        </form>
+      </Modal>
+    </div>
+  );
+}
+
+function BranchCard({ branch }: { branch: Branch }) {
+  return (
+    <Card
+      padding="md"
+      className="
+        group
+        overflow-hidden
+        transition-all
+        duration-200
+        hover:-translate-y-0.5
+      "
+    >
+      <div className="flex items-start justify-between gap-4">
+        <div
+          className="
+            flex
+            h-11
+            w-11
+            shrink-0
+            items-center
+            justify-center
+            rounded-xl
+            bg-(--accent-soft)
+            text-(--accent)
+            transition-transform
+            duration-200
+            group-hover:scale-105
+          "
+        >
+          <Building2 size={21} />
+        </div>
+
+        <Badge variant={branch.isActive ? "success" : "neutral"}>
+          <span
+            className={[
+              "h-1.5 w-1.5 rounded-full",
+              branch.isActive
+                ? "bg-(--green)"
+                : "bg-(--ink-faint)",
+            ].join(" ")}
+          />
+          {branch.isActive ? "Active" : "Inactive"}
+        </Badge>
+      </div>
+
+      <h3 className="mt-5 truncate text-lg font-extrabold text-(--foreground)">
+        {branch.name}
+      </h3>
+
+      <div className="mt-4 space-y-3">
+        <div className="flex items-start gap-3">
+          <MapPin
+            size={17}
+            className="mt-0.5 shrink-0 text-(--ink-faint)"
+          />
+
+          <p className="text-sm leading-6 text-(--ink-muted)">
+            {branch.address}
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={openForm}
-          className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-slate-950/10 transition hover:bg-orange-600"
-        >
-          <Plus size={18} />
-          Add Branch
-        </button>
-      </div>
-
-      {/* Summary Cards */}
-      <div className="mb-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-        <SummaryCard
-          icon={<Building2 size={21} />}
-          label="Total Branches"
-          value={branches.length}
-          description="All academy locations"
-        />
-
-        <SummaryCard
-          icon={<CheckCircle2 size={20} />}
-          label="Active Branches"
-          value={activeBranches}
-          description="Currently operational"
-        />
-
-        <SummaryCard
-          icon={<Building2 size={20} />}
-          label="Inactive Branches"
-          value={inactiveBranches}
-          description="Currently unavailable"
-        />
-      </div>
-
-      {/* Error */}
-      {error && (
-        <div className="mb-6 flex items-center justify-between gap-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          <span>{error}</span>
-
-          <button
-            type="button"
-            onClick={() => setError("")}
-            className="rounded-md p-1 transition hover:bg-red-100"
-          >
-            <X size={16} />
-          </button>
-        </div>
-      )}
-
-      {/* Search and Directory */}
-      <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <div className="flex flex-col justify-between gap-5 border-b border-slate-100 px-6 py-5 lg:flex-row lg:items-center">
-          <div>
-            <h2 className="text-xl font-bold tracking-tight text-slate-950">
-              Branch directory
-            </h2>
-
-            <p className="mt-1 text-sm text-slate-500">
-              View and manage your academy locations.
-            </p>
-          </div>
-
-          <div className="relative w-full lg:w-80">
-            <Search
-              size={17}
-              className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400"
+        {branch.phone && (
+          <div className="flex items-center gap-3">
+            <Phone
+              size={16}
+              className="shrink-0 text-(--ink-faint)"
             />
 
-            <input
-              type="text"
-              value={search}
-              onChange={(event) =>
-                setSearch(event.target.value)
-              }
-              placeholder="Search branches..."
-              className="h-12 w-full rounded-xl border border-slate-200 bg-slate-50 pl-10 pr-4 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-orange-400 focus:bg-white focus:ring-4 focus:ring-orange-100"
-            />
-          </div>
-        </div>
-
-        {/* Content */}
-        <div className="p-6">
-          {loading ? (
-            <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
-              {[1, 2, 3].map((item) => (
-                <div
-                  key={item}
-                  className="animate-pulse rounded-2xl border border-slate-200 bg-white p-5"
-                >
-                  <div className="mb-5 flex items-center justify-between">
-                    <div className="h-12 w-12 rounded-xl bg-slate-200" />
-                    <div className="h-6 w-16 rounded-full bg-slate-200" />
-                  </div>
-
-                  <div className="mb-3 h-5 w-3/4 rounded bg-slate-200" />
-                  <div className="mb-2 h-4 w-full rounded bg-slate-200" />
-                  <div className="h-4 w-2/3 rounded bg-slate-200" />
-                </div>
-              ))}
-            </div>
-          ) : filteredBranches.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-6 py-14 text-center">
-              <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-white text-slate-500 shadow-sm">
-                <Building2 size={28} />
-              </div>
-
-              <h2 className="text-lg font-semibold text-slate-800">
-                {search
-                  ? "No matching branches found"
-                  : "No branches created yet"}
-              </h2>
-
-              <p className="mx-auto mt-2 max-w-md text-sm text-slate-500">
-                {search
-                  ? "Try searching with another branch name, address, or phone number."
-                  : "Create your first branch using the Add Branch button."}
-              </p>
-
-              {!search && (
-                <button
-                  type="button"
-                  onClick={openForm}
-                  className="mt-5 inline-flex items-center gap-2 rounded-xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-orange-600"
-                >
-                  <Plus size={17} />
-                  Create First Branch
-                </button>
-              )}
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
-              {filteredBranches.map((branch) => (
-                <div
-                  key={branch._id}
-                  className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:border-orange-200 hover:shadow-md"
-                >
-                  {/* Card Top */}
-                  <div className="mb-5 flex items-start justify-between">
-                    <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-orange-50 text-orange-600">
-                      <Building2 size={22} />
-                    </div>
-
-                    <span
-                      className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold ${
-                        branch.isActive
-                          ? "bg-emerald-50 text-emerald-700"
-                          : "bg-slate-100 text-slate-600"
-                      }`}
-                    >
-                      <span
-                        className={`h-1.5 w-1.5 rounded-full ${
-                          branch.isActive
-                            ? "bg-emerald-500"
-                            : "bg-slate-400"
-                        }`}
-                      />
-
-                      {branch.isActive
-                        ? "Active"
-                        : "Inactive"}
-                    </span>
-                  </div>
-
-                  {/* Branch Name */}
-                  <h2 className="text-lg font-bold text-slate-950">
-                    {branch.name}
-                  </h2>
-
-                  {/* Details */}
-                  <div className="mt-4 space-y-3">
-                    <div className="flex items-start gap-3">
-                      <MapPin
-                        size={17}
-                        className="mt-0.5 shrink-0 text-slate-400"
-                      />
-
-                      <p className="text-sm leading-6 text-slate-600">
-                        {branch.address}
-                      </p>
-                    </div>
-
-                    {branch.phone && (
-                      <div className="flex items-center gap-3">
-                        <Phone
-                          size={16}
-                          className="shrink-0 text-slate-400"
-                        />
-
-                        <p className="text-sm text-slate-600">
-                          {branch.phone}
-                        </p>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Footer */}
-                  <div className="mt-5 border-t border-slate-100 pt-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
-                          Branch Status
-                        </p>
-
-                        <p className="mt-1 text-sm font-medium text-slate-700">
-                          {branch.isActive
-                            ? "Currently operational"
-                            : "Currently unavailable"}
-                        </p>
-                      </div>
-
-                      <div className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-50 text-slate-400">
-                        <Check size={16} />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {!loading && filteredBranches.length > 0 && (
-          <div className="border-t border-slate-100 px-6 py-4">
-            <p className="text-xs text-slate-400">
-              Showing {filteredBranches.length} of{" "}
-              {branches.length} branches
+            <p className="text-sm text-(--ink-muted)">
+              {branch.phone}
             </p>
           </div>
         )}
       </div>
 
-      {/* Create Branch Modal */}
-      {showForm && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4 backdrop-blur-[2px]"
-          onClick={closeForm}
-        >
+      <div className="mt-5 border-t border-(--line) pt-4">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-(--ink-faint)">
+              Branch Status
+            </p>
+
+            <p className="mt-1 text-sm font-semibold text-(--foreground)">
+              {branch.isActive
+                ? "Currently operational"
+                : "Currently unavailable"}
+            </p>
+          </div>
+
           <div
-            className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-slate-200 bg-white shadow-2xl"
-            onClick={(event) =>
-              event.stopPropagation()
-            }
+            className="
+              flex
+              h-9
+              w-9
+              shrink-0
+              items-center
+              justify-center
+              rounded-full
+              bg-(--surface)
+              text-(--ink-muted)
+            "
           >
-            {/* Modal Header */}
-            <div className="flex items-center justify-between border-b border-slate-100 px-6 py-5">
-              <div>
-                <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-orange-600">
-                  Academy Management
-                </p>
-
-                <h2 className="text-xl font-bold text-slate-950">
-                  Create New Branch
-                </h2>
-
-                <p className="mt-1 text-sm text-slate-500">
-                  Add the details of your new academy branch.
-                </p>
-              </div>
-
-              <button
-                type="button"
-                onClick={closeForm}
-                disabled={submitting}
-                className="rounded-xl p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <X size={21} />
-              </button>
-            </div>
-
-            {/* Modal Form */}
-            <form
-              onSubmit={handleSubmit}
-              className="p-6"
-            >
-              <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
-                <div>
-                  <label className="mb-2 block text-sm font-semibold text-slate-700">
-                    Branch Name
-                  </label>
-
-                  <input
-                    required
-                    value={form.name}
-                    onChange={(event) =>
-                      setForm({
-                        ...form,
-                        name: event.target.value,
-                      })
-                    }
-                    placeholder="e.g. Faridabad Main Branch"
-                    className="h-12 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-orange-400 focus:bg-white focus:ring-4 focus:ring-orange-100"
-                  />
-                </div>
-
-                <div>
-                  <label className="mb-2 block text-sm font-semibold text-slate-700">
-                    Phone Number
-                  </label>
-
-                  <input
-                    value={form.phone}
-                    onChange={(event) =>
-                      setForm({
-                        ...form,
-                        phone: event.target.value,
-                      })
-                    }
-                    placeholder="e.g. 9876543210"
-                    className="h-12 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-orange-400 focus:bg-white focus:ring-4 focus:ring-orange-100"
-                  />
-                </div>
-
-                <div className="md:col-span-2">
-                  <label className="mb-2 block text-sm font-semibold text-slate-700">
-                    Complete Address
-                  </label>
-
-                  <textarea
-                    required
-                    rows={4}
-                    value={form.address}
-                    onChange={(event) =>
-                      setForm({
-                        ...form,
-                        address: event.target.value,
-                      })
-                    }
-                    placeholder="Enter complete branch address"
-                    className="w-full resize-none rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-orange-400 focus:bg-white focus:ring-4 focus:ring-orange-100"
-                  />
-                </div>
-              </div>
-
-              {/* Form Error */}
-              {error && (
-                <div className="mt-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                  {error}
-                </div>
-              )}
-
-              {/* Form Actions */}
-              <div className="mt-6 flex flex-col-reverse gap-3 border-t border-slate-100 pt-5 sm:flex-row sm:justify-end">
-                <button
-                  type="button"
-                  onClick={closeForm}
-                  disabled={submitting}
-                  className="rounded-xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  Cancel
-                </button>
-
-                <button
-                  type="submit"
-                  disabled={submitting}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-orange-600 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {submitting ? (
-                    <>
-                      <RefreshCw
-                        size={17}
-                        className="animate-spin"
-                      />
-                      Creating...
-                    </>
-                  ) : (
-                    <>
-                      <Plus size={17} />
-                      Create Branch
-                    </>
-                  )}
-                </button>
-              </div>
-            </form>
+            <Check size={16} />
           </div>
         </div>
-      )}
-    </main>
-  );
-}
-
-function SummaryCard({
-  icon,
-  label,
-  value,
-  description,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: number;
-  description: string;
-}) {
-  return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-      <div className="mb-4 flex items-center justify-between">
-        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-orange-50 text-orange-600">
-          {icon}
-        </div>
-       
-
-        <span className="text-sm font-medium text-slate-400">
-          DojoFlow
-        </span>
       </div>
-
-      <p className="text-sm font-medium text-slate-500">
-        {label}
-      </p>
-
-      <p className="mt-1 text-2xl font-bold text-slate-950">
-        {value}
-      </p>
-
-      <p className="mt-1 text-xs text-slate-400">
-        {description}
-      </p>
-    </div>
+    </Card>
   );
 }

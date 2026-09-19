@@ -1,8 +1,8 @@
 "use client";
 
-import Link from "next/link";
 import Image from "next/image";
-import { FormEvent, useEffect, useState, type ChangeEvent } from "react";
+import Link from "next/link";
+import { type ChangeEvent, type FormEvent, useEffect, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -17,8 +17,11 @@ import {
   ShieldCheck,
   Sparkles,
   UserRound,
+  X,
   XCircle,
 } from "lucide-react";
+
+import { Button, Card, Input, Select } from "@/components/ui";
 
 type FormData = {
   fullName: string;
@@ -112,17 +115,191 @@ const experienceOptions = [
 
 const batchOptions = ["Morning", "Afternoon", "Evening", "Flexible"];
 
+function FieldLabel({
+  htmlFor,
+  children,
+  required = false,
+}: {
+  htmlFor: string;
+  children: React.ReactNode;
+  required?: boolean;
+}) {
+  return (
+    <label
+      htmlFor={htmlFor}
+      className="mb-2 block text-sm font-semibold text-(--foreground)"
+    >
+      {children}
+      {required && (
+        <span className="ml-1 text-(--accent)" aria-hidden="true">
+          *
+        </span>
+      )}
+    </label>
+  );
+}
+
+function Notice({
+  type,
+  message,
+  onClose,
+}: {
+  type: "error" | "success";
+  message: string;
+  onClose: () => void;
+}) {
+  const isError = type === "error";
+
+  return (
+    <div
+      role="alert"
+      className={`mb-6 flex items-start justify-between gap-4 rounded-2xl border p-4 ${
+        isError
+          ? "border-(--danger) bg-(--danger-soft) text-(--danger)"
+          : "border-(--green) bg-(--green-soft) text-(--green)"
+      }`}
+    >
+      <div className="flex items-start gap-3">
+        {isError ? (
+          <XCircle className="mt-0.5 h-5 w-5 shrink-0" />
+        ) : (
+          <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0" />
+        )}
+        <p className="text-sm font-medium">{message}</p>
+      </div>
+
+      <button
+        type="button"
+        onClick={onClose}
+        className="rounded-lg p-1 transition hover:bg-(--hover-bg)"
+        aria-label="Dismiss message"
+      >
+        <X className="h-4 w-4" />
+      </button>
+    </div>
+  );
+}
+
+function PlanCard({ plan }: { plan: Plan }) {
+  const formatDuration = () => {
+    const unit =
+      plan.duration === 1
+        ? plan.durationUnit === "MONTHS"
+          ? "month"
+          : "day"
+        : plan.durationUnit === "MONTHS"
+          ? "months"
+          : "days";
+
+    return `${plan.duration} ${unit}`;
+  };
+
+  return (
+    <Card className="group flex h-full flex-col overflow-hidden p-0 transition duration-300 hover:-translate-y-1 hover:border-(--accent) hover:shadow-[0_20px_50px_var(--shadow-color)]">
+      <div className="border-b border-(--line) p-6 sm:p-7">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <span className="text-[11px] font-bold uppercase tracking-[0.18em] text-(--accent)">
+              Training plan
+            </span>
+            <h3 className="mt-3 text-2xl font-bold tracking-tight text-(--foreground)">
+              {plan.name}
+            </h3>
+          </div>
+
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-(--sidebar-logo-bg) text-(--gold) transition group-hover:bg-(--gold) group-hover:text-(--sidebar-active-text)">
+            <Image
+              src="/logo.png"
+              alt="DojoFlow logo"
+              width={28}
+              height={28}
+              className="h-7 w-7 rounded-md object-contain"
+            />
+          </div>
+        </div>
+
+        <div className="mt-7 flex items-end gap-2">
+          <span className="text-4xl font-bold tracking-tight text-(--foreground)">
+            ₹{Number(plan.price || 0).toLocaleString("en-IN")}
+          </span>
+          <span className="pb-1 text-sm text-(--ink-muted)">
+            / {formatDuration()}
+          </span>
+        </div>
+      </div>
+
+      <div className="flex flex-1 flex-col p-6 sm:p-7">
+        <div className="space-y-4">
+          <div className="flex items-center justify-between gap-4 text-sm">
+            <span className="text-(--ink-muted)">Classes per week</span>
+            <span className="font-semibold text-(--foreground)">
+              {plan.classesPerWeek}
+            </span>
+          </div>
+
+          <div className="flex items-center justify-between gap-4 text-sm">
+            <span className="text-(--ink-muted)">Starting belt</span>
+            <span className="font-semibold text-(--foreground)">
+              {plan.startingBelt}
+            </span>
+          </div>
+
+          <div className="flex items-center justify-between gap-4 text-sm">
+            <span className="text-(--ink-muted)">Progress reports</span>
+            <span className="text-right font-semibold text-(--foreground)">
+              {plan.progressReports}
+            </span>
+          </div>
+        </div>
+
+        {plan.milestones && plan.milestones.length > 0 && (
+          <div className="mt-7 border-t border-(--line) pt-6">
+            <h4 className="text-sm font-bold text-(--foreground)">
+              Key milestones
+            </h4>
+            <ul className="mt-4 space-y-3">
+              {plan.milestones.slice(0, 4).map((milestone, index) => (
+                <li
+                  key={`${milestone.title}-${index}`}
+                  className="flex items-start gap-2 text-sm text-(--ink-muted)"
+                >
+                  <Check className="mt-0.5 h-4 w-4 shrink-0 text-(--gold)" />
+                  <span>{milestone.title}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        <a
+          href="#inquiry-form"
+          className="mt-8 inline-flex items-center justify-center gap-2 rounded-xl border border-(--line) bg-(--surface) px-4 py-3 text-sm font-semibold text-(--foreground) transition hover:border-(--accent) hover:bg-(--accent-soft) hover:text-(--accent)"
+        >
+          Enquire about this plan
+          <ArrowRight className="h-4 w-4" />
+        </a>
+      </div>
+    </Card>
+  );
+}
+
 export default function InquiryPage() {
   const [formData, setFormData] = useState<FormData>(initialFormData);
-
   const [plans, setPlans] = useState<Plan[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isLoadingPlans, setIsLoadingPlans] = useState(true);
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState("");
   const [plansError, setPlansError] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<{
+    email?: string;
+    phone?: string;
+    age?: string;
+  }>({});
 
-  const fetchPublicPlans = async () => {
+  const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+  async function fetchPublicPlans() {
     setIsLoadingPlans(true);
     setPlansError("");
 
@@ -138,10 +315,9 @@ export default function InquiryPage() {
         throw new Error(data.message || "Unable to load training plans.");
       }
 
-      setPlans(data.plans || []);
-    } catch (fetchError) {
+      setPlans(Array.isArray(data.plans) ? data.plans : []);
+    } catch (fetchError: unknown) {
       console.error("Fetch public plans error:", fetchError);
-
       setPlansError(
         fetchError instanceof Error
           ? fetchError.message
@@ -150,43 +326,123 @@ export default function InquiryPage() {
     } finally {
       setIsLoadingPlans(false);
     }
-  };
+  }
 
   useEffect(() => {
-    fetchPublicPlans();
+    void fetchPublicPlans();
   }, []);
 
-  const handleChange = (
+  function handleChange(
     event: ChangeEvent<
       HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement
     >,
-  ) => {
+  ) {
     const { name, value } = event.target;
 
     setFormData((previous) => ({
       ...previous,
       [name]: value,
     }));
-  };
+  }
 
-  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+  function handleEmailBlur(event: React.FocusEvent<HTMLInputElement>) {
+    const value = event.target.value.trim();
+
+    if (!value) {
+      setFieldErrors((previous) => ({ ...previous, email: undefined }));
+      return;
+    }
+
+    setFieldErrors((previous) => ({
+      ...previous,
+      email: emailPattern.test(value)
+        ? undefined
+        : "Please enter a valid email address.",
+    }));
+  }
+
+  function handlePhoneBlur(event: React.FocusEvent<HTMLInputElement>) {
+    const value = event.target.value.trim();
+
+    if (!value) {
+      setFieldErrors((previous) => ({ ...previous, phone: undefined }));
+      return;
+    }
+
+    setFieldErrors((previous) => ({
+      ...previous,
+      phone: /^[0-9]{10}$/.test(value)
+        ? undefined
+        : "Phone number must be exactly 10 digits.",
+    }));
+  }
+
+  function handleAgeBlur(event: React.FocusEvent<HTMLInputElement>) {
+    const value = event.target.value.trim();
+
+    if (!value) {
+      setFieldErrors((previous) => ({ ...previous, age: undefined }));
+      return;
+    }
+
+    const numericAge = Number(value);
+    const isValid =
+      Number.isInteger(numericAge) && numericAge >= 3 && numericAge <= 100;
+
+    setFieldErrors((previous) => ({
+      ...previous,
+      age: isValid ? undefined : "Age must be between 3 and 100.",
+    }));
+  }
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-
     setError("");
 
-    if (!formData.fullName.trim()) {
+    const trimmedName = formData.fullName.trim();
+    const trimmedEmail = formData.email.trim();
+    const trimmedPhone = formData.phone.trim();
+
+    if (!trimmedName) {
       setError("Please enter your full name.");
       return;
     }
 
-    if (!formData.email.trim()) {
+    if (!trimmedEmail) {
       setError("Please enter your email address.");
       return;
     }
 
-    if (formData.phone.trim().length < 10) {
-      setError("Please enter a valid phone number.");
+    if (!emailPattern.test(trimmedEmail)) {
+      setError("Please enter a valid email address.");
       return;
+    }
+
+    if (!trimmedPhone) {
+      setError("Please enter your phone number.");
+      return;
+    }
+
+    const phonePattern = /^[0-9]{10}$/;
+
+    if (!phonePattern.test(trimmedPhone)) {
+      setError(
+        "Please enter a valid 10-digit phone number (numbers only).",
+      );
+      return;
+    }
+
+    if (formData.age.trim()) {
+      const numericAge = Number(formData.age);
+
+      if (
+        !Number.isInteger(numericAge) ||
+        numericAge < 3 ||
+        numericAge > 100
+      ) {
+        setError("Please enter a valid age between 3 and 100.");
+        return;
+      }
     }
 
     setIsSubmitting(true);
@@ -199,6 +455,9 @@ export default function InquiryPage() {
         },
         body: JSON.stringify({
           ...formData,
+          fullName: trimmedName,
+          email: trimmedEmail,
+          phone: trimmedPhone,
           age: formData.age ? Number(formData.age) : undefined,
         }),
       });
@@ -211,16 +470,10 @@ export default function InquiryPage() {
 
       setSubmitted(true);
       setFormData(initialFormData);
-
-      await fetchPublicPlans();
-
-      window.scrollTo({
-        top: 0,
-        behavior: "smooth",
-      });
-    } catch (submitError) {
+      setFieldErrors({});
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    } catch (submitError: unknown) {
       console.error("Inquiry submission error:", submitError);
-
       setError(
         submitError instanceof Error
           ? submitError.message
@@ -229,28 +482,18 @@ export default function InquiryPage() {
     } finally {
       setIsSubmitting(false);
     }
-  };
-
-  const formatDuration = (plan: Plan) => {
-    const unit =
-      plan.duration === 1
-        ? plan.durationUnit === "MONTHS"
-          ? "month"
-          : "day"
-        : plan.durationUnit === "MONTHS"
-          ? "months"
-          : "days";
-
-    return `${plan.duration} ${unit}`;
-  };
+  }
 
   return (
-    <main id="top" className="min-h-screen bg-[#f5f7fb] text-slate-900">
+    <main
+      id="top"
+      className="min-h-screen bg-(--background) text-(--foreground) transition-colors duration-300"
+    >
       {/* Header */}
-      <header className="sticky top-0 z-50 border-b border-slate-200 bg-white/95 backdrop-blur">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-5 py-4 sm:px-8">
+      <header className="sticky top-0 z-50 border-b border-(--line) bg-(--card) backdrop-blur-xl">
+        <div className="mx-auto flex w-full max-w-[1440px] items-center justify-between gap-5 px-4 py-4 sm:px-6 lg:px-8">
           <Link href="/" className="flex items-center gap-3">
-            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#0b1020] text-[#f59e0b]">
+            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-(--sidebar-logo-bg) text-(--gold)">
               <Image
                 src="/logo.png"
                 alt="DojoFlow logo"
@@ -259,48 +502,46 @@ export default function InquiryPage() {
                 className="h-7 w-7 rounded-md object-contain"
               />
             </div>
-
             <div>
-              <p className="text-lg font-bold tracking-tight text-slate-950">
+              <p className="text-lg font-bold tracking-tight text-(--foreground)">
                 DojoFlow
               </p>
-
-              <p className="text-xs text-slate-500">Karate Academy</p>
+              <p className="text-xs text-(--ink-muted)">Karate Academy</p>
             </div>
           </Link>
 
           <Link
             href="/"
-            className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+            className="inline-flex items-center gap-2 rounded-xl border border-(--line) bg-(--surface) px-4 py-2.5 text-sm font-semibold text-(--foreground) transition hover:border-(--accent) hover:bg-(--accent-soft) hover:text-(--accent)"
           >
             <ArrowLeft className="h-4 w-4" />
-            Back to Home
+            <span className="hidden sm:inline">Back to Home</span>
+            <span className="sm:hidden">Home</span>
           </Link>
         </div>
       </header>
 
-      {/* Hero Section */}
-      <section className="relative overflow-hidden border-b border-slate-200 bg-white">
-        <div className="absolute -left-32 -top-32 h-80 w-80 rounded-full bg-orange-100/60 blur-3xl" />
-        <div className="absolute -right-32 top-10 h-96 w-96 rounded-full bg-slate-100 blur-3xl" />
+      {/* Hero + Form */}
+      <section className="relative overflow-hidden border-b border-(--line) bg-(--card)">
+        <div className="pointer-events-none absolute -left-32 -top-32 h-80 w-80 rounded-full bg-(--accent-soft) blur-3xl" />
+        <div className="pointer-events-none absolute -right-32 top-16 h-96 w-96 rounded-full bg-(--surface) blur-3xl" />
 
-        <div className="relative mx-auto max-w-7xl px-5 py-12 sm:px-8 sm:py-16 lg:py-20">
-          <div className="grid gap-12 lg:grid-cols-[0.85fr_1.15fr] lg:items-start">
-            {/* Left Content */}
+        <div className="relative mx-auto w-full max-w-[1440px] px-4 py-10 sm:px-6 sm:py-14 lg:px-8 lg:py-20">
+          <div className="grid gap-10 lg:grid-cols-[0.85fr_1.15fr] lg:items-start lg:gap-14">
             <div className="lg:sticky lg:top-28">
-              <div className="inline-flex items-center gap-2 rounded-full border border-orange-200 bg-orange-50 px-4 py-2 text-sm font-semibold text-orange-700">
+              <div className="inline-flex items-center gap-2 rounded-full border border-(--line) bg-(--accent-soft) px-4 py-2 text-sm font-semibold text-(--accent)">
                 <Sparkles className="h-4 w-4" />
                 Start your karate journey
               </div>
 
-              <h1 className="mt-6 max-w-xl text-4xl font-bold leading-tight tracking-tight text-slate-950 sm:text-5xl lg:text-6xl">
+              <h1 className="mt-6 max-w-xl text-4xl font-bold leading-tight tracking-tight text-(--foreground) sm:text-5xl lg:text-6xl">
                 Train with discipline.
-                <span className="mt-2 block text-orange-500">
+                <span className="mt-2 block text-(--gold)">
                   Grow with confidence.
                 </span>
               </h1>
 
-              <p className="mt-6 max-w-xl text-base leading-8 text-slate-600">
+              <p className="mt-6 max-w-xl text-base leading-8 text-(--ink-muted)">
                 Tell us a little about yourself. Our academy team will contact
                 you with suitable programs, batch timings and admission
                 information.
@@ -309,19 +550,16 @@ export default function InquiryPage() {
               <div className="mt-10 grid gap-6 sm:grid-cols-2 lg:grid-cols-1">
                 {benefits.map((benefit) => {
                   const Icon = benefit.icon;
-
                   return (
                     <div key={benefit.title} className="flex items-start gap-4">
-                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-orange-50 text-orange-600">
+                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-(--line) bg-(--accent-soft) text-(--accent)">
                         <Icon className="h-5 w-5" />
                       </div>
-
                       <div>
-                        <h3 className="font-semibold text-slate-950">
+                        <h3 className="font-semibold text-(--foreground)">
                           {benefit.title}
                         </h3>
-
-                        <p className="mt-1 text-sm leading-6 text-slate-500">
+                        <p className="mt-1 text-sm leading-6 text-(--ink-muted)">
                           {benefit.description}
                         </p>
                       </div>
@@ -330,12 +568,10 @@ export default function InquiryPage() {
                 })}
               </div>
 
-              {/* Process Card */}
-              <div className="mt-10 rounded-2xl border border-slate-200 bg-[#f8fafc] p-5">
-                <p className="text-sm font-bold text-slate-950">
+              <Card className="mt-10 p-5">
+                <p className="text-sm font-bold text-(--foreground)">
                   What happens next?
                 </p>
-
                 <div className="mt-5 space-y-4">
                   {[
                     "Submit your enquiry",
@@ -343,39 +579,38 @@ export default function InquiryPage() {
                     "Receive suitable batch and plan information",
                   ].map((item, index) => (
                     <div key={item} className="flex items-center gap-3">
-                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#0b1020] text-xs font-bold text-white">
+                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-(--sidebar-logo-bg) text-xs font-bold text-(--gold)">
                         {index + 1}
                       </span>
-
-                      <span className="text-sm text-slate-600">{item}</span>
+                      <span className="text-sm text-(--ink-muted)">{item}</span>
                     </div>
                   ))}
                 </div>
-              </div>
+              </Card>
             </div>
 
-            {/* Inquiry Form */}
-            <div className="rounded-3xl border border-slate-200 bg-white shadow-xl shadow-slate-200/50">
+            <Card
+              id="inquiry-form"
+              className="overflow-hidden p-0 shadow-[0_20px_60px_var(--shadow-color)]"
+            >
               {!submitted ? (
                 <>
-                  <div className="border-b border-slate-100 px-6 py-6 sm:px-8">
+                  <div className="border-b border-(--line) px-6 py-6 sm:px-8">
                     <div className="flex items-start justify-between gap-5">
                       <div>
-                        <p className="text-xs font-bold uppercase tracking-[0.18em] text-orange-600">
+                        <p className="text-xs font-bold uppercase tracking-[0.18em] text-(--accent)">
                           Student enquiry
                         </p>
-
-                        <h2 className="mt-2 text-2xl font-bold text-slate-950 sm:text-3xl">
+                        <h2 className="mt-2 text-2xl font-bold text-(--foreground) sm:text-3xl">
                           Tell us about yourself
                         </h2>
-
-                        <p className="mt-3 text-sm leading-6 text-slate-500">
+                        <p className="mt-3 text-sm leading-6 text-(--ink-muted)">
                           Fill in the details below and our academy team will
                           get in touch with you.
                         </p>
                       </div>
 
-                      <div className="hidden h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-[#0b1020] text-orange-400 sm:flex">
+                      <div className="hidden h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-(--sidebar-logo-bg) text-(--gold) sm:flex">
                         <Image
                           src="/logo.png"
                           alt="DojoFlow logo"
@@ -391,17 +626,20 @@ export default function InquiryPage() {
                     onSubmit={handleSubmit}
                     className="space-y-6 px-6 py-7 sm:px-8"
                   >
-                    <div className="grid gap-5 sm:grid-cols-2">
-                      {/* Full Name */}
-                      <div className="sm:col-span-2">
-                        <label
-                          htmlFor="fullName"
-                          className="mb-2 block text-sm font-semibold text-slate-700"
-                        >
-                          Full Name *
-                        </label>
+                    {error && (
+                      <Notice
+                        type="error"
+                        message={error}
+                        onClose={() => setError("")}
+                      />
+                    )}
 
-                        <input
+                    <div className="grid gap-5 sm:grid-cols-2">
+                      <div className="sm:col-span-2">
+                        <FieldLabel htmlFor="fullName" required>
+                          Full Name
+                        </FieldLabel>
+                        <Input
                           id="fullName"
                           name="fullName"
                           type="text"
@@ -409,191 +647,168 @@ export default function InquiryPage() {
                           value={formData.fullName}
                           onChange={handleChange}
                           placeholder="Enter your full name"
-                          className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-orange-400 focus:ring-4 focus:ring-orange-500/10"
                         />
                       </div>
 
-                      {/* Email */}
                       <div>
-                        <label
-                          htmlFor="email"
-                          className="mb-2 block text-sm font-semibold text-slate-700"
-                        >
-                          Email Address *
-                        </label>
-
-                        <div className="relative">
-                          <Mail className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-
-                          <input
-                            id="email"
-                            name="email"
-                            type="email"
-                            required
-                            value={formData.email}
-                            onChange={handleChange}
-                            placeholder="you@example.com"
-                            className="w-full rounded-xl border border-slate-200 bg-white py-3.5 pl-11 pr-4 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-orange-400 focus:ring-4 focus:ring-orange-500/10"
-                          />
-                        </div>
+                        <FieldLabel htmlFor="email" required>
+                          Email Address
+                        </FieldLabel>
+                        <Input
+                          id="email"
+                          name="email"
+                          type="email"
+                          required
+                          value={formData.email}
+                          onChange={handleChange}
+                          onBlur={handleEmailBlur}
+                          placeholder="you@example.com"
+                        />
+                        {fieldErrors.email && (
+                          <p className="mt-1.5 text-xs font-medium text-(--danger)">
+                            {fieldErrors.email}
+                          </p>
+                        )}
                       </div>
 
-                      {/* Phone */}
                       <div>
-                        <label
-                          htmlFor="phone"
-                          className="mb-2 block text-sm font-semibold text-slate-700"
-                        >
-                          Phone Number *
-                        </label>
+                        <FieldLabel htmlFor="phone" required>
+                          Phone Number
+                        </FieldLabel>
+                        <Input
+                          id="phone"
+                          name="phone"
+                          type="tel"
+                          inputMode="numeric"
+                          pattern="[0-9]{10}"
+                          maxLength={10}
+                          required
+                          value={formData.phone}
+                          onChange={(event) => {
+                            const digitsOnly = event.target.value.replace(
+                              /\D/g,
+                              "",
+                            );
 
-                        <div className="relative">
-                          <Phone className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-
-                          <input
-                            id="phone"
-                            name="phone"
-                            type="tel"
-                            required
-                            value={formData.phone}
-                            onChange={handleChange}
-                            placeholder="Enter phone number"
-                            className="w-full rounded-xl border border-slate-200 bg-white py-3.5 pl-11 pr-4 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-orange-400 focus:ring-4 focus:ring-orange-500/10"
-                          />
-                        </div>
+                            setFormData((previous) => ({
+                              ...previous,
+                              phone: digitsOnly,
+                            }));
+                          }}
+                          onBlur={handlePhoneBlur}
+                          placeholder="10-digit phone number"
+                        />
+                        {fieldErrors.phone && (
+                          <p className="mt-1.5 text-xs font-medium text-(--danger)">
+                            {fieldErrors.phone}
+                          </p>
+                        )}
                       </div>
 
-                      {/* Age */}
                       <div>
-                        <label
-                          htmlFor="age"
-                          className="mb-2 block text-sm font-semibold text-slate-700"
-                        >
-                          Age
-                        </label>
-
-                        <input
+                        <FieldLabel htmlFor="age">Age</FieldLabel>
+                        <Input
                           id="age"
                           name="age"
-                          type="number"
-                          min="3"
-                          max="100"
+                          type="text"
+                          inputMode="numeric"
+                          maxLength={3}
                           value={formData.age}
-                          onChange={handleChange}
+                          onChange={(event) => {
+                            const digitsOnly = event.target.value.replace(
+                              /\D/g,
+                              "",
+                            );
+
+                            setFormData((previous) => ({
+                              ...previous,
+                              age: digitsOnly,
+                            }));
+                          }}
+                          onBlur={handleAgeBlur}
                           placeholder="Enter age"
-                          className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-orange-400 focus:ring-4 focus:ring-orange-500/10"
                         />
+                        {fieldErrors.age && (
+                          <p className="mt-1.5 text-xs font-medium text-(--danger)">
+                            {fieldErrors.age}
+                          </p>
+                        )}
                       </div>
 
-                      {/* Current Belt */}
                       <div>
-                        <label
-                          htmlFor="currentBelt"
-                          className="mb-2 block text-sm font-semibold text-slate-700"
-                        >
+                        <FieldLabel htmlFor="currentBelt">
                           Current Belt / Rank
-                        </label>
-
-                        <select
+                        </FieldLabel>
+                        <Select
                           id="currentBelt"
                           name="currentBelt"
                           value={formData.currentBelt}
                           onChange={handleChange}
-                          className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-sm text-slate-900 outline-none transition focus:border-orange-400 focus:ring-4 focus:ring-orange-500/10"
                         >
                           {beltOptions.map((belt) => (
                             <option key={belt} value={belt}>
                               {belt}
                             </option>
                           ))}
-                        </select>
+                        </Select>
                       </div>
 
-                      {/* Experience */}
                       <div>
-                        <label
-                          htmlFor="experience"
-                          className="mb-2 block text-sm font-semibold text-slate-700"
-                        >
+                        <FieldLabel htmlFor="experience">
                           Previous Experience
-                        </label>
-
-                        <select
+                        </FieldLabel>
+                        <Select
                           id="experience"
                           name="experience"
                           value={formData.experience}
                           onChange={handleChange}
-                          className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-sm text-slate-900 outline-none transition focus:border-orange-400 focus:ring-4 focus:ring-orange-500/10"
                         >
                           <option value="">Select experience</option>
-
                           {experienceOptions.map((experience) => (
                             <option key={experience} value={experience}>
                               {experience}
                             </option>
                           ))}
-                        </select>
+                        </Select>
                       </div>
 
-                      {/* Preferred Batch */}
                       <div>
-                        <label
-                          htmlFor="preferredBatch"
-                          className="mb-2 block text-sm font-semibold text-slate-700"
-                        >
+                        <FieldLabel htmlFor="preferredBatch">
                           Preferred Batch
-                        </label>
-
-                        <select
+                        </FieldLabel>
+                        <Select
                           id="preferredBatch"
                           name="preferredBatch"
                           value={formData.preferredBatch}
                           onChange={handleChange}
-                          className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-sm text-slate-900 outline-none transition focus:border-orange-400 focus:ring-4 focus:ring-orange-500/10"
                         >
                           <option value="">Select timing</option>
-
                           {batchOptions.map((batch) => (
                             <option key={batch} value={batch}>
                               {batch}
                             </option>
                           ))}
-                        </select>
+                        </Select>
                       </div>
 
-                      {/* Preferred Branch */}
                       <div>
-                        <label
-                          htmlFor="preferredBranch"
-                          className="mb-2 block text-sm font-semibold text-slate-700"
-                        >
+                        <FieldLabel htmlFor="preferredBranch">
                           Preferred Branch / Location
-                        </label>
-
-                        <div className="relative">
-                          <MapPin className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-
-                          <input
-                            id="preferredBranch"
-                            name="preferredBranch"
-                            type="text"
-                            value={formData.preferredBranch}
-                            onChange={handleChange}
-                            placeholder="Enter preferred location"
-                            className="w-full rounded-xl border border-slate-200 bg-white py-3.5 pl-11 pr-4 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-orange-400 focus:ring-4 focus:ring-orange-500/10"
-                          />
-                        </div>
+                        </FieldLabel>
+                        <Input
+                          id="preferredBranch"
+                          name="preferredBranch"
+                          type="text"
+                          value={formData.preferredBranch}
+                          onChange={handleChange}
+                          placeholder="Enter preferred location"
+                        />
                       </div>
 
-                      {/* Message */}
                       <div className="sm:col-span-2">
-                        <label
-                          htmlFor="message"
-                          className="mb-2 block text-sm font-semibold text-slate-700"
-                        >
+                        <FieldLabel htmlFor="message">
                           Additional Message
-                        </label>
-
+                        </FieldLabel>
                         <textarea
                           id="message"
                           name="message"
@@ -601,22 +816,16 @@ export default function InquiryPage() {
                           value={formData.message}
                           onChange={handleChange}
                           placeholder="Tell us anything else you would like us to know..."
-                          className="w-full resize-none rounded-xl border border-slate-200 bg-white px-4 py-3.5 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-orange-400 focus:ring-4 focus:ring-orange-500/10"
+                          className="w-full resize-none rounded-xl border border-(--line) bg-(--input-bg) px-4 py-3.5 text-sm text-(--foreground) outline-none transition placeholder:text-(--ink-faint) focus:border-(--gold) focus:ring-4 focus:ring-(--gold)/10"
                         />
                       </div>
                     </div>
 
-                    {error && (
-                      <div className="flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                        <XCircle className="mt-0.5 h-4 w-4 shrink-0" />
-                        <span>{error}</span>
-                      </div>
-                    )}
-
-                    <button
+                    <Button
                       type="submit"
                       disabled={isSubmitting}
-                      className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-[#0b1020] px-5 py-4 text-sm font-semibold text-white shadow-lg shadow-slate-900/15 transition hover:bg-orange-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+                      fullWidth
+                      className="bg-(--sidebar-logo-bg) text-(--gold) hover:bg-(--gold) hover:text-(--sidebar-active-text)"
                     >
                       {isSubmitting ? (
                         <>
@@ -629,9 +838,9 @@ export default function InquiryPage() {
                           <ArrowRight className="h-4 w-4" />
                         </>
                       )}
-                    </button>
+                    </Button>
 
-                    <p className="text-center text-xs leading-5 text-slate-400">
+                    <p className="text-center text-xs leading-5 text-(--ink-faint)">
                       By submitting this form, you agree to be contacted by the
                       academy team regarding training and admission.
                     </p>
@@ -639,56 +848,55 @@ export default function InquiryPage() {
                 </>
               ) : (
                 <div className="px-6 py-16 text-center sm:px-8">
-                  <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-emerald-50">
-                    <CheckCircle2 className="h-10 w-10 text-emerald-600" />
+                  <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-(--green-soft) text-(--green)">
+                    <CheckCircle2 className="h-10 w-10" />
                   </div>
 
-                  <p className="mt-6 text-xs font-bold uppercase tracking-[0.18em] text-emerald-600">
+                  <p className="mt-6 text-xs font-bold uppercase tracking-[0.18em] text-(--green)">
                     Enquiry received
                   </p>
 
-                  <h2 className="mt-3 text-3xl font-bold text-slate-950">
+                  <h2 className="mt-3 text-3xl font-bold text-(--foreground)">
                     Thank you for reaching out!
                   </h2>
 
-                  <p className="mx-auto mt-4 max-w-md text-sm leading-7 text-slate-500">
+                  <p className="mx-auto mt-4 max-w-md text-sm leading-7 text-(--ink-muted)">
                     Your enquiry has been submitted successfully. Our academy
                     team will contact you soon with suitable training options,
                     batch timings and admission details.
                   </p>
 
-                  <button
+                  <Button
                     type="button"
+                    variant="secondary"
                     onClick={() => {
                       setSubmitted(false);
                       setError("");
                     }}
-                    className="mt-8 inline-flex items-center gap-2 rounded-xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-700 transition hover:border-orange-200 hover:bg-orange-50 hover:text-orange-700"
+                    className="mx-auto mt-8"
                   >
                     Submit Another Enquiry
                     <ArrowRight className="h-4 w-4" />
-                  </button>
+                  </Button>
                 </div>
               )}
-            </div>
+            </Card>
           </div>
         </div>
       </section>
 
-      {/* Public Plans Section */}
-      <section className="border-b border-slate-200 bg-[#f5f7fb]">
-        <div className="mx-auto max-w-7xl px-5 py-16 sm:px-8 lg:py-20">
+      {/* Plans */}
+      <section className="border-b border-(--line) bg-(--background)">
+        <div className="mx-auto w-full max-w-[1440px] px-4 py-14 sm:px-6 lg:px-8 lg:py-20">
           <div className="mx-auto max-w-2xl text-center">
-            <div className="inline-flex items-center gap-2 rounded-full border border-orange-200 bg-orange-50 px-4 py-2 text-sm font-semibold text-orange-700">
+            <div className="inline-flex items-center gap-2 rounded-full border border-(--line) bg-(--accent-soft) px-4 py-2 text-sm font-semibold text-(--accent)">
               <Dumbbell className="h-4 w-4" />
               Active training plans
             </div>
-
-            <h2 className="mt-5 text-3xl font-bold tracking-tight text-slate-950 sm:text-4xl">
+            <h2 className="mt-5 text-3xl font-bold tracking-tight text-(--foreground) sm:text-4xl">
               Choose a plan that fits your goals
             </h2>
-
-            <p className="mt-4 text-sm leading-7 text-slate-500">
+            <p className="mt-4 text-sm leading-7 text-(--ink-muted)">
               These plans are fetched directly from the academy system. Only
               currently active plans are displayed.
             </p>
@@ -696,174 +904,67 @@ export default function InquiryPage() {
 
           {isLoadingPlans ? (
             <div className="flex flex-col items-center justify-center py-16">
-              <Loader2 className="h-8 w-8 animate-spin text-orange-500" />
-
-              <p className="mt-4 text-sm text-slate-500">
+              <Loader2 className="h-8 w-8 animate-spin text-(--gold)" />
+              <p className="mt-4 text-sm text-(--ink-muted)">
                 Loading active plans...
               </p>
             </div>
           ) : plansError ? (
-            <div className="mx-auto mt-10 max-w-lg rounded-2xl border border-red-200 bg-red-50 p-6 text-center">
-              <XCircle className="mx-auto h-8 w-8 text-red-500" />
-
-              <h3 className="mt-3 font-semibold text-red-900">
+            <Card className="mx-auto mt-10 max-w-lg p-8 text-center">
+              <XCircle className="mx-auto h-8 w-8 text-(--danger)" />
+              <h3 className="mt-3 font-semibold text-(--foreground)">
                 Unable to load plans
               </h3>
-
-              <p className="mt-2 text-sm text-red-700">{plansError}</p>
-
-              <button
+              <p className="mt-2 text-sm text-(--ink-muted)">{plansError}</p>
+              <Button
                 type="button"
-                onClick={fetchPublicPlans}
-                className="mt-5 rounded-xl bg-[#0b1020] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-orange-500"
+                variant="secondary"
+                onClick={() => void fetchPublicPlans()}
+                className="mx-auto mt-5"
               >
                 Try Again
-              </button>
-            </div>
+              </Button>
+            </Card>
           ) : plans.length === 0 ? (
-            <div className="mx-auto mt-10 max-w-lg rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
-              <Image
-                src="/logo.png"
-                alt="DojoFlow logo"
-                width={28}
-                height={28}
-                className="h-7 w-7 rounded-md object-contain"
-              />
-
-              <h3 className="mt-4 text-lg font-semibold text-slate-950">
+            <Card className="mx-auto mt-10 max-w-lg p-8 text-center">
+              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-(--accent-soft) text-(--accent)">
+                <Dumbbell className="h-6 w-6" />
+              </div>
+              <h3 className="mt-4 text-lg font-semibold text-(--foreground)">
                 No active plans available
               </h3>
-
-              <p className="mt-2 text-sm leading-6 text-slate-500">
+              <p className="mt-2 text-sm leading-6 text-(--ink-muted)">
                 Our current training plans are not available at the moment.
                 Please submit an enquiry and our team will share the latest
                 options with you.
               </p>
-            </div>
+            </Card>
           ) : (
             <div className="mt-12 grid gap-6 md:grid-cols-2 lg:grid-cols-3">
               {plans.map((plan) => (
-                <div
-                  key={plan._id}
-                  className="group flex flex-col rounded-3xl border border-slate-200 bg-white p-6 shadow-sm transition duration-300 hover:-translate-y-1 hover:border-orange-200 hover:shadow-xl hover:shadow-slate-200/70 sm:p-8"
-                >
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <p className="text-xs font-bold uppercase tracking-[0.16em] text-orange-600">
-                        Training plan
-                      </p>
-
-                      <h3 className="mt-3 text-2xl font-bold text-slate-950">
-                        {plan.name}
-                      </h3>
-                    </div>
-
-                    <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#0b1020] text-orange-400 transition group-hover:bg-orange-500 group-hover:text-white">
-                      <Image
-                        src="/logo.png"
-                        alt="DojoFlow logo"
-                        width={28}
-                        height={28}
-                        className="h-7 w-7 rounded-md object-contain"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="mt-8">
-                    <span className="text-4xl font-bold tracking-tight text-slate-950">
-                      ₹{plan.price.toLocaleString("en-IN")}
-                    </span>
-
-                    <span className="ml-2 text-sm text-slate-500">
-                      / {formatDuration(plan)}
-                    </span>
-                  </div>
-
-                  <div className="mt-8 space-y-4 border-t border-slate-100 pt-6">
-                    <div className="flex items-center justify-between gap-4 text-sm">
-                      <span className="text-slate-500">Classes per week</span>
-
-                      <span className="font-semibold text-slate-950">
-                        {plan.classesPerWeek}
-                      </span>
-                    </div>
-
-                    <div className="flex items-center justify-between gap-4 text-sm">
-                      <span className="text-slate-500">Starting belt</span>
-
-                      <span className="font-semibold text-slate-950">
-                        {plan.startingBelt}
-                      </span>
-                    </div>
-
-                    <div className="flex items-center justify-between gap-4 text-sm">
-                      <span className="text-slate-500">Progress reports</span>
-
-                      <span className="text-right font-semibold text-slate-950">
-                        {plan.progressReports}
-                      </span>
-                    </div>
-                  </div>
-
-                  {plan.milestones && plan.milestones.length > 0 && (
-                    <div className="mt-8 border-t border-slate-100 pt-6">
-                      <h4 className="text-sm font-bold text-slate-950">
-                        Key milestones
-                      </h4>
-
-                      <ul className="mt-4 space-y-3">
-                        {plan.milestones.slice(0, 4).map((milestone, index) => (
-                          <li
-                            key={`${milestone.title}-${index}`}
-                            className="flex items-start gap-2 text-sm text-slate-600"
-                          >
-                            <Check className="mt-0.5 h-4 w-4 shrink-0 text-orange-500" />
-                            <span>{milestone.title}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-
-                  <a
-                    href="#top"
-                    className="mt-8 inline-flex items-center justify-center gap-2 rounded-xl bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-orange-50 hover:text-orange-700"
-                  >
-                    Enquire about this plan
-                    <ArrowRight className="h-4 w-4" />
-                  </a>
-                </div>
+                <PlanCard key={plan._id} plan={plan} />
               ))}
             </div>
           )}
         </div>
       </section>
 
-      {/* Final CTA */}
-      <section className="bg-[#0b1020]">
-        <div className="mx-auto max-w-4xl px-5 py-16 text-center sm:px-8 lg:py-20">
-          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-orange-500 text-white">
-            <Image
-              src="/logo.png"
-              alt="DojoFlow logo"
-              width={28}
-              height={28}
-              className="h-7 w-7 rounded-md object-contain"
-            />
+      {/* CTA */}
+      <section className="bg-(--sidebar-logo-bg)">
+        <div className="mx-auto max-w-4xl px-4 py-14 text-center sm:px-6 lg:py-20">
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-(--gold) text-(--sidebar-active-text)">
+            <Sparkles className="h-6 w-6" />
           </div>
-
           <h2 className="mt-6 text-3xl font-bold tracking-tight text-white sm:text-4xl">
             Ready to begin your journey?
           </h2>
-
-          <p className="mx-auto mt-4 max-w-2xl text-sm leading-7 text-slate-300">
+          <p className="mx-auto mt-4 max-w-2xl text-sm leading-7 text-white/70">
             Submit your enquiry and our team will help you find the right
             program, schedule and admission option.
           </p>
-
           <a
-            href="#top"
-            className="mt-8 inline-flex items-center gap-2 rounded-xl bg-orange-500 px-6 py-3.5 text-sm font-semibold text-white transition hover:bg-orange-400"
+            href="#inquiry-form"
+            className="mt-8 inline-flex items-center gap-2 rounded-xl bg-(--gold) px-6 py-3.5 text-sm font-semibold text-(--sidebar-active-text) transition hover:opacity-90"
           >
             Submit an Enquiry
             <ArrowRight className="h-4 w-4" />
@@ -872,22 +973,25 @@ export default function InquiryPage() {
       </section>
 
       {/* Footer */}
-      <footer className="border-t border-slate-200 bg-white">
-        <div className="mx-auto flex max-w-7xl flex-col gap-5 px-5 py-8 text-sm text-slate-500 sm:px-8 md:flex-row md:items-center md:justify-between">
-          <div className="mb-2 flex items-center gap-3 text-sm font-medium text-orange-600" >
-            <Image
-              src="/logo.png"
-              alt="DojoFlow logo"
-              width={28}
-              height={28}
-              className="h-7 w-7 rounded-md object-contain"
-            />
+      <footer className="border-t border-(--line) bg-(--card)">
+        <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-6 px-4 py-8 text-sm text-(--ink-muted) sm:px-6 md:flex-row md:items-center md:justify-between lg:px-8">
+          <div className="flex items-center gap-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-(--sidebar-logo-bg)">
+              <Image
+                src="/logo.png"
+                alt="DojoFlow logo"
+                width={24}
+                height={24}
+                className="h-6 w-6 rounded-md object-contain"
+              />
+            </div>
             <div>
-              <p className="font-semibold text-slate-950">
-              DojoFlow Karate Academy
-            </p>
-
-            <p className="mt-1">Train with discipline. Grow with confidence.</p>
+              <p className="font-semibold text-(--foreground)">
+                DojoFlow Karate Academy
+              </p>
+              <p className="mt-1">
+                Train with discipline. Grow with confidence.
+              </p>
             </div>
           </div>
 
@@ -896,7 +1000,6 @@ export default function InquiryPage() {
               <Mail className="h-4 w-4" />
               Academy support
             </span>
-
             <span className="inline-flex items-center gap-2">
               <Phone className="h-4 w-4" />
               Admission assistance

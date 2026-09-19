@@ -7,7 +7,6 @@ import {
   CheckCircle2,
   Clock3,
   GraduationCap,
-  Loader2,
   Plus,
   Search,
   UserRound,
@@ -21,6 +20,20 @@ import {
   getPlans,
   createStudent,
 } from "@/lib/api";
+
+import {
+  Badge,
+  Button,
+  Card,
+  EmptyState,
+  ErrorState,
+  Input,
+  LoadingSpinner,
+  Modal,
+  PageHeader,
+  Select,
+  SummaryCard,
+} from "@/components/ui";
 
 type Student = {
   _id: string;
@@ -65,6 +78,13 @@ type FormData = {
   plan: string;
 };
 
+type FieldErrors = {
+  age?: string;
+  phone?: string;
+  email?: string;
+  loginEmail?: string;
+};
+
 const initialForm: FormData = {
   name: "",
   age: "",
@@ -75,6 +95,9 @@ const initialForm: FormData = {
   branch: "",
   plan: "",
 };
+
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const PHONE_PATTERN = /^[0-9]{10}$/;
 
 export default function StudentsPage() {
   const [students, setStudents] = useState<Student[]>([]);
@@ -87,6 +110,7 @@ export default function StudentsPage() {
 
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState<FormData>(initialForm);
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState("");
 
@@ -99,7 +123,7 @@ export default function StudentsPage() {
       setStudents(data.students || []);
     } catch (error) {
       console.error(error);
-      setError("Failed to load students");
+      setError("Failed to load students.");
     } finally {
       setLoading(false);
     }
@@ -116,7 +140,7 @@ export default function StudentsPage() {
       setPlans(planData.plans || []);
     } catch (error) {
       console.error(error);
-      setFormError("Failed to load branches or plans");
+      setFormError("Failed to load branches or plans.");
     }
   };
 
@@ -127,6 +151,7 @@ export default function StudentsPage() {
   const openModal = async () => {
     setForm(initialForm);
     setFormError("");
+    setFieldErrors({});
     setShowModal(true);
 
     await loadFormData();
@@ -138,6 +163,7 @@ export default function StudentsPage() {
     setShowModal(false);
     setForm(initialForm);
     setFormError("");
+    setFieldErrors({});
   };
 
   const handleChange = (
@@ -153,17 +179,112 @@ export default function StudentsPage() {
     }));
   };
 
+  const handleDigitsOnlyChange = (
+    field: "age" | "phone",
+  ) => (event: React.ChangeEvent<HTMLInputElement>) => {
+    const digitsOnly = event.target.value.replace(/\D/g, "");
+
+    setForm((current) => ({
+      ...current,
+      [field]: digitsOnly,
+    }));
+  };
+
+  const handleAgeBlur = (
+    event: React.FocusEvent<HTMLInputElement>,
+  ) => {
+    const value = event.target.value.trim();
+
+    if (!value) {
+      setFieldErrors((current) => ({ ...current, age: undefined }));
+      return;
+    }
+
+    const numericAge = Number(value);
+    const isValid =
+      Number.isInteger(numericAge) &&
+      numericAge >= 1 &&
+      numericAge <= 100;
+
+    setFieldErrors((current) => ({
+      ...current,
+      age: isValid ? undefined : "Age must be between 1 and 100.",
+    }));
+  };
+
+  const handlePhoneBlur = (
+    event: React.FocusEvent<HTMLInputElement>,
+  ) => {
+    const value = event.target.value.trim();
+
+    if (!value) {
+      setFieldErrors((current) => ({ ...current, phone: undefined }));
+      return;
+    }
+
+    setFieldErrors((current) => ({
+      ...current,
+      phone: PHONE_PATTERN.test(value)
+        ? undefined
+        : "Phone number must be exactly 10 digits.",
+    }));
+  };
+
+  const handlePersonalEmailBlur = (
+    event: React.FocusEvent<HTMLInputElement>,
+  ) => {
+    const value = event.target.value.trim();
+
+    if (!value) {
+      setFieldErrors((current) => ({ ...current, email: undefined }));
+      return;
+    }
+
+    setFieldErrors((current) => ({
+      ...current,
+      email: EMAIL_PATTERN.test(value)
+        ? undefined
+        : "Please enter a valid email address.",
+    }));
+  };
+
+  const handleLoginEmailBlur = (
+    event: React.FocusEvent<HTMLInputElement>,
+  ) => {
+    const value = event.target.value.trim();
+
+    if (!value) {
+      setFieldErrors((current) => ({
+        ...current,
+        loginEmail: undefined,
+      }));
+      return;
+    }
+
+    setFieldErrors((current) => ({
+      ...current,
+      loginEmail: EMAIL_PATTERN.test(value)
+        ? undefined
+        : "Please enter a valid email address.",
+    }));
+  };
+
   const handleSubmit = async (
     event: React.FormEvent<HTMLFormElement>,
   ) => {
     event.preventDefault();
     setFormError("");
 
+    const trimmedName = form.name.trim();
+    const trimmedPhone = form.phone.trim();
+    const trimmedEmail = form.email.trim();
+    const trimmedLoginEmail = form.loginEmail.trim();
+
     if (
-      !form.name.trim() ||
+      !trimmedName ||
       !form.age ||
-      !form.phone.trim() ||
-      !form.loginEmail.trim() ||
+      !trimmedPhone ||
+      !trimmedLoginEmail ||
       !form.loginPassword.trim() ||
       !form.branch ||
       !form.plan
@@ -172,8 +293,31 @@ export default function StudentsPage() {
       return;
     }
 
-    if (Number(form.age) <= 0) {
-      setFormError("Please enter a valid age.");
+    const numericAge = Number(form.age);
+
+    if (
+      !Number.isInteger(numericAge) ||
+      numericAge < 1 ||
+      numericAge > 100
+    ) {
+      setFormError("Please enter a valid age between 1 and 100.");
+      return;
+    }
+
+    if (!PHONE_PATTERN.test(trimmedPhone)) {
+      setFormError(
+        "Please enter a valid 10-digit phone number (numbers only).",
+      );
+      return;
+    }
+
+    if (trimmedEmail && !EMAIL_PATTERN.test(trimmedEmail)) {
+      setFormError("Please enter a valid personal email address.");
+      return;
+    }
+
+    if (!EMAIL_PATTERN.test(trimmedLoginEmail)) {
+      setFormError("Please enter a valid login email address.");
       return;
     }
 
@@ -188,11 +332,11 @@ export default function StudentsPage() {
       setSaving(true);
 
       await createStudent({
-        name: form.name.trim(),
-        age: Number(form.age),
-        phone: form.phone.trim(),
-        email: form.email.trim(),
-        loginEmail: form.loginEmail.trim(),
+        name: trimmedName,
+        age: numericAge,
+        phone: trimmedPhone,
+        email: trimmedEmail,
+        loginEmail: trimmedLoginEmail,
         loginPassword: form.loginPassword,
         branch: form.branch,
         plan: form.plan,
@@ -200,6 +344,7 @@ export default function StudentsPage() {
 
       setShowModal(false);
       setForm(initialForm);
+      setFieldErrors({});
 
       await loadStudents();
     } catch (error) {
@@ -208,7 +353,7 @@ export default function StudentsPage() {
       setFormError(
         error instanceof Error
           ? error.message
-          : "Failed to create student",
+          : "Failed to create student.",
       );
     } finally {
       setSaving(false);
@@ -245,564 +390,809 @@ export default function StudentsPage() {
   ).length;
 
   return (
-    <main className="min-h-screen bg-[#f5f7fb] px-4 py-5 sm:px-6 lg:px-8">
-      <div className="space-y-8">
-        {/* Page Header */}
-        <div className="flex flex-col justify-between gap-6 lg:flex-row lg:items-end">
-          <div>
-            <div className="mb-2 flex items-center gap-2 text-sm font-medium text-orange-600">
-              <Users size={16}/>
-              Academy Management
+    <main className="
+      min-h-[calc(100vh-76px)]
+      bg-(--background)
+      px-4 py-6
+      sm:px-6
+      lg:px-8
+      xl:px-10
+    ">
+      <div className="mx-auto max-w-[1500px]">
+        <PageHeader
+          eyebrow="Academy management"
+          title="Students"
+          description="
+            Manage student profiles, enrollment, training plans,
+            branches and academy access.
+          "
+          actions={
+            <Button
+              variant="primary"
+              size="lg"
+              onClick={openModal}
+            >
+              <Plus size={18} />
+              Add student
+            </Button>
+          }
+        />
+
+        <StudentSummary
+          total={students.length}
+          active={activeStudents}
+          completed={completedStudents}
+          inactive={inactiveStudents}
+        />
+
+        <Card padding="none" className="mt-6 overflow-hidden">
+          <div className="
+            flex flex-col justify-between gap-5
+            border-b border-(--line)
+            px-5 py-5
+            sm:px-6
+            lg:flex-row lg:items-center
+          ">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <div className="
+                  flex h-9 w-9 items-center justify-center
+                  rounded-xl bg-(--accent-soft)
+                  text-(--accent)
+                ">
+                  <Users size={18} />
+                </div>
+
+                <div>
+                  <h2 className="
+                    text-xl font-extrabold tracking-tight
+                    text-(--foreground)
+                  ">
+                    All students
+                  </h2>
+
+                  <p className="
+                    mt-0.5 text-xs text-(--ink-muted)
+                    sm:text-sm
+                  ">
+                    View and manage every student in your academy.
+                  </p>
+                </div>
+              </div>
             </div>
 
-            <h1 className="text-3xl font-bold tracking-tight text-slate-950">
-              Students
-            </h1>
-
-            <p className="mt-2 max-w-xl text-sm text-slate-500">
-              Manage student profiles, enrollment, plans and academy
-              access.
-            </p>
-          </div>
-
-          <button
-            type="button"
-            onClick={openModal}
-            className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-slate-950/10 transition hover:bg-orange-600"
-          >
-            <Plus size={21} />
-            Add student
-          </button>
-        </div>
-
-        {/* Summary Cards */}
-        <div className="mb-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <SummaryCard
-            title="Total Students"
-            value={students.length}
-            description="Registered students"
-            icon={Users}
-            iconClass="bg-[#edf3ff] text-[#4774c8]"
-          />
-
-          <SummaryCard
-            title="Active Students"
-            value={activeStudents}
-            description="Currently enrolled"
-            icon={CheckCircle2}
-            iconClass="bg-[#edf9f2] text-[#29945d]"
-          />
-
-          <SummaryCard
-            title="Completed"
-            value={completedStudents}
-            description="Training completed"
-            icon={GraduationCap}
-            iconClass="bg-[#fff6e8] text-[#c78316]"
-          />
-
-          <SummaryCard
-            title="Inactive"
-            value={inactiveStudents}
-            description="Currently inactive"
-            icon={Clock3}
-            iconClass="bg-[#f3edff] text-[#8055c9]"
-          />
-        </div>
-
-        {/* Students Directory */}
-        <section className="overflow-hidden rounded-2xl border border-[#e4e9f0] bg-white shadow-[0_4px_18px_rgba(16,26,51,0.035)]">
-          <div className="flex flex-col justify-between gap-5 border-b border-[#edf0f4] px-7 py-6 sm:flex-row sm:items-center">
-            <div>
-              <h2 className="text-[25px] font-bold tracking-[-0.03em] text-[#071126]">
-                All students
-              </h2>
-
-              <p className="mt-2 text-[16px] text-[#60708a]">
-                View and manage every student in your academy.
-              </p>
-            </div>
-
-            <div className="relative w-full sm:w-[325px]">
+            <div className="relative w-full lg:w-[340px]">
               <Search
-                size={18}
-                className="absolute left-4 top-1/2 -translate-y-1/2 text-[#9aa5b5]"
+                size={17}
+                aria-hidden="true"
+                className="
+                  pointer-events-none absolute left-3.5
+                  top-1/2 -translate-y-1/2
+                  text-(--ink-faint)
+                "
               />
 
-              <input
-                type="text"
+              <Input
+                type="search"
                 value={search}
                 onChange={(event) =>
                   setSearch(event.target.value)
                 }
                 placeholder="Search students..."
-                className="h-12 w-full rounded-xl border border-[#dfe6ef] bg-[#fafbfd] pl-11 pr-4 text-sm text-[#34445d] outline-none transition placeholder:text-[#9aa5b5] focus:border-[#d9a63d] focus:bg-white focus:ring-4 focus:ring-[#d9a63d]/10"
+                aria-label="Search students"
+                className="h-11 pl-10"
               />
+
+              {search && (
+                <button
+                  type="button"
+                  aria-label="Clear search"
+                  title="Clear search"
+                  onClick={() => setSearch("")}
+                  className="
+                    absolute right-2.5 top-1/2
+                    flex h-7 w-7 -translate-y-1/2
+                    items-center justify-center
+                    rounded-lg text-(--ink-faint)
+                    transition hover:bg-(--hover-bg)
+                    hover:text-(--foreground)
+                  "
+                >
+                  <X size={15} />
+                </button>
+              )}
             </div>
           </div>
 
-          {loading ? (
-            <div className="flex min-h-[320px] items-center justify-center">
-              <div className="flex items-center gap-3 text-sm text-[#697386]">
-                <Loader2
-                  size={19}
-                  className="animate-spin text-[#ff4d00]"
-                />
-                Loading students...
-              </div>
-            </div>
-          ) : error ? (
-            <div className="p-7">
-              <div className="rounded-xl border border-red-200 bg-red-50 p-4">
-                <p className="text-sm font-medium text-red-700">
-                  {error}
-                </p>
-
-                <button
-                  type="button"
-                  onClick={loadStudents}
-                  className="mt-3 rounded-lg bg-red-600 px-4 py-2 text-xs font-semibold text-white transition hover:bg-red-700"
-                >
-                  Try again
-                </button>
-              </div>
-            </div>
-          ) : (
-            <>
-              {/* Desktop Table */}
-              <div className="hidden overflow-x-auto md:block">
-                <table className="w-full min-w-[1100px]">
-                  <thead className="border-b border-[#edf0f4] bg-[#fafbfd]">
-                    <tr>
-                      <TableHeading>Student</TableHeading>
-                      <TableHeading>Contact</TableHeading>
-                      <TableHeading>Plan / Branch</TableHeading>
-                      <TableHeading>Belt</TableHeading>
-                      <TableHeading>Status</TableHeading>
-                      <TableHeading>Joined</TableHeading>
-                      <TableHeading align="right">
-                        Action
-                      </TableHeading>
-                    </tr>
-                  </thead>
-
-                  <tbody className="divide-y divide-[#edf0f4]">
-                    {filteredStudents.length === 0 ? (
-                      <EmptyTableState />
-                    ) : (
-                      filteredStudents.map((student) => (
-                        <tr
-                          key={student._id}
-                          className="group transition hover:bg-[#fbfcfe]"
-                        >
-                          <td className="px-7 py-5">
-                            <Link
-                              href={`/students/${student._id}`}
-                              className="flex items-center gap-3"
-                            >
-                              <StudentAvatar
-                                name={student.name}
-                              />
-
-                              <div>
-                                <p className="text-sm font-bold text-[#101a33] transition group-hover:text-[#b67b1d]">
-                                  {student.name}
-                                </p>
-
-                                <p className="mt-1 text-xs text-[#8c98a9]">
-                                  Age {student.age}
-                                </p>
-                              </div>
-                            </Link>
-                          </td>
-
-                          <td className="px-7 py-5">
-                            <p className="text-sm text-[#34445d]">
-                              {student.phone}
-                            </p>
-
-                            <p className="mt-1 max-w-[220px] truncate text-xs text-[#9aa5b5]">
-                              {student.email || "No email"}
-                            </p>
-                          </td>
-
-                          <td className="px-7 py-5">
-                            <p className="text-sm text-[#34445d]">
-                              {student.plan?.name || "No plan"}
-                            </p>
-
-                            <p className="mt-1 text-xs text-[#9aa5b5]">
-                              {student.branch?.name || "No branch"}
-                            </p>
-                          </td>
-
-                          <td className="px-7 py-5">
-                            <span className="inline-flex rounded-full bg-[#fff5df] px-3 py-1 text-xs font-bold text-[#b67b1d]">
-                              {student.currentBelt}
-                            </span>
-                          </td>
-
-                          <td className="px-7 py-5">
-                            <StatusBadge
-                              status={student.status}
-                            />
-                          </td>
-
-                          <td className="px-7 py-5 text-sm text-[#697386]">
-                            {formatDate(student.joinDate)}
-                          </td>
-
-                          <td className="px-7 py-5 text-right">
-                            <Link
-                              href={`/students/${student._id}`}
-                              className="inline-flex items-center gap-1 text-sm font-bold text-[#b67b1d] transition hover:text-[#8d5d10]"
-                            >
-                              View
-                              <ArrowUpRight size={15} />
-                            </Link>
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Mobile Cards */}
-              <div className="space-y-4 p-5 md:hidden">
-                {filteredStudents.length === 0 ? (
-                  <EmptyMobileState />
-                ) : (
-                  filteredStudents.map((student) => (
-                    <Link
-                      key={student._id}
-                      href={`/students/${student._id}`}
-                      className="block rounded-2xl border border-[#e4e9f0] bg-white p-4 transition hover:border-[#d9a63d] hover:shadow-sm"
-                    >
-                      <div className="flex items-start justify-between gap-4">
-                        <div className="flex items-center gap-3">
-                          <StudentAvatar
-                            name={student.name}
-                          />
-
-                          <div>
-                            <p className="text-sm font-bold text-[#101a33]">
-                              {student.name}
-                            </p>
-
-                            <p className="mt-1 text-xs text-[#8c98a9]">
-                              Age {student.age}
-                            </p>
-                          </div>
-                        </div>
-
-                        <StatusBadge
-                          status={student.status}
-                        />
-                      </div>
-
-                      <div className="mt-4 grid grid-cols-2 gap-4 border-t border-[#edf0f4] pt-4">
-                        <MobileDetail
-                          label="Contact"
-                          value={student.phone}
-                        />
-
-                        <MobileDetail
-                          label="Belt"
-                          value={student.currentBelt}
-                        />
-
-                        <MobileDetail
-                          label="Plan"
-                          value={
-                            student.plan?.name || "No plan"
-                          }
-                        />
-
-                        <MobileDetail
-                          label="Branch"
-                          value={
-                            student.branch?.name || "No branch"
-                          }
-                        />
-                      </div>
-
-                      <div className="mt-4 flex items-center justify-between border-t border-[#edf0f4] pt-4">
-                        <span className="text-xs text-[#9aa5b5]">
-                          Joined {formatDate(student.joinDate)}
-                        </span>
-
-                        <span className="inline-flex items-center gap-1 text-sm font-bold text-[#b67b1d]">
-                          View
-                          <ArrowUpRight size={15} />
-                        </span>
-                      </div>
-                    </Link>
-                  ))
-                )}
-              </div>
-            </>
-          )}
+          <StudentsContent
+            loading={loading}
+            error={error}
+            students={filteredStudents}
+            totalStudents={students.length}
+            onRetry={loadStudents}
+          />
 
           {!loading &&
             !error &&
             filteredStudents.length > 0 && (
-              <div className="border-t border-[#edf0f4] px-7 py-4">
-                <p className="text-xs text-[#9aa5b5]">
+              <div className="
+                border-t border-(--line)
+                px-5 py-4
+                sm:px-6
+              ">
+                <p className="
+                  text-xs font-medium text-(--ink-faint)
+                ">
                   Showing {filteredStudents.length} of{" "}
                   {students.length} students
                 </p>
               </div>
             )}
-        </section>
+        </Card>
       </div>
 
-      {/* Add Student Modal */}
-      {showModal && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-[#101a33]/45 p-4 backdrop-blur-[2px]"
-          onClick={closeModal}
+      <Modal
+        open={showModal}
+        onClose={closeModal}
+        title="Add student"
+        description="
+          Create a student profile and academy login account.
+        "
+        size="xl"
+        footer={
+          <>
+            <Button
+              variant="ghost"
+              onClick={closeModal}
+              disabled={saving}
+            >
+              Cancel
+            </Button>
+
+            <Button
+              type="submit"
+              form="add-student-form"
+              variant="primary"
+              loading={saving}
+            >
+              <Plus size={17} />
+              Create student
+            </Button>
+          </>
+        }
+      >
+        <form
+          id="add-student-form"
+          onSubmit={handleSubmit}
+          className="space-y-7"
         >
-          <div
-            className="max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-2xl border border-[#e4e9f0] bg-white shadow-2xl"
-            onClick={(event) =>
-              event.stopPropagation()
-            }
-          >
-            <div className="flex items-start justify-between border-b border-[#edf0f4] px-7 py-6">
-              <div>
-                <p className="text-[11px] font-black uppercase tracking-[0.18em] text-[#ff4d00]">
-                  New admission
-                </p>
-
-                <h2 className="mt-2 text-2xl font-bold tracking-tight text-[#071126]">
-                  Add student
-                </h2>
-
-                <p className="mt-2 text-sm text-[#60708a]">
-                  Create a student profile and login account.
-                </p>
-              </div>
-
-              <button
-                type="button"
-                onClick={closeModal}
-                disabled={saving}
-                className="rounded-xl p-2 text-[#9aa5b5] transition hover:bg-[#f1f4f8] hover:text-[#34445d] disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <X size={20} />
-              </button>
+          {formError && (
+            <div className="
+              rounded-xl border border-(--danger)/20
+              bg-(--danger-soft) px-4 py-3
+            ">
+              <p className="
+                text-sm font-semibold text-(--danger)
+              ">
+                {formError}
+              </p>
             </div>
+          )}
 
-            <form onSubmit={handleSubmit}>
-              <div className="space-y-7 px-7 py-7">
-                {formError && (
-                  <div className="rounded-xl border border-red-200 bg-red-50 p-4">
-                    <p className="text-sm font-medium text-red-700">
-                      {formError}
-                    </p>
-                  </div>
-                )}
+          <StudentFormSection title="Personal information">
+            <FormField
+              label="Full name"
+              htmlFor="name"
+              required
+            >
+              <Input
+                id="name"
+                name="name"
+                value={form.name}
+                onChange={handleChange}
+                placeholder="Enter student name"
+                autoComplete="name"
+                required
+              />
+            </FormField>
 
-                <div>
-                  <p className="mb-4 text-[11px] font-black uppercase tracking-[0.16em] text-[#8c98a9]">
-                    Personal information
-                  </p>
+            <FormField
+              label="Age"
+              htmlFor="age"
+              required
+              error={fieldErrors.age}
+            >
+              <Input
+                id="age"
+                name="age"
+                type="text"
+                inputMode="numeric"
+                maxLength={3}
+                value={form.age}
+                onChange={handleDigitsOnlyChange("age")}
+                onBlur={handleAgeBlur}
+                placeholder="Enter age"
+                required
+              />
+            </FormField>
 
-                  <div className="grid gap-5 sm:grid-cols-2">
-                    <FormInput
-                      label="Full name"
-                      name="name"
-                      value={form.name}
-                      onChange={handleChange}
-                      placeholder="Enter student name"
-                      required
-                    />
+            <FormField
+              label="Phone number"
+              htmlFor="phone"
+              required
+              error={fieldErrors.phone}
+            >
+              <Input
+                id="phone"
+                name="phone"
+                type="tel"
+                inputMode="numeric"
+                pattern="[0-9]{10}"
+                maxLength={10}
+                value={form.phone}
+                onChange={handleDigitsOnlyChange("phone")}
+                onBlur={handlePhoneBlur}
+                placeholder="10-digit phone number"
+                autoComplete="tel"
+                required
+              />
+            </FormField>
 
-                    <FormInput
-                      label="Age"
-                      name="age"
-                      type="number"
-                      value={form.age}
-                      onChange={handleChange}
-                      placeholder="Enter age"
-                      required
-                    />
+            <FormField
+              label="Personal email"
+              htmlFor="email"
+              error={fieldErrors.email}
+            >
+              <Input
+                id="email"
+                name="email"
+                type="email"
+                value={form.email}
+                onChange={handleChange}
+                onBlur={handlePersonalEmailBlur}
+                placeholder="Optional email"
+                autoComplete="email"
+              />
+            </FormField>
+          </StudentFormSection>
 
-                    <FormInput
-                      label="Phone number"
-                      name="phone"
-                      value={form.phone}
-                      onChange={handleChange}
-                      placeholder="Enter phone number"
-                      required
-                    />
+          <StudentFormSection title="Student login account">
+            <FormField
+              label="Login email"
+              htmlFor="loginEmail"
+              required
+              error={fieldErrors.loginEmail}
+            >
+              <Input
+                id="loginEmail"
+                name="loginEmail"
+                type="email"
+                value={form.loginEmail}
+                onChange={handleChange}
+                onBlur={handleLoginEmailBlur}
+                placeholder="student@example.com"
+                autoComplete="username"
+                required
+              />
+            </FormField>
 
-                    <FormInput
-                      label="Personal email"
-                      name="email"
-                      type="email"
-                      value={form.email}
-                      onChange={handleChange}
-                      placeholder="Optional email"
-                    />
-                  </div>
-                </div>
+            <FormField
+              label="Login password"
+              htmlFor="loginPassword"
+              required
+              hint="Minimum 6 characters"
+            >
+              <Input
+                id="loginPassword"
+                name="loginPassword"
+                type="password"
+                value={form.loginPassword}
+                onChange={handleChange}
+                placeholder="Create a password"
+                autoComplete="new-password"
+                minLength={6}
+                required
+              />
+            </FormField>
+          </StudentFormSection>
 
-                <div>
-                  <p className="mb-4 text-[11px] font-black uppercase tracking-[0.16em] text-[#8c98a9]">
-                    Student login account
-                  </p>
+          <StudentFormSection title="Academy information">
+            <FormField
+              label="Branch"
+              htmlFor="branch"
+              required
+            >
+              <Select
+                id="branch"
+                name="branch"
+                value={form.branch}
+                onChange={handleChange}
+                required
+              >
+                <option value="">Select branch</option>
 
-                  <div className="grid gap-5 sm:grid-cols-2">
-                    <FormInput
-                      label="Login email"
-                      name="loginEmail"
-                      type="email"
-                      value={form.loginEmail}
-                      onChange={handleChange}
-                      placeholder="student@example.com"
-                      required
-                    />
+                {branches.map((branch) => (
+                  <option
+                    key={branch._id}
+                    value={branch._id}
+                  >
+                    {branch.name}
+                  </option>
+                ))}
+              </Select>
+            </FormField>
 
-                    <FormInput
-                      label="Login password"
-                      name="loginPassword"
-                      type="password"
-                      value={form.loginPassword}
-                      onChange={handleChange}
-                      placeholder="Minimum 6 characters"
-                      required
-                    />
-                  </div>
-                </div>
+            <FormField
+              label="Training plan"
+              htmlFor="plan"
+              required
+            >
+              <Select
+                id="plan"
+                name="plan"
+                value={form.plan}
+                onChange={handleChange}
+                required
+              >
+                <option value="">
+                  Select training plan
+                </option>
 
-                <div>
-                  <p className="mb-4 text-[11px] font-black uppercase tracking-[0.16em] text-[#8c98a9]">
-                    Academy information
-                  </p>
-
-                  <div className="grid gap-5 sm:grid-cols-2">
-                    <FormSelect
-                      label="Branch"
-                      name="branch"
-                      value={form.branch}
-                      onChange={handleChange}
-                      required
-                    >
-                      <option value="">
-                        Select branch
-                      </option>
-
-                      {branches.map((branch) => (
-                        <option
-                          key={branch._id}
-                          value={branch._id}
-                        >
-                          {branch.name}
-                        </option>
-                      ))}
-                    </FormSelect>
-
-                    <FormSelect
-                      label="Training plan"
-                      name="plan"
-                      value={form.plan}
-                      onChange={handleChange}
-                      required
-                    >
-                      <option value="">
-                        Select training plan
-                      </option>
-
-                      {plans.map((plan) => (
-                        <option
-                          key={plan._id}
-                          value={plan._id}
-                        >
-                          {plan.name}
-                        </option>
-                      ))}
-                    </FormSelect>
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex flex-col-reverse gap-3 border-t border-[#edf0f4] px-7 py-5 sm:flex-row sm:justify-end">
-                <button
-                  type="button"
-                  onClick={closeModal}
-                  disabled={saving}
-                  className="rounded-xl border border-[#e1e7ef] px-5 py-3 text-sm font-bold text-[#697386] transition hover:bg-[#f8fafc] disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  Cancel
-                </button>
-
-                <button
-                  type="submit"
-                  disabled={saving}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#050a1c] px-6 py-3 text-sm font-bold text-white transition hover:bg-[#17213d] disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {saving ? (
-                    <>
-                      <Loader2
-                        size={17}
-                        className="animate-spin"
-                      />
-                      Creating...
-                    </>
-                  ) : (
-                    <>
-                      <Plus size={17} />
-                      Create student
-                    </>
-                  )}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+                {plans.map((plan) => (
+                  <option
+                    key={plan._id}
+                    value={plan._id}
+                  >
+                    {plan.name}
+                  </option>
+                ))}
+              </Select>
+            </FormField>
+          </StudentFormSection>
+        </form>
+      </Modal>
     </main>
   );
 }
 
-function SummaryCard({
-  title,
-  value,
-  description,
-  icon: Icon,
-  iconClass,
+function StudentSummary({
+  total,
+  active,
+  completed,
+  inactive,
 }: {
-  title: string;
-  value: number;
-  description: string;
-  icon: React.ElementType;
-  iconClass: string;
+  total: number;
+  active: number;
+  completed: number;
+  inactive: number;
 }) {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm hover:border-[#d7a84b] hover:shadow-[0_12px_30px_rgba(16,26,51,0.08)]">
-      <div className="mb-4 flex items-center justify-between">
-        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-orange-50 text-orange-600">
-          <Icon size={20} />
-        </div>
+    <div className="
+      grid gap-4
+      sm:grid-cols-2
+      xl:grid-cols-4
+    ">
+      <SummaryCard
+        title="Total Students"
+        value={total}
+        subtitle="Registered students"
+        icon={<Users size={20} />}
+      />
 
-        <span className="text-xs font-medium text-slate-400">
-          DojoFlow
-        </span>
+      <SummaryCard
+        title="Active Students"
+        value={active}
+        subtitle="Currently enrolled"
+        icon={<CheckCircle2 size={20} />}
+      />
+
+      <SummaryCard
+        title="Completed"
+        value={completed}
+        subtitle="Training completed"
+        icon={<GraduationCap size={20} />}
+      />
+
+      <SummaryCard
+        title="Inactive"
+        value={inactive}
+        subtitle="Currently inactive"
+        icon={<Clock3 size={20} />}
+      />
+    </div>
+  );
+}
+
+function StudentsContent({
+  loading,
+  error,
+  students,
+  totalStudents,
+  onRetry,
+}: {
+  loading: boolean;
+  error: string;
+  students: Student[];
+  totalStudents: number;
+  onRetry: () => void;
+}) {
+  if (loading) {
+    return (
+      <div className="
+        flex min-h-[320px]
+        items-center justify-center
+        px-5 py-12
+      ">
+        <LoadingSpinner
+          size="md"
+          text="Loading students..."
+        />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="p-5 sm:p-6">
+        <ErrorState
+          title="Unable to load students"
+          message={error}
+          action={
+            <Button
+              variant="outline"
+              onClick={onRetry}
+            >
+              Try again
+            </Button>
+          }
+        />
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div className="hidden overflow-x-auto md:block">
+        <StudentTable students={students} />
       </div>
 
-      <p className="text-sm font-medium text-slate-500">
-        {title}
-      </p>
+      <div className="space-y-3 p-4 md:hidden">
+        <StudentMobileList
+          students={students}
+          totalStudents={totalStudents}
+        />
+      </div>
+    </>
+  );
+}
 
-      <p className="mt-1 text-2xl font-bold text-slate-950">
-        {value}
-      </p>
+function StudentTable({
+  students,
+}: {
+  students: Student[];
+}) {
+  return (
+    <table className="w-full min-w-[1050px]">
+      <thead className="
+        border-b border-(--line)
+        bg-(--surface)
+      ">
+        <tr>
+          <TableHeading>Student</TableHeading>
+          <TableHeading>Contact</TableHeading>
+          <TableHeading>Plan / Branch</TableHeading>
+          <TableHeading>Belt</TableHeading>
+          <TableHeading>Status</TableHeading>
+          <TableHeading>Joined</TableHeading>
+          <TableHeading align="right">
+            Action
+          </TableHeading>
+        </tr>
+      </thead>
 
-      <p className="mt-1 text-xs text-slate-400">
-        {description}
-      </p>
+      <tbody className="divide-y divide-(--line)">
+        {students.length === 0 ? (
+          <tr>
+            <td colSpan={7} className="px-6 py-8">
+              <EmptyState
+                title="No students found"
+                description="
+                  Try changing your search or add a new student.
+                "
+                icon={<UserRound size={22} />}
+              />
+            </td>
+          </tr>
+        ) : (
+          students.map((student) => (
+            <StudentTableRow
+              key={student._id}
+              student={student}
+            />
+          ))
+        )}
+      </tbody>
+    </table>
+  );
+}
+
+function StudentTableRow({
+  student,
+}: {
+  student: Student;
+}) {
+  return (
+    <tr className="
+      group transition-colors duration-200
+      hover:bg-(--surface)
+    ">
+      <td className="px-6 py-5">
+        <Link
+          href={`/students/${student._id}`}
+          className="flex items-center gap-3"
+        >
+          <StudentAvatar name={student.name} />
+
+          <div className="min-w-0">
+            <p className="
+              truncate text-sm font-bold
+              text-(--foreground-soft)
+              transition-colors
+              group-hover:text-(--accent)
+            ">
+              {student.name}
+            </p>
+
+            <p className="
+              mt-1 text-xs text-(--ink-muted)
+            ">
+              Age {student.age}
+            </p>
+          </div>
+        </Link>
+      </td>
+
+      <td className="px-6 py-5">
+        <p className="
+          text-sm font-medium
+          text-(--foreground-soft)
+        ">
+          {student.phone}
+        </p>
+
+        <p className="
+          mt-1 max-w-[220px] truncate
+          text-xs text-(--ink-muted)
+        ">
+          {student.email || "No email"}
+        </p>
+      </td>
+
+      <td className="px-6 py-5">
+        <p className="
+          text-sm font-medium
+          text-(--foreground-soft)
+        ">
+          {student.plan?.name || "No plan"}
+        </p>
+
+        <p className="
+          mt-1 text-xs text-(--ink-muted)
+        ">
+          {student.branch?.name || "No branch"}
+        </p>
+      </td>
+
+      <td className="px-6 py-5">
+        <Badge variant="warning">
+          {student.currentBelt || "White Belt"}
+        </Badge>
+      </td>
+
+      <td className="px-6 py-5">
+        <StatusBadge status={student.status} />
+      </td>
+
+      <td className="
+        whitespace-nowrap px-6 py-5
+        text-sm text-(--ink-muted)
+      ">
+        {formatDate(student.joinDate)}
+      </td>
+
+      <td className="px-6 py-5 text-right">
+        <Link
+          href={`/students/${student._id}`}
+          className="
+            inline-flex items-center gap-1
+            rounded-lg px-2 py-1
+            text-sm font-bold
+            text-(--accent)
+            transition-colors
+            hover:bg-(--accent-soft)
+          "
+        >
+          View
+          <ArrowUpRight size={15} />
+        </Link>
+      </td>
+    </tr>
+  );
+}
+
+function StudentMobileList({
+  students,
+  totalStudents,
+}: {
+  students: Student[];
+  totalStudents: number;
+}) {
+  if (students.length === 0) {
+    return (
+      <EmptyState
+        title="No students found"
+        description={
+          totalStudents === 0
+            ? "Add your first student to get started."
+            : "Try changing your search."
+        }
+        icon={<UserRound size={22} />}
+      />
+    );
+  }
+
+  return (
+    <>
+      {students.map((student) => (
+        <Link
+          key={student._id}
+          href={`/students/${student._id}`}
+          className="
+            group block rounded-2xl
+            border border-(--line)
+            bg-(--surface)
+            p-4 transition-all duration-200
+            hover:-translate-y-0.5
+            hover:border-(--line-strong)
+            hover:bg-(--card)
+            hover:shadow-[0_8px_25px_var(--shadow-color)]
+          "
+        >
+          <div className="
+            flex items-start
+            justify-between gap-3
+          ">
+            <div className="flex min-w-0 items-center gap-3">
+              <StudentAvatar name={student.name} />
+
+              <div className="min-w-0">
+                <p className="
+                  truncate text-sm font-bold
+                  text-(--foreground-soft)
+                  group-hover:text-(--accent)
+                ">
+                  {student.name}
+                </p>
+
+                <p className="
+                  mt-1 text-xs text-(--ink-muted)
+                ">
+                  Age {student.age}
+                </p>
+              </div>
+            </div>
+
+            <StatusBadge status={student.status} />
+          </div>
+
+          <div className="
+            mt-4 grid grid-cols-2 gap-x-4 gap-y-4
+            border-t border-(--line)
+            pt-4
+          ">
+            <MobileDetail
+              label="Contact"
+              value={student.phone}
+            />
+
+            <MobileDetail
+              label="Belt"
+              value={student.currentBelt || "White Belt"}
+            />
+
+            <MobileDetail
+              label="Plan"
+              value={student.plan?.name || "No plan"}
+            />
+
+            <MobileDetail
+              label="Branch"
+              value={
+                student.branch?.name || "No branch"
+              }
+            />
+          </div>
+
+          <div className="
+            mt-4 flex items-center
+            justify-between gap-3
+            border-t border-(--line)
+            pt-4
+          ">
+            <span className="
+              text-xs text-(--ink-faint)
+            ">
+              Joined {formatDate(student.joinDate)}
+            </span>
+
+            <span className="
+              inline-flex items-center gap-1
+              text-sm font-bold
+              text-(--accent)
+            ">
+              View
+              <ArrowUpRight size={15} />
+            </span>
+          </div>
+        </Link>
+      ))}
+    </>
+  );
+}
+
+function StatusBadge({
+  status,
+}: {
+  status: Student["status"];
+}) {
+  const config = {
+    ACTIVE: {
+      label: "Active",
+      variant: "success" as const,
+    },
+    COMPLETED: {
+      label: "Completed",
+      variant: "info" as const,
+    },
+    INACTIVE: {
+      label: "Inactive",
+      variant: "default" as const,
+    },
+  };
+
+  const current = config[status];
+
+  return (
+    <Badge variant={current.variant}>
+      {current.label}
+    </Badge>
+  );
+}
+
+function StudentAvatar({
+  name,
+}: {
+  name: string;
+}) {
+  const initials = name
+    .split(" ")
+    .filter(Boolean)
+    .map((part) => part[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+
+  return (
+    <div className="
+      flex h-10 w-10 shrink-0
+      items-center justify-center
+      rounded-full
+      border border-(--line)
+      bg-(--sidebar-logo-bg)
+      text-xs font-black
+      text-(--gold)
+    ">
+      {initials || "ST"}
     </div>
   );
 }
@@ -816,81 +1206,17 @@ function TableHeading({
 }) {
   return (
     <th
-      className={`px-7 py-4 text-[11px] font-black uppercase tracking-[0.16em] text-[#8c98a9] ${
-        align === "right" ? "text-right" : "text-left"
-      }`}
+      scope="col"
+      className={`
+        px-6 py-4
+        text-[10px] font-black
+        uppercase tracking-[0.16em]
+        text-(--ink-faint)
+        ${align === "right" ? "text-right" : "text-left"}
+      `}
     >
       {children}
     </th>
-  );
-}
-
-function StudentAvatar({ name }: { name: string }) {
-  const initials = name
-    .split(" ")
-    .map((part) => part[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase();
-
-  return (
-    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#101a33] text-xs font-black text-[#e1b44c]">
-      {initials}
-    </div>
-  );
-}
-
-function StatusBadge({
-  status,
-}: {
-  status: Student["status"];
-}) {
-  const styles = {
-    ACTIVE: "bg-[#ecfaf3] text-[#16804b]",
-    COMPLETED: "bg-[#edf3ff] text-[#4774c8]",
-    INACTIVE: "bg-[#f1f3f6] text-[#697386]",
-  };
-
-  return (
-    <span
-      className={`inline-flex rounded-full px-3 py-1 text-[11px] font-black uppercase tracking-wide ${styles[status]}`}
-    >
-      {status}
-    </span>
-  );
-}
-
-function EmptyTableState() {
-  return (
-    <tr>
-      <td colSpan={7} className="px-7 py-16 text-center">
-        <UserRound className="mx-auto h-9 w-9 text-[#cbd3df]" />
-
-        <p className="mt-4 text-sm font-bold text-[#34445d]">
-          No students found
-        </p>
-
-        <p className="mt-1 text-xs text-[#9aa5b5]">
-          Try changing your search.
-        </p>
-      </td>
-    </tr>
-  );
-}
-
-function EmptyMobileState() {
-  return (
-    <div className="rounded-2xl border border-dashed border-[#d9e0e9] bg-[#fafbfd] px-5 py-12 text-center">
-      <UserRound className="mx-auto h-9 w-9 text-[#cbd3df]" />
-
-      <p className="mt-4 text-sm font-bold text-[#34445d]">
-        No students found
-      </p>
-
-      <p className="mt-1 text-xs text-[#9aa5b5]">
-        Try changing your search.
-      </p>
-    </div>
   );
 }
 
@@ -902,104 +1228,116 @@ function MobileDetail({
   value: string;
 }) {
   return (
-    <div>
-      <p className="text-[10px] font-black uppercase tracking-[0.12em] text-[#9aa5b5]">
+    <div className="min-w-0">
+      <p className="
+        text-[9px] font-black uppercase
+        tracking-[0.12em]
+        text-(--ink-faint)
+      ">
         {label}
       </p>
 
-      <p className="mt-1 truncate text-sm font-medium text-[#34445d]">
+      <p className="
+        mt-1 truncate text-sm font-medium
+        text-(--foreground-soft)
+      ">
         {value}
       </p>
     </div>
   );
 }
 
-function FormInput({
-  label,
-  name,
-  value,
-  onChange,
-  placeholder,
-  type = "text",
-  required = false,
+function StudentFormSection({
+  title,
+  children,
 }: {
-  label: string;
-  name: string;
-  value: string;
-  onChange: (
-    event: React.ChangeEvent<HTMLInputElement>,
-  ) => void;
-  placeholder?: string;
-  type?: string;
-  required?: boolean;
+  title: string;
+  children: React.ReactNode;
 }) {
   return (
-    <div>
-      <label
-        htmlFor={name}
-        className="mb-2 block text-sm font-bold text-[#34445d]"
-      >
-        {label}
+    <section>
+      <div className="
+        mb-4 flex items-center gap-3
+      ">
+        <span className="
+          h-5 w-1 rounded-full
+          bg-(--accent)
+        " />
 
-        {required && (
-          <span className="ml-1 text-[#c78316]">*</span>
-        )}
-      </label>
+        <h3 className="
+          text-[11px] font-black
+          uppercase tracking-[0.16em]
+          text-(--ink-muted)
+        ">
+          {title}
+        </h3>
+      </div>
 
-      <input
-        id={name}
-        name={name}
-        type={type}
-        value={value}
-        onChange={onChange}
-        placeholder={placeholder}
-        required={required}
-        className="h-12 w-full rounded-xl border border-[#e1e7ef] bg-[#fafbfd] px-4 text-sm text-[#34445d] outline-none transition placeholder:text-[#9aa5b5] focus:border-[#d9a63d] focus:bg-white focus:ring-4 focus:ring-[#d9a63d]/10"
-      />
-    </div>
+      <div className="
+        grid gap-5
+        sm:grid-cols-2
+      ">
+        {children}
+      </div>
+    </section>
   );
 }
 
-function FormSelect({
+function FormField({
   label,
-  name,
-  value,
-  onChange,
-  children,
+  htmlFor,
   required = false,
+  hint,
+  error,
+  children,
 }: {
   label: string;
-  name: string;
-  value: string;
-  onChange: (
-    event: React.ChangeEvent<HTMLSelectElement>,
-  ) => void;
-  children: React.ReactNode;
+  htmlFor: string;
   required?: boolean;
+  hint?: string;
+  error?: string;
+  children: React.ReactNode;
 }) {
   return (
     <div>
-      <label
-        htmlFor={name}
-        className="mb-2 block text-sm font-bold text-[#34445d]"
-      >
-        {label}
+      <div className="
+        mb-2 flex items-center
+        justify-between gap-3
+      ">
+        <label
+          htmlFor={htmlFor}
+          className="
+            text-xs font-bold
+            text-(--foreground-soft)
+          "
+        >
+          {label}
 
-        {required && (
-          <span className="ml-1 text-[#c78316]">*</span>
+          {required && (
+            <span className="
+              ml-1 text-(--danger)
+            ">
+              *
+            </span>
+          )}
+        </label>
+
+        {hint && (
+          <span className="
+            text-[10px] text-(--ink-faint)
+          ">
+            {hint}
+          </span>
         )}
-      </label>
+      </div>
 
-      <select
-        id={name}
-        name={name}
-        value={value}
-        onChange={onChange}
-        required={required}
-        className="h-12 w-full rounded-xl border border-[#e1e7ef] bg-[#fafbfd] px-4 text-sm text-[#34445d] outline-none transition focus:border-[#d9a63d] focus:bg-white focus:ring-4 focus:ring-[#d9a63d]/10"
-      >
-        {children}
-      </select>
+      {children}
+
+      {error && (
+        <p className="mt-1.5 text-xs font-medium text-(--danger)">
+          {error}
+        </p>
+      )}
     </div>
   );
 }
