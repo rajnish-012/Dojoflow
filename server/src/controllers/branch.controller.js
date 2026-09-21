@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const { isBranchScoped } = require("../utils/access");
 const Branch = require("../models/Branch");
 
 const getBranches = async (req, res) => {
@@ -8,7 +9,7 @@ const getBranches = async (req, res) => {
     };
 
     // Branch Admins and Coaches can only see their own branch
-    if (req.user.role === "BRANCH_ADMIN" || req.user.role === "COACH") {
+    if (isBranchScoped(req.user)) {
       if (!req.user.branch) {
         return res.status(403).json({
           success: false,
@@ -58,7 +59,7 @@ const getBranchById = async (req, res) => {
 
     // Branch-level access
     if (
-      req.user.role !== "SUPER_ADMIN" &&
+      isBranchScoped(req.user) &&
       branch._id.toString() !== req.user.branch?.toString()
     ) {
       return res.status(403).json({
@@ -126,8 +127,31 @@ const createBranch = async (req, res) => {
   }
 };
 
+// Public list (no login) used by the enquiry form.
+// Only the id and name are returned.
+const getPublicBranches = async (req, res) => {
+  try {
+    const branches = await Branch.find({ isActive: true })
+      .sort({ name: 1 })
+      .select("name");
+
+    res.status(200).json({
+      success: true,
+      branches,
+    });
+  } catch (error) {
+    console.error("Get public branches error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch branches",
+    });
+  }
+};
+
 module.exports = {
   getBranches,
   getBranchById,
   createBranch,
+  getPublicBranches,
 };

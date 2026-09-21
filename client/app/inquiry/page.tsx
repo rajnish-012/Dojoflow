@@ -32,7 +32,13 @@ type FormData = {
   experience: string;
   preferredBatch: string;
   preferredBranch: string;
+  branch: string;
   message: string;
+};
+
+type BranchOption = {
+  _id: string;
+  name: string;
 };
 
 type Plan = {
@@ -65,6 +71,7 @@ const initialFormData: FormData = {
   experience: "",
   preferredBatch: "",
   preferredBranch: "",
+  branch: "",
   message: "",
 };
 
@@ -288,6 +295,7 @@ export default function InquiryPage() {
   const [plans, setPlans] = useState<Plan[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isLoadingPlans, setIsLoadingPlans] = useState(true);
+  const [branches, setBranches] = useState<BranchOption[]>([]);
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState("");
   const [plansError, setPlansError] = useState("");
@@ -330,6 +338,25 @@ export default function InquiryPage() {
 
   useEffect(() => {
     void fetchPublicPlans();
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    fetch(`${API_URL}/branches/public`, { cache: "no-store" })
+      .then((response) => response.json())
+      .then((data) => {
+        if (cancelled) return;
+
+        setBranches(Array.isArray(data.branches) ? data.branches : []);
+      })
+      .catch(() => {
+        // The form still works without the list.
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   function handleChange(
@@ -426,20 +453,14 @@ export default function InquiryPage() {
     const phonePattern = /^[0-9]{10}$/;
 
     if (!phonePattern.test(trimmedPhone)) {
-      setError(
-        "Please enter a valid 10-digit phone number (numbers only).",
-      );
+      setError("Please enter a valid 10-digit phone number (numbers only).");
       return;
     }
 
     if (formData.age.trim()) {
       const numericAge = Number(formData.age);
 
-      if (
-        !Number.isInteger(numericAge) ||
-        numericAge < 3 ||
-        numericAge > 100
-      ) {
+      if (!Number.isInteger(numericAge) || numericAge < 3 || numericAge > 100) {
         setError("Please enter a valid age between 3 and 100.");
         return;
       }
@@ -792,17 +813,23 @@ export default function InquiryPage() {
                       </div>
 
                       <div>
-                        <FieldLabel htmlFor="preferredBranch">
+                        <FieldLabel htmlFor="branch">
                           Preferred Branch / Location
                         </FieldLabel>
-                        <Input
-                          id="preferredBranch"
-                          name="preferredBranch"
-                          type="text"
-                          value={formData.preferredBranch}
+                        <Select
+                          id="branch"
+                          name="branch"
+                          value={formData.branch}
                           onChange={handleChange}
-                          placeholder="Enter preferred location"
-                        />
+                        >
+                          <option value="">Select a branch</option>
+
+                          {branches.map((item) => (
+                            <option key={item._id} value={item._id}>
+                              {item.name}
+                            </option>
+                          ))}
+                        </Select>
                       </div>
 
                       <div className="sm:col-span-2">

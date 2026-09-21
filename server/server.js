@@ -16,6 +16,10 @@ const dashboardRoutes = require("./src/routes/dashboard.routes");
 const branchRoutes = require("./src/routes/branch.routes");
 const userRoutes = require("./src/routes/user.routes");
 const inquiryRoutes = require("./src/routes/inquiry.routes");
+const moduleRoutes = require("./src/routes/module.routes");
+const { ensureDefaultModules } = require("./src/config/defaultModules");
+const roleRoutes = require("./src/routes/role.routes");
+const { ensureDefaultRoles } = require("./src/config/defaultRoles");
 
 
 // Load environment variables
@@ -24,7 +28,9 @@ dotenv.config();
 const app = express();
 
 // Connect to MongoDB
-connectDB();
+connectDB()
+  .then(() => ensureDefaultRoles())
+  .then(() => ensureDefaultModules());
 
 // Middleware
 app.use(
@@ -49,6 +55,8 @@ app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/branches", branchRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/inquiries", inquiryRoutes);
+app.use("/api/modules", moduleRoutes);
+app.use("/api/roles", roleRoutes);
 
 // Health Check
 app.get("/api/health", (req, res) => {

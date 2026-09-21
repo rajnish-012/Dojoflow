@@ -14,12 +14,9 @@ import {
   X,
 } from "lucide-react";
 
-import {
-  getStudents,
-  getBranches,
-  getPlans,
-  createStudent,
-} from "@/lib/api";
+import { getStudents, getBranches, getPlans, createStudent } from "@/lib/api";
+
+import { useCan } from "@/lib/permissions";
 
 import {
   Badge,
@@ -100,6 +97,7 @@ const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHONE_PATTERN = /^[0-9]{10}$/;
 
 export default function StudentsPage() {
+  const canCreateStudent = useCan("student.create");
   const [students, setStudents] = useState<Student[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [plans, setPlans] = useState<Plan[]>([]);
@@ -167,9 +165,7 @@ export default function StudentsPage() {
   };
 
   const handleChange = (
-    event: React.ChangeEvent<
-      HTMLInputElement | HTMLSelectElement
-    >,
+    event: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>,
   ) => {
     const { name, value } = event.target;
 
@@ -179,20 +175,18 @@ export default function StudentsPage() {
     }));
   };
 
-  const handleDigitsOnlyChange = (
-    field: "age" | "phone",
-  ) => (event: React.ChangeEvent<HTMLInputElement>) => {
-    const digitsOnly = event.target.value.replace(/\D/g, "");
+  const handleDigitsOnlyChange =
+    (field: "age" | "phone") =>
+    (event: React.ChangeEvent<HTMLInputElement>) => {
+      const digitsOnly = event.target.value.replace(/\D/g, "");
 
-    setForm((current) => ({
-      ...current,
-      [field]: digitsOnly,
-    }));
-  };
+      setForm((current) => ({
+        ...current,
+        [field]: digitsOnly,
+      }));
+    };
 
-  const handleAgeBlur = (
-    event: React.FocusEvent<HTMLInputElement>,
-  ) => {
+  const handleAgeBlur = (event: React.FocusEvent<HTMLInputElement>) => {
     const value = event.target.value.trim();
 
     if (!value) {
@@ -202,9 +196,7 @@ export default function StudentsPage() {
 
     const numericAge = Number(value);
     const isValid =
-      Number.isInteger(numericAge) &&
-      numericAge >= 1 &&
-      numericAge <= 100;
+      Number.isInteger(numericAge) && numericAge >= 1 && numericAge <= 100;
 
     setFieldErrors((current) => ({
       ...current,
@@ -212,9 +204,7 @@ export default function StudentsPage() {
     }));
   };
 
-  const handlePhoneBlur = (
-    event: React.FocusEvent<HTMLInputElement>,
-  ) => {
+  const handlePhoneBlur = (event: React.FocusEvent<HTMLInputElement>) => {
     const value = event.target.value.trim();
 
     if (!value) {
@@ -248,9 +238,7 @@ export default function StudentsPage() {
     }));
   };
 
-  const handleLoginEmailBlur = (
-    event: React.FocusEvent<HTMLInputElement>,
-  ) => {
+  const handleLoginEmailBlur = (event: React.FocusEvent<HTMLInputElement>) => {
     const value = event.target.value.trim();
 
     if (!value) {
@@ -269,9 +257,7 @@ export default function StudentsPage() {
     }));
   };
 
-  const handleSubmit = async (
-    event: React.FormEvent<HTMLFormElement>,
-  ) => {
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setFormError("");
 
@@ -295,11 +281,7 @@ export default function StudentsPage() {
 
     const numericAge = Number(form.age);
 
-    if (
-      !Number.isInteger(numericAge) ||
-      numericAge < 1 ||
-      numericAge > 100
-    ) {
+    if (!Number.isInteger(numericAge) || numericAge < 1 || numericAge > 100) {
       setFormError("Please enter a valid age between 1 and 100.");
       return;
     }
@@ -322,9 +304,7 @@ export default function StudentsPage() {
     }
 
     if (form.loginPassword.length < 6) {
-      setFormError(
-        "Login password must be at least 6 characters.",
-      );
+      setFormError("Login password must be at least 6 characters.");
       return;
     }
 
@@ -351,9 +331,7 @@ export default function StudentsPage() {
       console.error(error);
 
       setFormError(
-        error instanceof Error
-          ? error.message
-          : "Failed to create student.",
+        error instanceof Error ? error.message : "Failed to create student.",
       );
     } finally {
       setSaving(false);
@@ -390,15 +368,8 @@ export default function StudentsPage() {
   ).length;
 
   return (
-    <main className="
-      min-h-[calc(100vh-76px)]
-      bg-(--background)
-      px-4 py-6
-      sm:px-6
-      lg:px-8
-      xl:px-10
-    ">
-      <div className="mx-auto max-w-[1500px]">
+    <main>
+      <div className="df-page">
         <PageHeader
           eyebrow="Academy management"
           title="Students"
@@ -407,14 +378,12 @@ export default function StudentsPage() {
             branches and academy access.
           "
           actions={
-            <Button
-              variant="primary"
-              size="lg"
-              onClick={openModal}
-            >
-              <Plus size={18} />
-              Add student
-            </Button>
+            canCreateStudent ? (
+              <Button variant="primary" size="lg" onClick={openModal}>
+                <Plus size={18} />
+                Add student
+              </Button>
+            ) : undefined
           }
         />
 
@@ -426,35 +395,43 @@ export default function StudentsPage() {
         />
 
         <Card padding="none" className="mt-6 overflow-hidden">
-          <div className="
+          <div
+            className="
             flex flex-col justify-between gap-5
             border-b border-(--line)
             px-5 py-5
             sm:px-6
             lg:flex-row lg:items-center
-          ">
+          "
+          >
             <div className="min-w-0">
               <div className="flex items-center gap-2">
-                <div className="
+                <div
+                  className="
                   flex h-9 w-9 items-center justify-center
                   rounded-xl bg-(--accent-soft)
                   text-(--accent)
-                ">
+                "
+                >
                   <Users size={18} />
                 </div>
 
                 <div>
-                  <h2 className="
+                  <h2
+                    className="
                     text-xl font-extrabold tracking-tight
                     text-(--foreground)
-                  ">
+                  "
+                  >
                     All students
                   </h2>
 
-                  <p className="
+                  <p
+                    className="
                     mt-0.5 text-xs text-(--ink-muted)
                     sm:text-sm
-                  ">
+                  "
+                  >
                     View and manage every student in your academy.
                   </p>
                 </div>
@@ -475,9 +452,7 @@ export default function StudentsPage() {
               <Input
                 type="search"
                 value={search}
-                onChange={(event) =>
-                  setSearch(event.target.value)
-                }
+                onChange={(event) => setSearch(event.target.value)}
                 placeholder="Search students..."
                 aria-label="Search students"
                 className="h-11 pl-10"
@@ -512,22 +487,23 @@ export default function StudentsPage() {
             onRetry={loadStudents}
           />
 
-          {!loading &&
-            !error &&
-            filteredStudents.length > 0 && (
-              <div className="
+          {!loading && !error && filteredStudents.length > 0 && (
+            <div
+              className="
                 border-t border-(--line)
                 px-5 py-4
                 sm:px-6
-              ">
-                <p className="
+              "
+            >
+              <p
+                className="
                   text-xs font-medium text-(--ink-faint)
-                ">
-                  Showing {filteredStudents.length} of{" "}
-                  {students.length} students
-                </p>
-              </div>
-            )}
+                "
+              >
+                Showing {filteredStudents.length} of {students.length} students
+              </p>
+            </div>
+          )}
         </Card>
       </div>
 
@@ -541,11 +517,7 @@ export default function StudentsPage() {
         size="xl"
         footer={
           <>
-            <Button
-              variant="ghost"
-              onClick={closeModal}
-              disabled={saving}
-            >
+            <Button variant="ghost" onClick={closeModal} disabled={saving}>
               Cancel
             </Button>
 
@@ -567,24 +539,24 @@ export default function StudentsPage() {
           className="space-y-7"
         >
           {formError && (
-            <div className="
+            <div
+              className="
               rounded-xl border border-(--danger)/20
               bg-(--danger-soft) px-4 py-3
-            ">
-              <p className="
+            "
+            >
+              <p
+                className="
                 text-sm font-semibold text-(--danger)
-              ">
+              "
+              >
                 {formError}
               </p>
             </div>
           )}
 
           <StudentFormSection title="Personal information">
-            <FormField
-              label="Full name"
-              htmlFor="name"
-              required
-            >
+            <FormField label="Full name" htmlFor="name" required>
               <Input
                 id="name"
                 name="name"
@@ -697,11 +669,7 @@ export default function StudentsPage() {
           </StudentFormSection>
 
           <StudentFormSection title="Academy information">
-            <FormField
-              label="Branch"
-              htmlFor="branch"
-              required
-            >
+            <FormField label="Branch" htmlFor="branch" required>
               <Select
                 id="branch"
                 name="branch"
@@ -712,21 +680,14 @@ export default function StudentsPage() {
                 <option value="">Select branch</option>
 
                 {branches.map((branch) => (
-                  <option
-                    key={branch._id}
-                    value={branch._id}
-                  >
+                  <option key={branch._id} value={branch._id}>
                     {branch.name}
                   </option>
                 ))}
               </Select>
             </FormField>
 
-            <FormField
-              label="Training plan"
-              htmlFor="plan"
-              required
-            >
+            <FormField label="Training plan" htmlFor="plan" required>
               <Select
                 id="plan"
                 name="plan"
@@ -734,15 +695,10 @@ export default function StudentsPage() {
                 onChange={handleChange}
                 required
               >
-                <option value="">
-                  Select training plan
-                </option>
+                <option value="">Select training plan</option>
 
                 {plans.map((plan) => (
-                  <option
-                    key={plan._id}
-                    value={plan._id}
-                  >
+                  <option key={plan._id} value={plan._id}>
                     {plan.name}
                   </option>
                 ))}
@@ -767,11 +723,13 @@ function StudentSummary({
   inactive: number;
 }) {
   return (
-    <div className="
+    <div
+      className="
       grid gap-4
       sm:grid-cols-2
       xl:grid-cols-4
-    ">
+    "
+    >
       <SummaryCard
         title="Total Students"
         value={total}
@@ -818,15 +776,14 @@ function StudentsContent({
 }) {
   if (loading) {
     return (
-      <div className="
+      <div
+        className="
         flex min-h-[320px]
         items-center justify-center
         px-5 py-12
-      ">
-        <LoadingSpinner
-          size="md"
-          text="Loading students..."
-        />
+      "
+      >
+        <LoadingSpinner size="md" text="Loading students..." />
       </div>
     );
   }
@@ -838,10 +795,7 @@ function StudentsContent({
           title="Unable to load students"
           message={error}
           action={
-            <Button
-              variant="outline"
-              onClick={onRetry}
-            >
+            <Button variant="outline" onClick={onRetry}>
               Try again
             </Button>
           }
@@ -857,26 +811,21 @@ function StudentsContent({
       </div>
 
       <div className="space-y-3 p-4 md:hidden">
-        <StudentMobileList
-          students={students}
-          totalStudents={totalStudents}
-        />
+        <StudentMobileList students={students} totalStudents={totalStudents} />
       </div>
     </>
   );
 }
 
-function StudentTable({
-  students,
-}: {
-  students: Student[];
-}) {
+function StudentTable({ students }: { students: Student[] }) {
   return (
     <table className="w-full min-w-[1050px]">
-      <thead className="
+      <thead
+        className="
         border-b border-(--line)
         bg-(--surface)
-      ">
+      "
+      >
         <tr>
           <TableHeading>Student</TableHeading>
           <TableHeading>Contact</TableHeading>
@@ -884,9 +833,7 @@ function StudentTable({
           <TableHeading>Belt</TableHeading>
           <TableHeading>Status</TableHeading>
           <TableHeading>Joined</TableHeading>
-          <TableHeading align="right">
-            Action
-          </TableHeading>
+          <TableHeading align="right">Action</TableHeading>
         </tr>
       </thead>
 
@@ -905,10 +852,7 @@ function StudentTable({
           </tr>
         ) : (
           students.map((student) => (
-            <StudentTableRow
-              key={student._id}
-              student={student}
-            />
+            <StudentTableRow key={student._id} student={student} />
           ))
         )}
       </tbody>
@@ -916,16 +860,14 @@ function StudentTable({
   );
 }
 
-function StudentTableRow({
-  student,
-}: {
-  student: Student;
-}) {
+function StudentTableRow({ student }: { student: Student }) {
   return (
-    <tr className="
+    <tr
+      className="
       group transition-colors duration-200
       hover:bg-(--surface)
-    ">
+    "
+    >
       <td className="px-6 py-5">
         <Link
           href={`/students/${student._id}`}
@@ -934,18 +876,22 @@ function StudentTableRow({
           <StudentAvatar name={student.name} />
 
           <div className="min-w-0">
-            <p className="
+            <p
+              className="
               truncate text-sm font-bold
               text-(--foreground-soft)
               transition-colors
               group-hover:text-(--accent)
-            ">
+            "
+            >
               {student.name}
             </p>
 
-            <p className="
+            <p
+              className="
               mt-1 text-xs text-(--ink-muted)
-            ">
+            "
+            >
               Age {student.age}
             </p>
           </div>
@@ -953,50 +899,58 @@ function StudentTableRow({
       </td>
 
       <td className="px-6 py-5">
-        <p className="
+        <p
+          className="
           text-sm font-medium
           text-(--foreground-soft)
-        ">
+        "
+        >
           {student.phone}
         </p>
 
-        <p className="
+        <p
+          className="
           mt-1 max-w-[220px] truncate
           text-xs text-(--ink-muted)
-        ">
+        "
+        >
           {student.email || "No email"}
         </p>
       </td>
 
       <td className="px-6 py-5">
-        <p className="
+        <p
+          className="
           text-sm font-medium
           text-(--foreground-soft)
-        ">
+        "
+        >
           {student.plan?.name || "No plan"}
         </p>
 
-        <p className="
+        <p
+          className="
           mt-1 text-xs text-(--ink-muted)
-        ">
+        "
+        >
           {student.branch?.name || "No branch"}
         </p>
       </td>
 
       <td className="px-6 py-5">
-        <Badge variant="warning">
-          {student.currentBelt || "White Belt"}
-        </Badge>
+        <Badge variant="warning">{student.currentBelt || "White Belt"}</Badge>
       </td>
 
       <td className="px-6 py-5">
         <StatusBadge status={student.status} />
       </td>
 
-      <td className="
+      <td
+        className="
         whitespace-nowrap px-6 py-5
         text-sm text-(--ink-muted)
-      ">
+      "
+      >
         {formatDate(student.joinDate)}
       </td>
 
@@ -1033,7 +987,7 @@ function StudentMobileList({
         title="No students found"
         description={
           totalStudents === 0
-            ? "Add your first student to get started."
+            ? "No students have been added yet."
             : "Try changing your search."
         }
         icon={<UserRound size={22} />}
@@ -1058,25 +1012,31 @@ function StudentMobileList({
             hover:shadow-[0_8px_25px_var(--shadow-color)]
           "
         >
-          <div className="
+          <div
+            className="
             flex items-start
             justify-between gap-3
-          ">
+          "
+          >
             <div className="flex min-w-0 items-center gap-3">
               <StudentAvatar name={student.name} />
 
               <div className="min-w-0">
-                <p className="
+                <p
+                  className="
                   truncate text-sm font-bold
                   text-(--foreground-soft)
                   group-hover:text-(--accent)
-                ">
+                "
+                >
                   {student.name}
                 </p>
 
-                <p className="
+                <p
+                  className="
                   mt-1 text-xs text-(--ink-muted)
-                ">
+                "
+                >
                   Age {student.age}
                 </p>
               </div>
@@ -1085,15 +1045,14 @@ function StudentMobileList({
             <StatusBadge status={student.status} />
           </div>
 
-          <div className="
+          <div
+            className="
             mt-4 grid grid-cols-2 gap-x-4 gap-y-4
             border-t border-(--line)
             pt-4
-          ">
-            <MobileDetail
-              label="Contact"
-              value={student.phone}
-            />
+          "
+          >
+            <MobileDetail label="Contact" value={student.phone} />
 
             <MobileDetail
               label="Belt"
@@ -1107,29 +1066,33 @@ function StudentMobileList({
 
             <MobileDetail
               label="Branch"
-              value={
-                student.branch?.name || "No branch"
-              }
+              value={student.branch?.name || "No branch"}
             />
           </div>
 
-          <div className="
+          <div
+            className="
             mt-4 flex items-center
             justify-between gap-3
             border-t border-(--line)
             pt-4
-          ">
-            <span className="
+          "
+          >
+            <span
+              className="
               text-xs text-(--ink-faint)
-            ">
+            "
+            >
               Joined {formatDate(student.joinDate)}
             </span>
 
-            <span className="
+            <span
+              className="
               inline-flex items-center gap-1
               text-sm font-bold
               text-(--accent)
-            ">
+            "
+            >
               View
               <ArrowUpRight size={15} />
             </span>
@@ -1140,11 +1103,7 @@ function StudentMobileList({
   );
 }
 
-function StatusBadge({
-  status,
-}: {
-  status: Student["status"];
-}) {
+function StatusBadge({ status }: { status: Student["status"] }) {
   const config = {
     ACTIVE: {
       label: "Active",
@@ -1162,18 +1121,10 @@ function StatusBadge({
 
   const current = config[status];
 
-  return (
-    <Badge variant={current.variant}>
-      {current.label}
-    </Badge>
-  );
+  return <Badge variant={current.variant}>{current.label}</Badge>;
 }
 
-function StudentAvatar({
-  name,
-}: {
-  name: string;
-}) {
+function StudentAvatar({ name }: { name: string }) {
   const initials = name
     .split(" ")
     .filter(Boolean)
@@ -1183,7 +1134,8 @@ function StudentAvatar({
     .toUpperCase();
 
   return (
-    <div className="
+    <div
+      className="
       flex h-10 w-10 shrink-0
       items-center justify-center
       rounded-full
@@ -1191,7 +1143,8 @@ function StudentAvatar({
       bg-(--sidebar-logo-bg)
       text-xs font-black
       text-(--gold)
-    ">
+    "
+    >
       {initials || "ST"}
     </div>
   );
@@ -1220,27 +1173,25 @@ function TableHeading({
   );
 }
 
-function MobileDetail({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-}) {
+function MobileDetail({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0">
-      <p className="
+      <p
+        className="
         text-[9px] font-black uppercase
         tracking-[0.12em]
         text-(--ink-faint)
-      ">
+      "
+      >
         {label}
       </p>
 
-      <p className="
+      <p
+        className="
         mt-1 truncate text-sm font-medium
         text-(--foreground-soft)
-      ">
+      "
+      >
         {value}
       </p>
     </div>
@@ -1256,27 +1207,35 @@ function StudentFormSection({
 }) {
   return (
     <section>
-      <div className="
+      <div
+        className="
         mb-4 flex items-center gap-3
-      ">
-        <span className="
+      "
+      >
+        <span
+          className="
           h-5 w-1 rounded-full
           bg-(--accent)
-        " />
+        "
+        />
 
-        <h3 className="
+        <h3
+          className="
           text-[11px] font-black
           uppercase tracking-[0.16em]
           text-(--ink-muted)
-        ">
+        "
+        >
           {title}
         </h3>
       </div>
 
-      <div className="
+      <div
+        className="
         grid gap-5
         sm:grid-cols-2
-      ">
+      "
+      >
         {children}
       </div>
     </section>
@@ -1300,10 +1259,12 @@ function FormField({
 }) {
   return (
     <div>
-      <div className="
+      <div
+        className="
         mb-2 flex items-center
         justify-between gap-3
-      ">
+      "
+      >
         <label
           htmlFor={htmlFor}
           className="
@@ -1314,18 +1275,22 @@ function FormField({
           {label}
 
           {required && (
-            <span className="
+            <span
+              className="
               ml-1 text-(--danger)
-            ">
+            "
+            >
               *
             </span>
           )}
         </label>
 
         {hint && (
-          <span className="
+          <span
+            className="
             text-[10px] text-(--ink-faint)
-          ">
+          "
+          >
             {hint}
           </span>
         )}
@@ -1334,9 +1299,7 @@ function FormField({
       {children}
 
       {error && (
-        <p className="mt-1.5 text-xs font-medium text-(--danger)">
-          {error}
-        </p>
+        <p className="mt-1.5 text-xs font-medium text-(--danger)">{error}</p>
       )}
     </div>
   );

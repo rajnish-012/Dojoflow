@@ -476,21 +476,8 @@ export default function InquiriesPage() {
   };
 
   return (
-    <main
-      className="
-        min-h-[calc(100vh-72px)]
-        bg-(--background)
-        px-4
-        py-6
-        text-(--foreground)
-        transition-colors
-        duration-300
-        sm:px-6
-        lg:px-8
-        xl:px-10
-      "
-    >
-      <div className="mx-auto w-full max-w-[1500px]">
+    <main>
+      <div className="df-page">
         <PageHeader
           eyebrow="Academy Management"
           title="Student Inquiries"

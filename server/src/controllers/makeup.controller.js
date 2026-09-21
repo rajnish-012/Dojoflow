@@ -1,5 +1,6 @@
 const mongoose = require("mongoose");
 
+const { isBranchScoped } = require("../utils/access");
 const Makeup = require("../models/Makeup");
 const Attendance = require("../models/Attendance");
 const Student = require("../models/Student");
@@ -9,7 +10,7 @@ const Branch = require("../models/Branch");
 // Helper: Branch access validation
 // ==============================
 const checkBranchAccess = (req, branchId) => {
-  if (!["BRANCH_ADMIN", "COACH"].includes(req.user.role)) {
+  if (!isBranchScoped(req.user)) {
     return null;
   }
 
@@ -49,7 +50,7 @@ const getMakeups = async (req, res) => {
     const filter = {};
 
     // Branch-level filtering
-    if (["BRANCH_ADMIN", "COACH"].includes(req.user.role)) {
+    if (isBranchScoped(req.user)) {
       if (!req.user.branch) {
         return res.status(403).json({
           success: false,

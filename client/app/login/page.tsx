@@ -15,42 +15,38 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
-const API_URL =
-  process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api";
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api";
 
 type LoginRole = "admin" | "coach" | "student";
-
-type UserRole =
-  | "SUPER_ADMIN"
-  | "BRANCH_ADMIN"
-  | "COACH"
-  | "STUDENT";
 
 type RoleDetail = {
   title: string;
   description: string;
   icon: LucideIcon;
-  allowedRoles: UserRole[];
+  isAllowed: (role: string) => boolean;
 };
+
+const ADMIN_ROLES = ["SUPER_ADMIN", "BRANCH_ADMIN"];
 
 const roleDetails: Record<LoginRole, RoleDetail> = {
   admin: {
     title: "Admin Login",
     description: "Manage your academy, staff, students and operations.",
     icon: ShieldCheck,
-    allowedRoles: ["SUPER_ADMIN", "BRANCH_ADMIN"],
+    isAllowed: (role) => ADMIN_ROLES.includes(role),
   },
   coach: {
-    title: "Coach / Instructor Login",
+    title: "Coach / Staff Login",
     description: "Manage training, attendance and student performance.",
     icon: UserRound,
-    allowedRoles: ["COACH"],
+    // Coaches and every custom role created in the Roles page.
+    isAllowed: (role) => role !== "STUDENT" && !ADMIN_ROLES.includes(role),
   },
   student: {
     title: "Student / Parent Login",
     description: "View training progress, attendance and academy details.",
     icon: GraduationCap,
-    allowedRoles: ["STUDENT"],
+    isAllowed: (role) => role === "STUDENT",
   },
 };
 
@@ -170,7 +166,7 @@ export default function LoginPage() {
 
       const selectedRoleDetails = roleDetails[selectedRole];
 
-      if (!selectedRoleDetails.allowedRoles.includes(user.role)) {
+      if (!selectedRoleDetails.isAllowed(user.role)) {
         throw new Error(
           `This account cannot log in as ${selectedRoleDetails.title}.`,
         );
@@ -195,9 +191,7 @@ export default function LoginPage() {
     }
   }
 
-  const selectedRoleDetails = selectedRole
-    ? roleDetails[selectedRole]
-    : null;
+  const selectedRoleDetails = selectedRole ? roleDetails[selectedRole] : null;
 
   const SelectedRoleIcon = selectedRoleDetails?.icon;
 
@@ -218,9 +212,7 @@ export default function LoginPage() {
 
             <div>
               <p className="text-xl font-black">DojoFlow</p>
-              <p className="text-xs text-white/45">
-                Karate Academy Management
-              </p>
+              <p className="text-xs text-white/45">Karate Academy Management</p>
             </div>
           </div>
 
@@ -238,30 +230,24 @@ export default function LoginPage() {
             </h1>
 
             <p className="mt-6 max-w-md text-base leading-8 text-white/55">
-              Manage students, coaches, attendance, training plans,
-              performance, and academy growth from one platform.
+              Manage students, coaches, attendance, training plans, performance,
+              and academy growth from one platform.
             </p>
 
             <div className="mt-9 grid max-w-md grid-cols-3 gap-5 border-t border-white/10 pt-6">
               <div>
                 <p className="text-2xl font-black">500+</p>
-                <p className="mt-1 text-xs text-white/40">
-                  Students managed
-                </p>
+                <p className="mt-1 text-xs text-white/40">Students managed</p>
               </div>
 
               <div>
                 <p className="text-2xl font-black">15+</p>
-                <p className="mt-1 text-xs text-white/40">
-                  Years of expertise
-                </p>
+                <p className="mt-1 text-xs text-white/40">Years of expertise</p>
               </div>
 
               <div>
                 <p className="text-2xl font-black">24/7</p>
-                <p className="mt-1 text-xs text-white/40">
-                  Platform access
-                </p>
+                <p className="mt-1 text-xs text-white/40">Platform access</p>
               </div>
             </div>
           </div>
@@ -281,9 +267,7 @@ export default function LoginPage() {
               </div>
 
               <div>
-                <p className="text-lg font-black text-[#101a33]">
-                  DojoFlow
-                </p>
+                <p className="text-lg font-black text-[#101a33]">DojoFlow</p>
                 <p className="text-xs text-[#697386]">
                   Karate Academy Management
                 </p>
@@ -296,16 +280,16 @@ export default function LoginPage() {
                 {/* Back Button Only Here */}
                 <div className="mb-7">
                   <button
-                  type="button"
-                  onClick={handleBackToLandingPage}
-                  className="group mb-7 inline-flex items-center gap-2 text-sm font-bold text-[#697386] transition hover:text-[#101a33]"
-                >
-                  <ArrowLeft
-                    size={16}
-                    className="transition group-hover:-translate-x-1"
-                  />
-                  Back to website
-                </button>
+                    type="button"
+                    onClick={handleBackToLandingPage}
+                    className="group mb-7 inline-flex items-center gap-2 text-sm font-bold text-[#697386] transition hover:text-[#101a33]"
+                  >
+                    <ArrowLeft
+                      size={16}
+                      className="transition group-hover:-translate-x-1"
+                    />
+                    Back to website
+                  </button>
                 </div>
 
                 {/* Heading */}
@@ -316,9 +300,7 @@ export default function LoginPage() {
 
                   <h2 className="text-3xl font-black tracking-[-0.04em] text-[#101a33] sm:text-4xl">
                     Welcome to
-                    <span className="block text-[#a87418]">
-                      DojoFlow.
-                    </span>
+                    <span className="block text-[#a87418]">DojoFlow.</span>
                   </h2>
 
                   <p className="mt-3 text-sm leading-6 text-[#697386]">
@@ -387,9 +369,7 @@ export default function LoginPage() {
 
                 <div className="mb-7">
                   <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-[#101a33] text-[#d7a84b]">
-                    {SelectedRoleIcon && (
-                      <SelectedRoleIcon size={28} />
-                    )}
+                    {SelectedRoleIcon && <SelectedRoleIcon size={28} />}
                   </div>
 
                   <p className="mb-2 text-xs font-black uppercase tracking-[0.2em] text-[#a87418]">
@@ -436,9 +416,7 @@ export default function LoginPage() {
                         type="email"
                         autoComplete="email"
                         value={email}
-                        onChange={(event) =>
-                          setEmail(event.target.value)
-                        }
+                        onChange={(event) => setEmail(event.target.value)}
                         placeholder="Enter your email"
                         className="w-full rounded-xl border border-[#dfe5ed] bg-white py-3.5 pl-11 pr-4 text-sm outline-none transition placeholder:text-[#a5afbd] focus:border-[#a87418] focus:ring-4 focus:ring-[#d7a84b]/10"
                       />
@@ -479,18 +457,14 @@ export default function LoginPage() {
                         type={showPassword ? "text" : "password"}
                         autoComplete="current-password"
                         value={password}
-                        onChange={(event) =>
-                          setPassword(event.target.value)
-                        }
+                        onChange={(event) => setPassword(event.target.value)}
                         placeholder="Enter your password"
                         className="w-full rounded-xl border border-[#dfe5ed] bg-white py-3.5 pl-11 pr-12 text-sm outline-none transition placeholder:text-[#a5afbd] focus:border-[#a87418] focus:ring-4 focus:ring-[#d7a84b]/10"
                       />
 
                       <button
                         type="button"
-                        onClick={() =>
-                          setShowPassword((current) => !current)
-                        }
+                        onClick={() => setShowPassword((current) => !current)}
                         className="absolute right-4 top-1/2 -translate-y-1/2 text-[#9aabc2] hover:text-[#34445d]"
                       >
                         {showPassword ? (
@@ -524,9 +498,7 @@ export default function LoginPage() {
 
                 <div className="mt-7 flex items-center gap-3">
                   <div className="h-px flex-1 bg-[#e4e8ef]" />
-                  <span className="text-xs text-[#9aa5b5]">
-                    Secure access
-                  </span>
+                  <span className="text-xs text-[#9aa5b5]">Secure access</span>
                   <div className="h-px flex-1 bg-[#e4e8ef]" />
                 </div>
               </div>

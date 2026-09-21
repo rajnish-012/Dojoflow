@@ -45,10 +45,18 @@ const inquirySchema = new mongoose.Schema(
       trim: true,
     },
 
+    // Text shown to staff (the branch name)
     preferredBranch: {
       type: String,
       default: "",
       trim: true,
+    },
+
+    // Real link to the branch, used to limit who can see the inquiry
+    branch: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Branch",
+      default: null,
     },
 
     message: {

@@ -1,3 +1,5 @@
+
+const { isBranchScoped } = require("../utils/access");
 const Student = require("../models/Student");
 const Plan = require("../models/Plan");
 const Attendance = require("../models/Attendance");

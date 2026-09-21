@@ -1,5 +1,6 @@
 const mongoose = require("mongoose");
 
+const { isBranchScoped } = require("../utils/access");
 const Attendance = require("../models/Attendance");
 const Makeup = require("../models/Makeup");
 const Student = require("../models/Student");
@@ -10,7 +11,7 @@ const Plan = require("../models/Plan");
 // Helper: Check branch access
 // ==============================
 const checkBranchAccess = (req, studentBranch) => {
-  if (!["BRANCH_ADMIN", "COACH"].includes(req.user.role)) {
+  if (!isBranchScoped(req.user)) {
     return null;
   }
 
@@ -59,7 +60,7 @@ const getAttendance = async (req, res) => {
     const filter = {};
 
     // Branch Admins and Coaches can only see their own branch
-    if (["BRANCH_ADMIN", "COACH"].includes(req.user.role)) {
+    if (isBranchScoped(req.user)) {
       if (!req.user.branch) {
         return res.status(403).json({
           success: false,
@@ -238,7 +239,7 @@ const getAttendanceById = async (req, res) => {
     }
 
     // Branch-level access
-    if (["BRANCH_ADMIN", "COACH"].includes(req.user.role)) {
+    if (isBranchScoped(req.user)) {
       if (!req.user.branch) {
         return res.status(403).json({
           success: false,

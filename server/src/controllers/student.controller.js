@@ -1,6 +1,7 @@
 const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
 
+const { isBranchScoped } = require("../utils/access");
 const Student = require("../models/Student");
 const User = require("../models/User");
 const Plan = require("../models/Plan");
@@ -14,10 +15,7 @@ const getStudents = async (req, res) => {
     const filter = {};
 
     // Branch Admins and Coaches only see their branch
-    if (
-      req.user.role === "BRANCH_ADMIN" ||
-      req.user.role === "COACH"
-    ) {
+    if (isBranchScoped(req.user)) {
       filter.branch = req.user.branch;
     }
 
@@ -71,7 +69,7 @@ const getStudentById = async (req, res) => {
 
     // Branch-level access
     if (
-      req.user.role !== "SUPER_ADMIN" &&
+      isBranchScoped(req.user) &&
       student.branch._id.toString() !==
         req.user.branch?.toString()
     ) {
@@ -367,7 +365,7 @@ const updateStudent = async (req, res) => {
 
     // Branch-level access
     if (
-      req.user.role !== "SUPER_ADMIN" &&
+      isBranchScoped(req.user) &&
       student.branch.toString() !==
         req.user.branch?.toString()
     ) {

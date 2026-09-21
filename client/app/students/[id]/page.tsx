@@ -36,6 +36,8 @@ import {
   updateStudent,
 } from "@/lib/api";
 
+import { useCan } from "@/lib/permissions";
+
 import {
   Badge,
   Button,
@@ -158,20 +160,13 @@ const initialEditForm: EditForm = {
   password: "",
 };
 
-function extractRecords(
-  response: unknown,
-  keys: string[],
-): any[] {
+function extractRecords(response: unknown, keys: string[]): any[] {
   if (Array.isArray(response)) {
     return response;
   }
 
-  if (
-    response &&
-    typeof response === "object"
-  ) {
-    const value =
-      response as Record<string, any>;
+  if (response && typeof response === "object") {
+    const value = response as Record<string, any>;
 
     for (const key of keys) {
       if (Array.isArray(value[key])) {
@@ -179,33 +174,19 @@ function extractRecords(
       }
     }
 
-    if (
-      value.data &&
-      value.data !== response
-    ) {
-      return extractRecords(
-        value.data,
-        keys,
-      );
+    if (value.data && value.data !== response) {
+      return extractRecords(value.data, keys);
     }
 
-    if (
-      value.result &&
-      value.result !== response
-    ) {
-      return extractRecords(
-        value.result,
-        keys,
-      );
+    if (value.result && value.result !== response) {
+      return extractRecords(value.result, keys);
     }
   }
 
   return [];
 }
 
-function getRating(
-  record: PerformanceRecord,
-) {
+function getRating(record: PerformanceRecord) {
   const value =
     record.rating ??
     record.score ??
@@ -215,30 +196,21 @@ function getRating(
 
   const rating = Number(value);
 
-  return Number.isFinite(rating)
-    ? rating
-    : 0;
+  return Number.isFinite(rating) ? rating : 0;
 }
 
-function calculateAverageRating(
-  records: PerformanceRecord[],
-) {
-  const ratings = records
-    .map(getRating)
-    .filter((rating) => rating > 0);
+function calculateAverageRating(records: PerformanceRecord[]) {
+  const ratings = records.map(getRating).filter((rating) => rating > 0);
 
   if (!ratings.length) {
     return 0;
   }
 
-  return Math.round(
-    (ratings.reduce(
-      (sum, rating) => sum + rating,
-      0,
-    ) /
-      ratings.length) *
-      10,
-  ) / 10;
+  return (
+    Math.round(
+      (ratings.reduce((sum, rating) => sum + rating, 0) / ratings.length) * 10,
+    ) / 10
+  );
 }
 
 function formatDate(date?: string) {
@@ -248,22 +220,15 @@ function formatDate(date?: string) {
 
   const parsedDate = new Date(date);
 
-  if (
-    Number.isNaN(
-      parsedDate.getTime(),
-    )
-  ) {
+  if (Number.isNaN(parsedDate.getTime())) {
     return "—";
   }
 
-  return parsedDate.toLocaleDateString(
-    "en-IN",
-    {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    },
-  );
+  return parsedDate.toLocaleDateString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
 }
 
 function getInitials(name?: string) {
@@ -280,9 +245,7 @@ function getInitials(name?: string) {
     .toUpperCase();
 }
 
-function getStatusVariant(
-  status: Student["status"],
-) {
+function getStatusVariant(status: Student["status"]) {
   if (status === "ACTIVE") {
     return "success" as const;
   }
@@ -294,9 +257,7 @@ function getStatusVariant(
   return "default" as const;
 }
 
-function getStatusLabel(
-  status: Student["status"],
-) {
+function getStatusLabel(status: Student["status"]) {
   if (status === "ACTIVE") {
     return "Active";
   }
@@ -646,45 +607,33 @@ function FormField({
 }
 
 export default function StudentDetailsPage() {
+  const canEditStudent = useCan("student.update");
   const params = useParams();
   const router = useRouter();
 
-  const studentId = String(
-    params.id || "",
-  );
+  const studentId = String(params.id || "");
 
-  const [student, setStudent] =
-    useState<Student | null>(null);
+  const [student, setStudent] = useState<Student | null>(null);
 
-  const [progress, setProgress] =
-    useState<Progress | null>(null);
+  const [progress, setProgress] = useState<Progress | null>(null);
 
-  const [attendance, setAttendance] =
-    useState<AttendanceRecord[]>([]);
+  const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
 
-  const [performance, setPerformance] =
-    useState<PerformanceRecord[]>([]);
+  const [performance, setPerformance] = useState<PerformanceRecord[]>([]);
 
-  const [loading, setLoading] =
-    useState(true);
+  const [loading, setLoading] = useState(true);
 
-  const [error, setError] =
-    useState("");
+  const [error, setError] = useState("");
 
-  const [showEditModal, setShowEditModal] =
-    useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
 
-  const [saving, setSaving] =
-    useState(false);
+  const [saving, setSaving] = useState(false);
 
-  const [editError, setEditError] =
-    useState("");
+  const [editError, setEditError] = useState("");
 
-  const [plans, setPlans] =
-    useState<PlanOption[]>([]);
+  const [plans, setPlans] = useState<PlanOption[]>([]);
 
-  const [editForm, setEditForm] =
-    useState<EditForm>(initialEditForm);
+  const [editForm, setEditForm] = useState<EditForm>(initialEditForm);
 
   const loadStudent = async () => {
     if (!studentId) {
@@ -695,10 +644,7 @@ export default function StudentDetailsPage() {
       setLoading(true);
       setError("");
 
-      const [
-        studentData,
-        progressData,
-      ] = await Promise.all([
+      const [studentData, progressData] = await Promise.all([
         getStudentById(studentId),
         getStudentProgress(studentId),
       ]);
@@ -706,56 +652,35 @@ export default function StudentDetailsPage() {
       setStudent(studentData.student);
       setProgress(progressData.progress);
 
-      const [
-        attendanceResult,
-        performanceResult,
-      ] = await Promise.allSettled([
+      const [attendanceResult, performanceResult] = await Promise.allSettled([
         getStudentAttendance(studentId),
         getStudentPerformance(studentId),
       ]);
 
-      if (
-        attendanceResult.status ===
-        "fulfilled"
-      ) {
+      if (attendanceResult.status === "fulfilled") {
         setAttendance(
-          extractRecords(
-            attendanceResult.value,
-            [
-              "attendance",
-              "records",
-              "items",
-            ],
-          ),
+          extractRecords(attendanceResult.value, [
+            "attendance",
+            "records",
+            "items",
+          ]),
         );
       } else {
-        console.error(
-          "Failed to load attendance:",
-          attendanceResult.reason,
-        );
+        console.error("Failed to load attendance:", attendanceResult.reason);
 
         setAttendance([]);
       }
 
-      if (
-        performanceResult.status ===
-        "fulfilled"
-      ) {
+      if (performanceResult.status === "fulfilled") {
         setPerformance(
-          extractRecords(
-            performanceResult.value,
-            [
-              "performance",
-              "records",
-              "items",
-            ],
-          ),
+          extractRecords(performanceResult.value, [
+            "performance",
+            "records",
+            "items",
+          ]),
         );
       } else {
-        console.error(
-          "Failed to load performance:",
-          performanceResult.reason,
-        );
+        console.error("Failed to load performance:", performanceResult.reason);
 
         setPerformance([]);
       }
@@ -789,10 +714,8 @@ export default function StudentDetailsPage() {
       phone: student.phone || "",
       email: student.email || "",
       plan: student.plan?._id || "",
-      currentBelt:
-        student.currentBelt || "White",
-      status:
-        student.status || "ACTIVE",
+      currentBelt: student.currentBelt || "White",
+      status: student.status || "ACTIVE",
       password: "",
     });
 
@@ -805,9 +728,7 @@ export default function StudentDetailsPage() {
     } catch (planError) {
       console.error(planError);
 
-      setEditError(
-        "Unable to load training plans. Please try again.",
-      );
+      setEditError("Unable to load training plans. Please try again.");
     }
   };
 
@@ -821,14 +742,9 @@ export default function StudentDetailsPage() {
   };
 
   const handleEditChange = (
-    event: ChangeEvent<
-      HTMLInputElement | HTMLSelectElement
-    >,
+    event: ChangeEvent<HTMLInputElement | HTMLSelectElement>,
   ) => {
-    const {
-      name,
-      value,
-    } = event.target;
+    const { name, value } = event.target;
 
     setEditForm((current) => ({
       ...current,
@@ -836,9 +752,7 @@ export default function StudentDetailsPage() {
     }));
   };
 
-  const handleEditSubmit = async (
-    event: FormEvent<HTMLFormElement>,
-  ) => {
+  const handleEditSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
     setEditError("");
@@ -849,28 +763,19 @@ export default function StudentDetailsPage() {
       !editForm.phone.trim() ||
       !editForm.plan
     ) {
-      setEditError(
-        "Please fill all required fields.",
-      );
+      setEditError("Please fill all required fields.");
 
       return;
     }
 
     if (Number(editForm.age) < 1) {
-      setEditError(
-        "Age must be greater than zero.",
-      );
+      setEditError("Age must be greater than zero.");
 
       return;
     }
 
-    if (
-      editForm.password.trim() &&
-      editForm.password.trim().length < 6
-    ) {
-      setEditError(
-        "New password must be at least 6 characters.",
-      );
+    if (editForm.password.trim() && editForm.password.trim().length < 6) {
+      setEditError("New password must be at least 6 characters.");
 
       return;
     }
@@ -878,24 +783,16 @@ export default function StudentDetailsPage() {
     try {
       setSaving(true);
 
-      await updateStudent(
-        studentId,
-        {
-          name: editForm.name.trim(),
-          age: Number(editForm.age),
-          phone: editForm.phone.trim(),
-          email:
-            editForm.email.trim() ||
-            undefined,
-          plan: editForm.plan,
-          currentBelt:
-            editForm.currentBelt,
-          status: editForm.status,
-          password:
-            editForm.password.trim() ||
-            undefined,
-        },
-      );
+      await updateStudent(studentId, {
+        name: editForm.name.trim(),
+        age: Number(editForm.age),
+        phone: editForm.phone.trim(),
+        email: editForm.email.trim() || undefined,
+        plan: editForm.plan,
+        currentBelt: editForm.currentBelt,
+        status: editForm.status,
+        password: editForm.password.trim() || undefined,
+      });
 
       await loadStudent();
 
@@ -914,126 +811,70 @@ export default function StudentDetailsPage() {
     }
   };
 
-  const attendanceStats =
-    useMemo(() => {
-      const presentFromRecords =
-        attendance.filter(
-          (record) =>
-            String(record.status)
-              .toUpperCase() ===
-            "PRESENT",
-        ).length;
+  const attendanceStats = useMemo(() => {
+    const presentFromRecords = attendance.filter(
+      (record) => String(record.status).toUpperCase() === "PRESENT",
+    ).length;
 
-      const absentFromRecords =
-        attendance.filter(
-          (record) =>
-            String(record.status)
-              .toUpperCase() ===
-            "ABSENT",
-        ).length;
+    const absentFromRecords = attendance.filter(
+      (record) => String(record.status).toUpperCase() === "ABSENT",
+    ).length;
 
-      const pendingFromRecords =
-        attendance.filter(
-          (record) =>
-            record.makeupRequired &&
-            !record.makeupCompleted,
-        ).length;
+    const pendingFromRecords = attendance.filter(
+      (record) => record.makeupRequired && !record.makeupCompleted,
+    ).length;
 
-      const completedFromRecords =
-        attendance.filter(
-          (record) =>
-            record.makeupRequired &&
-            record.makeupCompleted,
-        ).length;
+    const completedFromRecords = attendance.filter(
+      (record) => record.makeupRequired && record.makeupCompleted,
+    ).length;
 
-      const apiPresent =
-        progress?.presentClasses ?? 0;
+    const apiPresent = progress?.presentClasses ?? 0;
 
-      const apiAbsent =
-        progress?.absentClasses ?? 0;
+    const apiAbsent = progress?.absentClasses ?? 0;
 
-      const hasApiAttendance =
-        apiPresent + apiAbsent > 0;
+    const hasApiAttendance = apiPresent + apiAbsent > 0;
 
-      const present =
-        hasApiAttendance
-          ? apiPresent
-          : presentFromRecords;
+    const present = hasApiAttendance ? apiPresent : presentFromRecords;
 
-      const absent =
-        hasApiAttendance
-          ? apiAbsent
-          : absentFromRecords;
+    const absent = hasApiAttendance ? apiAbsent : absentFromRecords;
 
-      const pending =
-        progress?.pendingMakeups ??
-        pendingFromRecords;
+    const pending = progress?.pendingMakeups ?? pendingFromRecords;
 
-      const completed =
-        progress?.completedMakeups ??
-        completedFromRecords;
+    const completed = progress?.completedMakeups ?? completedFromRecords;
 
-      const total =
-        present + absent;
+    const total = present + absent;
 
-      const attendanceRate =
-        total > 0
-          ? Math.round(
-              (present / total) * 100,
-            )
-          : 0;
+    const attendanceRate = total > 0 ? Math.round((present / total) * 100) : 0;
 
-      const completedDays =
-        present + completed;
+    const completedDays = present + completed;
 
-      const totalDays =
-        progress?.totalCurriculumDays ||
-        total;
+    const totalDays = progress?.totalCurriculumDays || total;
 
-      const progressPercent =
-        totalDays > 0
-          ? Math.min(
-              (completedDays / totalDays) *
-                100,
-              100,
-            )
-          : 0;
+    const progressPercent =
+      totalDays > 0 ? Math.min((completedDays / totalDays) * 100, 100) : 0;
 
-      return {
-        present,
-        absent,
-        pending,
-        completed,
-        total,
-        attendanceRate,
-        completedDays,
-        totalDays,
-        progressPercent,
-      };
-    }, [
-      attendance,
-      progress,
-    ]);
+    return {
+      present,
+      absent,
+      pending,
+      completed,
+      total,
+      attendanceRate,
+      completedDays,
+      totalDays,
+      progressPercent,
+    };
+  }, [attendance, progress]);
 
   const avgRating = useMemo(() => {
-    const apiRating = Number(
-      progress?.averageRating ?? 0,
-    );
+    const apiRating = Number(progress?.averageRating ?? 0);
 
-    if (
-      Number.isFinite(apiRating) &&
-      apiRating > 0
-    ) {
+    if (Number.isFinite(apiRating) && apiRating > 0) {
       return apiRating;
     }
 
-    return calculateAverageRating(
-      performance,
-    );
-  }, [
-    performance,
-    progress?.averageRating,
-  ]);
+    return calculateAverageRating(performance);
+  }, [performance, progress?.averageRating]);
 
   if (loading) {
     return (
@@ -1045,10 +886,7 @@ export default function StudentDetailsPage() {
           px-4
         "
       >
-        <LoadingSpinner
-          size="md"
-          text="Loading student details..."
-        />
+        <LoadingSpinner size="md" text="Loading student details..." />
       </main>
     );
   }
@@ -1065,12 +903,7 @@ export default function StudentDetailsPage() {
         "
       >
         <div className="mx-auto max-w-[1500px]">
-          <Button
-            variant="ghost"
-            onClick={() =>
-              router.push("/students")
-            }
-          >
+          <Button variant="ghost" onClick={() => router.push("/students")}>
             <ArrowLeft size={17} />
             Back to Students
           </Button>
@@ -1078,15 +911,9 @@ export default function StudentDetailsPage() {
           <div className="mt-5">
             <ErrorState
               title="Unable to load student"
-              message={
-                error ||
-                "Student could not be found."
-              }
+              message={error || "Student could not be found."}
               action={
-                <Button
-                  variant="outline"
-                  onClick={loadStudent}
-                >
+                <Button variant="outline" onClick={loadStudent}>
                   Try again
                 </Button>
               }
@@ -1122,12 +949,7 @@ export default function StudentDetailsPage() {
             gap-3
           "
         >
-          <Button
-            variant="ghost"
-            onClick={() =>
-              router.push("/students")
-            }
-          >
+          <Button variant="ghost" onClick={() => router.push("/students")}>
             <ArrowLeft size={17} />
             Back to Students
           </Button>
@@ -1156,10 +978,7 @@ export default function StudentDetailsPage() {
         </div>
 
         {/* Student Hero */}
-        <Card
-          padding="none"
-          className="overflow-hidden"
-        >
+        <Card padding="none" className="overflow-hidden">
           <div
             className="
               h-1
@@ -1200,9 +1019,7 @@ export default function StudentDetailsPage() {
                     sm:text-2xl
                   "
                 >
-                  {getInitials(
-                    student.name,
-                  )}
+                  {getInitials(student.name)}
                 </div>
 
                 <div className="min-w-0">
@@ -1223,14 +1040,8 @@ export default function StudentDetailsPage() {
                       {student.name}
                     </h1>
 
-                    <Badge
-                      variant={getStatusVariant(
-                        student.status,
-                      )}
-                    >
-                      {getStatusLabel(
-                        student.status,
-                      )}
+                    <Badge variant={getStatusVariant(student.status)}>
+                      {getStatusLabel(student.status)}
                     </Badge>
                   </div>
 
@@ -1243,23 +1054,17 @@ export default function StudentDetailsPage() {
                       text-(--ink-muted)
                     "
                   >
-                    <span>
-                      Age {student.age}
-                    </span>
+                    <span>Age {student.age}</span>
 
                     <span>•</span>
 
-                    <span>
-                      {student.currentBelt} Belt
-                    </span>
+                    <span>{student.currentBelt} Belt</span>
 
                     {student.branch?.name && (
                       <>
                         <span>•</span>
 
-                        <span>
-                          {student.branch.name}
-                        </span>
+                        <span>{student.branch.name}</span>
                       </>
                     )}
                   </div>
@@ -1272,10 +1077,7 @@ export default function StudentDetailsPage() {
                     "
                   >
                     <CalendarCheck size={14} />
-                    Joined{" "}
-                    {formatDate(
-                      student.joinDate,
-                    )}
+                    Joined {formatDate(student.joinDate)}
                   </p>
                 </div>
               </div>
@@ -1332,23 +1134,18 @@ export default function StudentDetailsPage() {
 
                 <Button
                   variant="primary"
-                  onClick={() =>
-                    router.push(
-                      `/students/${studentId}/progress`,
-                    )
-                  }
+                  onClick={() => router.push(`/students/${studentId}/progress`)}
                 >
                   <Target size={17} />
                   View Progress
                 </Button>
 
-                <Button
-                  variant="outline"
-                  onClick={openEditModal}
-                >
-                  <Pencil size={16} />
-                  Edit Student
-                </Button>
+                {canEditStudent && (
+                  <Button variant="outline" onClick={openEditModal}>
+                    <Pencil size={16} />
+                    Edit Student
+                  </Button>
+                )}
               </div>
             </div>
           </div>
@@ -1364,10 +1161,7 @@ export default function StudentDetailsPage() {
         >
           <SummaryCard
             title="Training Day"
-            value={
-              progress?.currentTrainingDay ??
-              attendanceStats.total
-            }
+            value={progress?.currentTrainingDay ?? attendanceStats.total}
             subtitle="Current curriculum day"
             icon={<Target size={20} />}
           />
@@ -1376,27 +1170,19 @@ export default function StudentDetailsPage() {
             title="Attendance"
             value={`${attendanceStats.attendanceRate}%`}
             subtitle="Overall attendance rate"
-            icon={
-              <CheckCircle2 size={20} />
-            }
+            icon={<CheckCircle2 size={20} />}
           />
 
           <SummaryCard
             title="Completed Days"
-            value={
-              attendanceStats.completedDays
-            }
+            value={attendanceStats.completedDays}
             subtitle={`Of ${attendanceStats.totalDays} curriculum days`}
-            icon={
-              <CalendarCheck size={20} />
-            }
+            icon={<CalendarCheck size={20} />}
           />
 
           <SummaryCard
             title="Pending Makeups"
-            value={
-              attendanceStats.pending
-            }
+            value={attendanceStats.pending}
             subtitle="Classes requiring attention"
             icon={<Clock3 size={20} />}
           />
@@ -1409,16 +1195,11 @@ export default function StudentDetailsPage() {
             xl:grid-cols-12
           "
         >
-          <Card
-            padding="lg"
-            className="xl:col-span-4"
-          >
+          <Card padding="lg" className="xl:col-span-4">
             <SectionHeading
               eyebrow="Profile"
               title="Personal Information"
-              icon={
-                <UserRound size={19} />
-              }
+              icon={<UserRound size={19} />}
             />
 
             <div className="mt-4">
@@ -1431,48 +1212,29 @@ export default function StudentDetailsPage() {
               <DetailItem
                 icon={<Mail size={16} />}
                 label="Email Address"
-                value={
-                  student.email ||
-                  "No email added"
-                }
+                value={student.email || "No email added"}
               />
 
               <DetailItem
                 icon={<Users size={16} />}
                 label="Branch"
-                value={
-                  student.branch?.name ||
-                  "No branch assigned"
-                }
-                description={
-                  student.branch?.address
-                }
+                value={student.branch?.name || "No branch assigned"}
+                description={student.branch?.address}
               />
 
               <DetailItem
-                icon={
-                  <CalendarCheck
-                    size={16}
-                  />
-                }
+                icon={<CalendarCheck size={16} />}
                 label="Joining Date"
-                value={formatDate(
-                  student.joinDate,
-                )}
+                value={formatDate(student.joinDate)}
               />
             </div>
           </Card>
 
-          <Card
-            padding="lg"
-            className="xl:col-span-4"
-          >
+          <Card padding="lg" className="xl:col-span-4">
             <SectionHeading
               eyebrow="Subscription"
               title="Training Plan"
-              icon={
-                <ShieldCheck size={19} />
-              }
+              icon={<ShieldCheck size={19} />}
             />
 
             {student.plan ? (
@@ -1515,9 +1277,7 @@ export default function StudentDetailsPage() {
                       </h3>
                     </div>
 
-                    <Badge variant="success">
-                      Active
-                    </Badge>
+                    <Badge variant="success">Active</Badge>
                   </div>
 
                   <div
@@ -1546,10 +1306,7 @@ export default function StudentDetailsPage() {
                 >
                   <MiniMetric
                     label="Classes / Week"
-                    value={
-                      student.plan
-                        .classesPerWeek
-                    }
+                    value={student.plan.classesPerWeek}
                   />
 
                   <MiniMetric
@@ -1569,17 +1326,12 @@ export default function StudentDetailsPage() {
                   Assign a training plan to begin
                   tracking this student's training.
                 "
-                icon={
-                  <ShieldCheck size={22} />
-                }
+                icon={<ShieldCheck size={22} />}
               />
             )}
           </Card>
 
-          <Card
-            padding="lg"
-            className="xl:col-span-4"
-          >
+          <Card padding="lg" className="xl:col-span-4">
             <SectionHeading
               eyebrow="Performance"
               title="Training Progress"
@@ -1587,11 +1339,7 @@ export default function StudentDetailsPage() {
               action={
                 <button
                   type="button"
-                  onClick={() =>
-                    router.push(
-                      `/students/${studentId}/progress`,
-                    )
-                  }
+                  onClick={() => router.push(`/students/${studentId}/progress`)}
                   className="
                     text-xs font-bold
                     text-(--accent)
@@ -1599,11 +1347,7 @@ export default function StudentDetailsPage() {
                     hover:text-(--accent-hover)
                   "
                 >
-                  Details{" "}
-                  <ArrowUpRight
-                    size={13}
-                    className="ml-0.5 inline"
-                  />
+                  Details <ArrowUpRight size={13} className="ml-0.5 inline" />
                 </button>
               }
             />
@@ -1655,13 +1399,7 @@ export default function StudentDetailsPage() {
                       text-(--foreground-soft)
                     "
                   >
-                    {
-                      attendanceStats.completedDays
-                    }
-                    /
-                    {
-                      attendanceStats.totalDays
-                    }
+                    {attendanceStats.completedDays}/{attendanceStats.totalDays}
                   </p>
                 </div>
               </div>
@@ -1707,10 +1445,7 @@ export default function StudentDetailsPage() {
                     text-(--accent)
                   "
                 >
-                  {Math.round(
-                    attendanceStats.progressPercent,
-                  )}
-                  %
+                  {Math.round(attendanceStats.progressPercent)}%
                 </span>
               </div>
 
@@ -1720,26 +1455,11 @@ export default function StudentDetailsPage() {
                   gap-3
                 "
               >
-                <MiniMetric
-                  label="Present"
-                  value={
-                    attendanceStats.present
-                  }
-                />
+                <MiniMetric label="Present" value={attendanceStats.present} />
 
-                <MiniMetric
-                  label="Absent"
-                  value={
-                    attendanceStats.absent
-                  }
-                />
+                <MiniMetric label="Absent" value={attendanceStats.absent} />
 
-                <MiniMetric
-                  label="Makeups"
-                  value={
-                    attendanceStats.pending
-                  }
-                />
+                <MiniMetric label="Makeups" value={attendanceStats.pending} />
 
                 <MiniMetric
                   label="Rating"
@@ -1759,12 +1479,7 @@ export default function StudentDetailsPage() {
             action={
               progress?.currentCurriculum ? (
                 <Badge variant="warning">
-                  Day{" "}
-                  {
-                    progress
-                      .currentCurriculum
-                      .day
-                  }
+                  Day {progress.currentCurriculum.day}
                 </Badge>
               ) : undefined
             }
@@ -1791,16 +1506,10 @@ export default function StudentDetailsPage() {
                     text-(--foreground)
                   "
                 >
-                  {
-                    progress
-                      .currentCurriculum
-                      .title
-                  }
+                  {progress.currentCurriculum.title}
                 </h3>
 
-                {progress
-                  .currentCurriculum
-                  .description && (
+                {progress.currentCurriculum.description && (
                   <p
                     className="
                       mt-3 max-w-3xl
@@ -1808,17 +1517,11 @@ export default function StudentDetailsPage() {
                       text-(--ink-muted)
                     "
                   >
-                    {
-                      progress
-                        .currentCurriculum
-                        .description
-                    }
+                    {progress.currentCurriculum.description}
                   </p>
                 )}
 
-                {progress
-                  .currentCurriculum
-                  .skill && (
+                {progress.currentCurriculum.skill && (
                   <div
                     className="
                       mt-5 inline-flex
@@ -1832,11 +1535,7 @@ export default function StudentDetailsPage() {
                     <Award size={15} />
 
                     <span className="text-sm font-bold">
-                      {
-                        progress
-                          .currentCurriculum
-                          .skill
-                      }
+                      {progress.currentCurriculum.skill}
                     </span>
                   </div>
                 )}
@@ -1868,18 +1567,13 @@ export default function StudentDetailsPage() {
                     text-(--foreground-soft)
                   "
                 >
-                  Continue practicing the
-                  current curriculum skills
+                  Continue practicing the current curriculum skills
                   consistently.
                 </p>
 
                 <button
                   type="button"
-                  onClick={() =>
-                    router.push(
-                      `/students/${studentId}/progress`,
-                    )
-                  }
+                  onClick={() => router.push(`/students/${studentId}/progress`)}
                   className="
                     mt-4 inline-flex
                     items-center gap-1
@@ -1916,33 +1610,24 @@ export default function StudentDetailsPage() {
             <SectionHeading
               eyebrow="Class Records"
               title="Attendance Summary"
-              icon={
-                <CalendarCheck size={19} />
-              }
+              icon={<CalendarCheck size={19} />}
               action={
                 <Badge variant="success">
-                  {
-                    attendanceStats.attendanceRate
-                  }
-                  %
+                  {attendanceStats.attendanceRate}%
                 </Badge>
               }
             />
 
             <div className="mt-5 space-y-3">
               <RecordStat
-                icon={
-                  <CheckCircle2 size={18} />
-                }
+                icon={<CheckCircle2 size={18} />}
                 iconClass="
                   bg-(--green-soft)
                   text-(--green)
                 "
                 label="Present Classes"
                 description="Successfully attended"
-                value={
-                  attendanceStats.present
-                }
+                value={attendanceStats.present}
               />
 
               <RecordStat
@@ -1953,9 +1638,7 @@ export default function StudentDetailsPage() {
                 "
                 label="Absent Classes"
                 description="Missed training sessions"
-                value={
-                  attendanceStats.absent
-                }
+                value={attendanceStats.absent}
               />
 
               <RecordStat
@@ -1966,24 +1649,18 @@ export default function StudentDetailsPage() {
                 "
                 label="Pending Makeups"
                 description="Classes still to be completed"
-                value={
-                  attendanceStats.pending
-                }
+                value={attendanceStats.pending}
               />
 
               <RecordStat
-                icon={
-                  <CheckCircle2 size={18} />
-                }
+                icon={<CheckCircle2 size={18} />}
                 iconClass="
                   bg-(--blue-soft)
                   text-(--blue)
                 "
                 label="Completed Makeups"
                 description="Previously recovered classes"
-                value={
-                  attendanceStats.completed
-                }
+                value={attendanceStats.completed}
               />
             </div>
           </Card>
@@ -2041,12 +1718,7 @@ export default function StudentDetailsPage() {
                           text-(--foreground)
                         "
                       >
-                        {
-                          progress
-                            .nextMilestone
-                            .belt
-                        }{" "}
-                        Belt
+                        {progress.nextMilestone.belt} Belt
                       </h3>
 
                       <p
@@ -2055,12 +1727,7 @@ export default function StudentDetailsPage() {
                           text-(--ink-muted)
                         "
                       >
-                        Target Day{" "}
-                        {
-                          progress
-                            .nextMilestone
-                            .day
-                        }
+                        Target Day {progress.nextMilestone.day}
                       </p>
                     </div>
                   </div>
@@ -2079,16 +1746,10 @@ export default function StudentDetailsPage() {
                         text-(--foreground-soft)
                       "
                     >
-                      {
-                        progress
-                          .nextMilestone
-                          .skill
-                      }
+                      {progress.nextMilestone.skill}
                     </p>
 
-                    {progress
-                      .nextMilestone
-                      .description && (
+                    {progress.nextMilestone.description && (
                       <p
                         className="
                           mt-2 text-xs
@@ -2096,11 +1757,7 @@ export default function StudentDetailsPage() {
                           text-(--ink-muted)
                         "
                       >
-                        {
-                          progress
-                            .nextMilestone
-                            .description
-                        }
+                        {progress.nextMilestone.description}
                       </p>
                     )}
                   </div>
@@ -2140,12 +1797,7 @@ export default function StudentDetailsPage() {
                           text-(--foreground-soft)
                         "
                       >
-                        {
-                          progress
-                            .achievedMilestone
-                            .belt
-                        }{" "}
-                        Belt
+                        {progress.achievedMilestone.belt} Belt
                       </p>
                     </div>
                   </div>
@@ -2176,13 +1828,9 @@ export default function StudentDetailsPage() {
             <SectionHeading
               eyebrow="Recent Records"
               title="Attendance Records"
-              icon={
-                <CalendarCheck size={19} />
-              }
+              icon={<CalendarCheck size={19} />}
               action={
-                <Badge variant="warning">
-                  {attendance.length} Records
-                </Badge>
+                <Badge variant="warning">{attendance.length} Records</Badge>
               }
             />
 
@@ -2194,18 +1842,14 @@ export default function StudentDetailsPage() {
                   overflow-y-auto pr-1
                 "
               >
-                {attendance.map(
-                  (record) => {
-                    const present =
-                      String(
-                        record.status,
-                      ).toUpperCase() ===
-                      "PRESENT";
+                {attendance.map((record) => {
+                  const present =
+                    String(record.status).toUpperCase() === "PRESENT";
 
-                    return (
-                      <div
-                        key={record._id}
-                        className="
+                  return (
+                    <div
+                      key={record._id}
+                      className="
                           flex items-center
                           justify-between gap-3
                           rounded-xl
@@ -2215,15 +1859,15 @@ export default function StudentDetailsPage() {
                           transition-colors
                           hover:bg-(--hover-bg)
                         "
-                      >
-                        <div
-                          className="
+                    >
+                      <div
+                        className="
                             flex min-w-0
                             items-center gap-3
                           "
-                        >
-                          <div
-                            className={`
+                      >
+                        <div
+                          className={`
                               flex h-9 w-9 shrink-0
                               items-center
                               justify-center
@@ -2234,82 +1878,69 @@ export default function StudentDetailsPage() {
                                   : "bg-(--red-soft) text-(--red)"
                               }
                             `}
-                          >
-                            {present ? (
-                              <CheckCircle2
-                                size={17}
-                              />
-                            ) : (
-                              <XCircle
-                                size={17}
-                              />
-                            )}
-                          </div>
+                        >
+                          {present ? (
+                            <CheckCircle2 size={17} />
+                          ) : (
+                            <XCircle size={17} />
+                          )}
+                        </div>
 
-                          <div className="min-w-0">
-                            <p
-                              className="
+                        <div className="min-w-0">
+                          <p
+                            className="
                                 truncate text-sm
                                 font-bold
                                 text-(--foreground-soft)
                               "
-                            >
-                              {
-                                record
-                                  .curriculumTitle ||
-                                `Training Day ${
-                                  record.planDay ??
-                                  "-"
-                                }`
-                              }
-                            </p>
+                          >
+                            {record.curriculumTitle ||
+                              `Training Day ${record.planDay ?? "-"}`}
+                          </p>
 
-                            <p
-                              className="
+                          <p
+                            className="
                                 mt-1 text-xs
                                 text-(--ink-faint)
                               "
-                            >
-                              {formatDate(
-                                record.date,
-                              )}
-                            </p>
-                          </div>
+                          >
+                            {formatDate(record.date)}
+                          </p>
                         </div>
+                      </div>
 
-                        <div
-                          className="
+                      <div
+                        className="
                             shrink-0 text-right
                           "
-                        >
-                          <p
-                            className="
+                      >
+                        <p
+                          className="
                               text-[10px] font-black
                               uppercase
                               text-(--foreground-soft)
                             "
-                          >
-                            {record.status}
-                          </p>
+                        >
+                          {record.status}
+                        </p>
 
-                          {record.makeupRequired && (
-                            <p
-                              className="
+                        {record.makeupRequired && (
+                          <p
+                            className="
                                 mt-1 text-[10px]
                                 font-bold
                                 text-(--orange)
                               "
-                            >
-                              {record.makeupCompleted
-                                ? "Makeup completed"
-                                : "Makeup pending"}
-                            </p>
-                          )}
-                        </div>
+                          >
+                            {record.makeupCompleted
+                              ? "Makeup completed"
+                              : "Makeup pending"}
+                          </p>
+                        )}
                       </div>
-                    );
-                  },
-                )}
+                    </div>
+                  );
+                })}
               </div>
             ) : (
               <EmptyState
@@ -2319,9 +1950,7 @@ export default function StudentDetailsPage() {
                   Attendance records will appear
                   after classes are marked.
                 "
-                icon={
-                  <CalendarCheck size={22} />
-                }
+                icon={<CalendarCheck size={22} />}
               />
             )}
           </Card>
@@ -2332,9 +1961,7 @@ export default function StudentDetailsPage() {
               title="Performance Records"
               icon={<Award size={19} />}
               action={
-                <Badge variant="info">
-                  {performance.length} Reports
-                </Badge>
+                <Badge variant="info">{performance.length} Reports</Badge>
               }
             />
 
@@ -2346,64 +1973,59 @@ export default function StudentDetailsPage() {
                   overflow-y-auto pr-1
                 "
               >
-                {performance.map(
-                  (record) => (
-                    <div
-                      key={record._id}
-                      className="
+                {performance.map((record) => (
+                  <div
+                    key={record._id}
+                    className="
                         rounded-xl
                         border border-(--line)
                         bg-(--surface)
                         p-4
                       "
-                    >
-                      <div
-                        className="
+                  >
+                    <div
+                      className="
                           flex items-center
                           justify-between gap-3
                         "
-                      >
-                        <div>
-                          <p
-                            className="
+                    >
+                      <div>
+                        <p
+                          className="
                               text-sm font-bold
                               text-(--foreground-soft)
                             "
-                          >
-                            Performance Evaluation
-                          </p>
+                        >
+                          Performance Evaluation
+                        </p>
 
-                          <p
-                            className="
+                        <p
+                          className="
                               mt-1 text-xs
                               text-(--ink-faint)
                             "
-                          >
-                            {formatDate(
-                              record.evaluationDate,
-                            )}
-                          </p>
-                        </div>
+                        >
+                          {formatDate(record.evaluationDate)}
+                        </p>
+                      </div>
 
-                        <div
-                          className="
+                      <div
+                        className="
                             rounded-lg
                             bg-(--accent-soft)
                             px-3 py-1.5
                             text-sm font-black
                             text-(--accent)
                           "
-                        >
-                          {getRating(
-                            record,
-                          ).toFixed(1)}
-                          /5
-                        </div>
+                      >
+                        {getRating(record).toFixed(1)}
+                        /5
                       </div>
+                    </div>
 
-                      {record.remarks && (
-                        <p
-                          className="
+                    {record.remarks && (
+                      <p
+                        className="
                             mt-3 rounded-lg
                             border border-(--line)
                             bg-(--card)
@@ -2411,13 +2033,12 @@ export default function StudentDetailsPage() {
                             leading-5
                             text-(--ink-muted)
                           "
-                        >
-                          {record.remarks}
-                        </p>
-                      )}
-                    </div>
-                  ),
-                )}
+                      >
+                        {record.remarks}
+                      </p>
+                    )}
+                  </div>
+                ))}
               </div>
             ) : (
               <EmptyState
@@ -2445,11 +2066,7 @@ export default function StudentDetailsPage() {
         size="lg"
         footer={
           <>
-            <Button
-              variant="ghost"
-              onClick={closeEditModal}
-              disabled={saving}
-            >
+            <Button variant="ghost" onClick={closeEditModal} disabled={saving}>
               Cancel
             </Button>
 
@@ -2490,11 +2107,7 @@ export default function StudentDetailsPage() {
           )}
 
           <FormSection title="Basic Information">
-            <FormField
-              label="Full name"
-              htmlFor="edit-name"
-              required
-            >
+            <FormField label="Full name" htmlFor="edit-name" required>
               <Input
                 id="edit-name"
                 name="name"
@@ -2506,11 +2119,7 @@ export default function StudentDetailsPage() {
               />
             </FormField>
 
-            <FormField
-              label="Age"
-              htmlFor="edit-age"
-              required
-            >
+            <FormField label="Age" htmlFor="edit-age" required>
               <Input
                 id="edit-age"
                 name="age"
@@ -2523,11 +2132,7 @@ export default function StudentDetailsPage() {
               />
             </FormField>
 
-            <FormField
-              label="Phone number"
-              htmlFor="edit-phone"
-              required
-            >
+            <FormField label="Phone number" htmlFor="edit-phone" required>
               <Input
                 id="edit-phone"
                 name="phone"
@@ -2539,10 +2144,7 @@ export default function StudentDetailsPage() {
               />
             </FormField>
 
-            <FormField
-              label="Email address"
-              htmlFor="edit-email"
-            >
+            <FormField label="Email address" htmlFor="edit-email">
               <Input
                 id="edit-email"
                 name="email"
@@ -2556,11 +2158,7 @@ export default function StudentDetailsPage() {
           </FormSection>
 
           <FormSection title="Training Details">
-            <FormField
-              label="Training plan"
-              htmlFor="edit-plan"
-              required
-            >
+            <FormField label="Training plan" htmlFor="edit-plan" required>
               <Select
                 id="edit-plan"
                 name="plan"
@@ -2568,80 +2166,44 @@ export default function StudentDetailsPage() {
                 onChange={handleEditChange}
                 required
               >
-                <option value="">
-                  Select a plan
-                </option>
+                <option value="">Select a plan</option>
 
                 {plans.map((plan) => (
-                  <option
-                    key={plan._id}
-                    value={plan._id}
-                  >
-                    {plan.name} — ₹
-                    {plan.price}
+                  <option key={plan._id} value={plan._id}>
+                    {plan.name} — ₹{plan.price}
                   </option>
                 ))}
               </Select>
             </FormField>
 
-            <FormField
-              label="Current belt"
-              htmlFor="edit-belt"
-            >
+            <FormField label="Current belt" htmlFor="edit-belt">
               <Select
                 id="edit-belt"
                 name="currentBelt"
-                value={
-                  editForm.currentBelt
-                }
+                value={editForm.currentBelt}
                 onChange={handleEditChange}
               >
-                <option value="White">
-                  White
-                </option>
-                <option value="Yellow">
-                  Yellow
-                </option>
-                <option value="Orange">
-                  Orange
-                </option>
-                <option value="Green">
-                  Green
-                </option>
-                <option value="Blue">
-                  Blue
-                </option>
-                <option value="Purple">
-                  Purple
-                </option>
-                <option value="Brown">
-                  Brown
-                </option>
-                <option value="Black">
-                  Black
-                </option>
+                <option value="White">White</option>
+                <option value="Yellow">Yellow</option>
+                <option value="Orange">Orange</option>
+                <option value="Green">Green</option>
+                <option value="Blue">Blue</option>
+                <option value="Purple">Purple</option>
+                <option value="Brown">Brown</option>
+                <option value="Black">Black</option>
               </Select>
             </FormField>
 
-            <FormField
-              label="Student status"
-              htmlFor="edit-status"
-            >
+            <FormField label="Student status" htmlFor="edit-status">
               <Select
                 id="edit-status"
                 name="status"
                 value={editForm.status}
                 onChange={handleEditChange}
               >
-                <option value="ACTIVE">
-                  Active
-                </option>
-                <option value="INACTIVE">
-                  Inactive
-                </option>
-                <option value="COMPLETED">
-                  Completed
-                </option>
+                <option value="ACTIVE">Active</option>
+                <option value="INACTIVE">Inactive</option>
+                <option value="COMPLETED">Completed</option>
               </Select>
             </FormField>
           </FormSection>
@@ -2670,13 +2232,7 @@ export default function StudentDetailsPage() {
   );
 }
 
-function PlanMetric({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-}) {
+function PlanMetric({ label, value }: { label: string; value: string }) {
   return (
     <div
       className="
@@ -2695,9 +2251,7 @@ function PlanMetric({
         {label}
       </p>
 
-      <p className="mt-1 text-lg font-black">
-        {value}
-      </p>
+      <p className="mt-1 text-lg font-black">{value}</p>
     </div>
   );
 }

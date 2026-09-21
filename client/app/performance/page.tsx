@@ -84,13 +84,14 @@ type AttendanceRecord = {
   status: "PRESENT" | "ABSENT";
 };
 
+// How many evaluations the history shows at first, and per "Show more".
+const HISTORY_PAGE_SIZE = 10;
+
 export default function PerformancePage() {
   const [students, setStudents] = useState<Student[]>([]);
   const [plans, setPlans] = useState<Plan[]>([]);
   const [records, setRecords] = useState<PerformanceRecord[]>([]);
-  const [studentAttendance, setStudentAttendance] = useState<
-    AttendanceRecord[]
-  >([]);
+  const [studentAttendance, setStudentAttendance] = useState<AttendanceRecord[]>([]);
 
   const [selectedStudent, setSelectedStudent] =
     useState("");
@@ -98,6 +99,7 @@ export default function PerformancePage() {
   const [rating, setRating] = useState(0);
   const [remarks, setRemarks] = useState("");
   const [search, setSearch] = useState("");
+  const [visibleCount, setVisibleCount] = useState(HISTORY_PAGE_SIZE);
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -320,6 +322,9 @@ export default function PerformancePage() {
     search,
   ]);
 
+  const visibleRecords = filteredRecords.slice(0, visibleCount);
+  const hiddenCount = filteredRecords.length - visibleRecords.length;
+
   const averageRating = useMemo(() => {
     if (!filteredRecords.length) return "—";
 
@@ -366,6 +371,7 @@ export default function PerformancePage() {
     value: string,
   ) {
     setSelectedStudent(value);
+    setVisibleCount(HISTORY_PAGE_SIZE);
     setSelectedDay(
       value
         ? getNextTrainingDayForStudent(value)
@@ -559,7 +565,7 @@ export default function PerformancePage() {
   if (loading) {
     return (
       <div className="df-page">
-        <Card className="min-h-[360px]">
+        <Card className="min-h-90">
           <LoadingSpinner
             size="lg"
             text="Loading performance data..."
@@ -659,8 +665,13 @@ export default function PerformancePage() {
         />
       </div>
 
-      <div className="grid gap-5 xl:grid-cols-[390px_minmax(0,1fr)]">
-        <Card padding="none" className="overflow-hidden">
+      <div className="grid items-start gap-5 xl:grid-cols-[390px_minmax(0,1fr)]">
+        {/* The form keeps its own height and stays in view while the
+            history scrolls. If the screen is short it scrolls inside. */}
+        <Card
+          padding="none"
+          className="overflow-hidden xl:sticky xl:top-24 xl:max-h-[calc(100vh-7.5rem)] xl:overflow-y-auto"
+        >
           <div className="border-b border-(--line) px-6 py-6">
             <div className="mb-4 flex h-11 w-11 items-center justify-center rounded-xl bg-(--accent) text-(--background)">
               <Award size={21} />
@@ -856,9 +867,10 @@ export default function PerformancePage() {
 
               <Input
                 value={search}
-                onChange={(event) =>
-                  setSearch(event.target.value)
-                }
+                onChange={(event) => {
+                  setSearch(event.target.value);
+                  setVisibleCount(HISTORY_PAGE_SIZE);
+                }}
                 placeholder="Search students..."
                 className="pl-10"
                 aria-label="Search performance records"
@@ -880,17 +892,37 @@ export default function PerformancePage() {
                 icon={<Award size={23} />}
               />
             ) : (
-              <div className="space-y-3">
-                {filteredRecords.map(
-                  (record) => (
+              <>
+                <div className="space-y-3">
+                  {visibleRecords.map((record) => (
                     <PerformanceRecordCard
                       key={record._id}
                       record={record}
                       renderStars={renderStars}
                     />
-                  ),
+                  ))}
+                </div>
+
+                {hiddenCount > 0 && (
+                  <div className="mt-5 flex flex-col items-center gap-2">
+                    <p className="text-xs text-(--ink-muted)">
+                      Showing {visibleRecords.length} of{" "}
+                      {filteredRecords.length} evaluations
+                    </p>
+
+                    <Button
+                      variant="outline"
+                      onClick={() =>
+                        setVisibleCount(
+                          (count) => count + HISTORY_PAGE_SIZE,
+                        )
+                      }
+                    >
+                      Show {Math.min(HISTORY_PAGE_SIZE, hiddenCount)} more
+                    </Button>
+                  </div>
                 )}
-              </div>
+              </>
             )}
           </div>
         </Card>

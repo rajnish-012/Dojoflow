@@ -27,8 +27,9 @@ import {
   SummaryCard,
 } from "@/components/ui";
 
-const API_URL =
-  process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api";
+import { getRoles, type RoleRecord } from "@/lib/api";
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -44,7 +45,7 @@ type StaffUser = {
   _id: string;
   name: string;
   email: string;
-  role: "SUPER_ADMIN" | "BRANCH_ADMIN" | "COACH";
+  role: string;
   branch?: Branch | null;
   createdAt?: string;
 };
@@ -53,7 +54,7 @@ type FormData = {
   name: string;
   email: string;
   password: string;
-  role: "BRANCH_ADMIN" | "COACH";
+  role: string;
   branch: string;
 };
 
@@ -65,17 +66,15 @@ const emptyForm: FormData = {
   branch: "",
 };
 
-function getRoleLabel(role: StaffUser["role"]) {
-  switch (role) {
-    case "SUPER_ADMIN":
-      return "Super Admin";
-    case "BRANCH_ADMIN":
-      return "Branch Admin";
-    case "COACH":
-      return "Coach";
-    default:
-      return role;
-  }
+function getRoleLabel(role: string, roles: RoleRecord[] = []) {
+  const found = roles.find((item) => item.key === role);
+
+  if (found) return found.name;
+
+  return role
+    .replaceAll("_", " ")
+    .toLowerCase()
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 function getRoleVariant(
@@ -128,6 +127,7 @@ function formatDate(value?: string) {
 export default function StaffManagementPage() {
   const [users, setUsers] = useState<StaffUser[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
+  const [roles, setRoles] = useState<RoleRecord[]>([]);
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -142,8 +142,7 @@ export default function StaffManagementPage() {
   const [showModal, setShowModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
 
-  const [editingUser, setEditingUser] =
-    useState<StaffUser | null>(null);
+  const [editingUser, setEditingUser] = useState<StaffUser | null>(null);
 
   const [form, setForm] = useState<FormData>(emptyForm);
 
@@ -152,14 +151,29 @@ export default function StaffManagementPage() {
     [branches],
   );
 
+  // Super Admin and Student are never given from this page.
+  const assignableRoles = useMemo(
+    () =>
+      roles.filter(
+        (role) => role.key !== "SUPER_ADMIN" && role.key !== "STUDENT",
+      ),
+    [roles],
+  );
+
+  // Branch-only roles must be given a branch.
+  function roleNeedsBranch(key: string) {
+    const role = roles.find((item) => item.key === key);
+
+    return role ? role.dataScope === "BRANCH" : true;
+  }
+
   const coaches = useMemo(
     () => users.filter((user) => user.role === "COACH").length,
     [users],
   );
 
   const branchAdmins = useMemo(
-    () =>
-      users.filter((user) => user.role === "BRANCH_ADMIN").length,
+    () => users.filter((user) => user.role === "BRANCH_ADMIN").length,
     [users],
   );
 
@@ -184,29 +198,26 @@ export default function StaffManagementPage() {
         Authorization: `Bearer ${token}`,
       };
 
-      const [usersResponse, branchesResponse] =
-        await Promise.all([
-          fetch(`${API_URL}/users`, { headers }),
-          fetch(`${API_URL}/branches`, { headers }),
-        ]);
+      const [usersResponse, branchesResponse, rolesList] = await Promise.all([
+        fetch(`${API_URL}/users`, { headers }),
+        fetch(`${API_URL}/branches`, { headers }),
+        getRoles(),
+      ]);
 
       const usersData = await usersResponse.json();
       const branchesData = await branchesResponse.json();
 
       if (!usersResponse.ok) {
-        throw new Error(
-          usersData.message || "Failed to load staff users.",
-        );
+        throw new Error(usersData.message || "Failed to load staff users.");
       }
 
       if (!branchesResponse.ok) {
-        throw new Error(
-          branchesData.message || "Failed to load branches.",
-        );
+        throw new Error(branchesData.message || "Failed to load branches.");
       }
 
       setUsers(usersData.users || []);
       setBranches(branchesData.branches || []);
+      setRoles(rolesList);
     } catch (caughtError) {
       console.error(caughtError);
 
@@ -250,7 +261,7 @@ export default function StaffManagementPage() {
       name: user.name || "",
       email: user.email || "",
       password: "",
-      role: user.role as "BRANCH_ADMIN" | "COACH",
+      role: user.role,
       branch: user.branch?._id || "",
     });
 
@@ -270,9 +281,7 @@ export default function StaffManagementPage() {
   }
 
   function handleChange(
-    event: React.ChangeEvent<
-      HTMLInputElement | HTMLSelectElement
-    >,
+    event: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>,
   ) {
     const { name, value } = event.target;
 
@@ -282,9 +291,7 @@ export default function StaffManagementPage() {
     }));
   }
 
-  function handleEmailBlur(
-    event: React.FocusEvent<HTMLInputElement>,
-  ) {
+  function handleEmailBlur(event: React.FocusEvent<HTMLInputElement>) {
     const value = event.target.value.trim();
 
     if (!value) {
@@ -293,15 +300,11 @@ export default function StaffManagementPage() {
     }
 
     setEmailFieldError(
-      EMAIL_PATTERN.test(value)
-        ? ""
-        : "Please enter a valid email address.",
+      EMAIL_PATTERN.test(value) ? "" : "Please enter a valid email address.",
     );
   }
 
-  async function handleCreateUser(
-    event: React.FormEvent<HTMLFormElement>,
-  ) {
+  async function handleCreateUser(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setFormError("");
 
@@ -326,16 +329,12 @@ export default function StaffManagementPage() {
     }
 
     if (password.length < 6) {
-      setFormError(
-        "Password must contain at least 6 characters.",
-      );
+      setFormError("Password must contain at least 6 characters.");
       return;
     }
 
-    if (!branch) {
-      setFormError(
-        "Please select a branch for this staff member.",
-      );
+    if (!branch && roleNeedsBranch(form.role)) {
+      setFormError("Please select a branch for this staff member.");
       return;
     }
 
@@ -367,9 +366,7 @@ export default function StaffManagementPage() {
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(
-          data.message || "Failed to create staff user.",
-        );
+        throw new Error(data.message || "Failed to create staff user.");
       }
 
       setUsers((current) => [data.user, ...current]);
@@ -390,9 +387,7 @@ export default function StaffManagementPage() {
     }
   }
 
-  async function handleUpdateUser(
-    event: React.FormEvent<HTMLFormElement>,
-  ) {
+  async function handleUpdateUser(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setEditError("");
 
@@ -417,17 +412,13 @@ export default function StaffManagementPage() {
       return;
     }
 
-    if (!form.branch) {
-      setEditError(
-        "Please select a branch for this staff member.",
-      );
+    if (!form.branch && roleNeedsBranch(form.role)) {
+      setEditError("Please select a branch for this staff member.");
       return;
     }
 
     if (password && password.length < 6) {
-      setEditError(
-        "New password must contain at least 6 characters.",
-      );
+      setEditError("New password must contain at least 6 characters.");
       return;
     }
 
@@ -441,30 +432,25 @@ export default function StaffManagementPage() {
         return;
       }
 
-      const response = await fetch(
-        `${API_URL}/users/${editingUser._id}`,
-        {
-          method: "PUT",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            name,
-            email,
-            role: form.role,
-            branch: form.branch,
-            password: password || undefined,
-          }),
+      const response = await fetch(`${API_URL}/users/${editingUser._id}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
         },
-      );
+        body: JSON.stringify({
+          name,
+          email,
+          role: form.role,
+          branch: form.branch,
+          password: password || undefined,
+        }),
+      });
 
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(
-          data.message || "Failed to update staff user.",
-        );
+        throw new Error(data.message || "Failed to update staff user.");
       }
 
       setUsers((current) =>
@@ -510,27 +496,20 @@ export default function StaffManagementPage() {
         return;
       }
 
-      const response = await fetch(
-        `${API_URL}/users/${user._id}`,
-        {
-          method: "DELETE",
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
+      const response = await fetch(`${API_URL}/users/${user._id}`, {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${token}`,
         },
-      );
+      });
 
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(
-          data.message || "Failed to delete staff user.",
-        );
+        throw new Error(data.message || "Failed to delete staff user.");
       }
 
-      setUsers((current) =>
-        current.filter((item) => item._id !== user._id),
-      );
+      setUsers((current) => current.filter((item) => item._id !== user._id));
     } catch (caughtError) {
       console.error(caughtError);
 
@@ -565,20 +544,8 @@ export default function StaffManagementPage() {
   }
 
   return (
-    <div
-      className="
-        min-h-screen
-        bg-(--background)
-        px-4
-        py-6
-        text-(--foreground)
-        transition-colors
-        duration-300
-        sm:px-6
-        lg:px-8
-      "
-    >
-      <div className="mx-auto w-full max-w-[1440px]">
+    <div>
+      <div className="df-page">
         <PageHeader
           eyebrow="Academy Management"
           title="Staff Management"
@@ -672,9 +639,7 @@ export default function StaffManagementPage() {
                   Staff Accounts
                 </h2>
 
-                <Badge variant="neutral">
-                  {users.length}
-                </Badge>
+                <Badge variant="neutral">{users.length}</Badge>
               </div>
 
               <p className="mt-1 text-sm text-(--ink-muted)">
@@ -784,7 +749,7 @@ export default function StaffManagementPage() {
                         <td className="px-6 py-5">
                           <Badge variant={getRoleVariant(user.role)}>
                             <RoleIcon size={14} />
-                            {getRoleLabel(user.role)}
+                            {getRoleLabel(user.role, roles)}
                           </Badge>
                         </td>
 
@@ -884,15 +849,13 @@ export default function StaffManagementPage() {
           className="space-y-5"
         >
           {formError && (
-            <FormAlert
-              message={formError}
-              onClose={() => setFormError("")}
-            />
+            <FormAlert message={formError} onClose={() => setFormError("")} />
           )}
 
           <StaffFormFields
             form={form}
             branches={activeBranches}
+            roles={assignableRoles}
             onChange={handleChange}
             onEmailBlur={handleEmailBlur}
             emailError={emailFieldError}
@@ -936,15 +899,13 @@ export default function StaffManagementPage() {
           className="space-y-5"
         >
           {editError && (
-            <FormAlert
-              message={editError}
-              onClose={() => setEditError("")}
-            />
+            <FormAlert message={editError} onClose={() => setEditError("")} />
           )}
 
           <StaffFormFields
             form={form}
             branches={activeBranches}
+            roles={assignableRoles}
             onChange={handleChange}
             onEmailBlur={handleEmailBlur}
             emailError={emailFieldError}
@@ -998,6 +959,7 @@ function FormAlert({
 function StaffFormFields({
   form,
   branches,
+  roles,
   onChange,
   onEmailBlur,
   emailError,
@@ -1006,6 +968,7 @@ function StaffFormFields({
 }: {
   form: FormData;
   branches: Branch[];
+  roles: RoleRecord[];
   onChange: (
     event: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>,
   ) => void;
@@ -1014,6 +977,12 @@ function StaffFormFields({
   passwordLabel: string;
   passwordPlaceholder: string;
 }) {
+  const selectedRole = roles.find((role) => role.key === form.role);
+
+  const branchRequired = selectedRole
+    ? selectedRole.dataScope === "BRANCH"
+    : true;
+
   return (
     <>
       <div>
@@ -1093,10 +1062,11 @@ function StaffFormFields({
           value={form.role}
           onChange={onChange}
         >
-          <option value="COACH">Coach</option>
-          <option value="BRANCH_ADMIN">
-            Branch Admin
-          </option>
+          {roles.map((role) => (
+            <option key={role.key} value={role.key}>
+              {role.name}
+            </option>
+          ))}
         </Select>
       </div>
 
@@ -1105,7 +1075,7 @@ function StaffFormFields({
           htmlFor="staff-branch"
           className="mb-2 block text-sm font-semibold text-(--foreground)"
         >
-          Branch
+          {branchRequired ? "Branch" : "Branch (optional)"}
         </label>
 
         <Select
@@ -1114,13 +1084,12 @@ function StaffFormFields({
           value={form.branch}
           onChange={onChange}
         >
-          <option value="">Select a branch</option>
+          <option value="">
+            {branchRequired ? "Select a branch" : "All branches"}
+          </option>
 
           {branches.map((branch) => (
-            <option
-              key={branch._id}
-              value={branch._id}
-            >
+            <option key={branch._id} value={branch._id}>
               {branch.name}
             </option>
           ))}

@@ -29,9 +29,11 @@ export default function SummaryCard({
         text-(--foreground)
         shadow-[0_6px_24px_var(--shadow-color)]
         transition-all
-        duration-200
-        hover:-translate-y-0.5
+        duration-300
+        ease-(--ease-premium)
+        hover:-translate-y-1
         hover:border-(--line-strong)
+        hover:shadow-[0_16px_40px_var(--shadow-color)]
         ${className}
       `}
     >
@@ -71,8 +73,9 @@ export default function SummaryCard({
               bg-(--accent-soft)
               text-(--accent)
               transition-transform
-              duration-200
-              group-hover:scale-105
+              duration-300
+              ease-(--ease-premium)
+              group-hover:scale-110
             "
           >
             {icon}

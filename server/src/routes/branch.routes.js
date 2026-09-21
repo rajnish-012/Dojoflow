@@ -4,12 +4,17 @@ const {
   getBranches,
   getBranchById,
   createBranch,
+  getPublicBranches,
 } = require("../controllers/branch.controller");
 
 const protect = require("../middleware/auth.middleware");
 const authorize = require("../middleware/role.middleware");
 
 const router = express.Router();
+
+// Public list of active branches (for the enquiry form).
+// IMPORTANT: must stay above "/:id".
+router.get("/public", getPublicBranches);
 
 router.get(
   "/",

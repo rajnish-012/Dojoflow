@@ -1,6 +1,7 @@
 const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
 
+const { isBranchScoped } = require("../utils/access");
 const Student = require("../models/Student");
 const User = require("../models/User");
 const Plan = require("../models/Plan");
@@ -16,24 +17,20 @@ const canAccessStudent = (user, student) => {
     return false;
   }
 
-  // Super Admin can access every student.
-  if (user.role === "SUPER_ADMIN") {
+  // Roles that can see every branch.
+  if (!isBranchScoped(user)) {
     return true;
   }
 
-  // Branch-level staff must have an assigned branch.
-  if (["BRANCH_ADMIN", "COACH"].includes(user.role)) {
-    if (!user.branch || !student.branch) {
-      return false;
-    }
-
-    return (
-      user.branch.toString() ===
-      student.branch.toString()
-    );
+  // Branch-only roles must have an assigned branch.
+  if (!user.branch || !student.branch) {
+    return false;
   }
 
-  return false;
+  // student.branch can be an id or a populated branch.
+  const studentBranchId = student.branch._id || student.branch;
+
+  return user.branch.toString() === studentBranchId.toString();
 };
 
 // =========================================================
@@ -45,12 +42,11 @@ const getStudents = async (req, res) => {
     const filter = {};
 
     // Branch Admin and Coach can only see their own branch.
-    if (["BRANCH_ADMIN", "COACH"].includes(req.user.role)) {
+    if (isBranchScoped(req.user)) {
       if (!req.user.branch) {
         return res.status(403).json({
           success: false,
-          message:
-            "Your account is not assigned to a branch",
+          message: "Your account is not assigned to a branch",
         });
       }
 
@@ -59,10 +55,7 @@ const getStudents = async (req, res) => {
 
     const students = await Student.find(filter)
       .populate("branch", "name address")
-      .populate(
-        "plan",
-        "name price duration durationUnit startingBelt"
-      )
+      .populate("plan", "name price duration durationUnit startingBelt")
       .populate("user", "name email role")
       .sort({ createdAt: -1 });
 
@@ -97,10 +90,7 @@ const getStudentById = async (req, res) => {
 
     const student = await Student.findById(id)
       .populate("branch", "name address")
-      .populate(
-        "plan",
-        "name price duration durationUnit startingBelt"
-      )
+      .populate("plan", "name price duration durationUnit startingBelt")
       .populate("user", "name email role");
 
     if (!student) {
@@ -141,10 +131,7 @@ const getMyStudentProfile = async (req, res) => {
       user: req.user._id,
     })
       .populate("branch", "name address")
-      .populate(
-        "plan",
-        "name price duration durationUnit startingBelt"
-      )
+      .populate("plan", "name price duration durationUnit startingBelt")
       .populate("user", "name email role");
 
     if (!student) {
@@ -174,16 +161,8 @@ const getMyStudentProfile = async (req, res) => {
 
 const createStudent = async (req, res) => {
   try {
-    const {
-      name,
-      age,
-      phone,
-      email,
-      branch,
-      plan,
-      loginEmail,
-      loginPassword,
-    } = req.body;
+    const { name, age, phone, email, branch, plan, loginEmail, loginPassword } =
+      req.body;
 
     if (
       !name ||
@@ -225,28 +204,23 @@ const createStudent = async (req, res) => {
     if (loginPassword.length < 6) {
       return res.status(400).json({
         success: false,
-        message:
-          "Login password must be at least 6 characters",
+        message: "Login password must be at least 6 characters",
       });
     }
 
     // Branch Admin can only create students in their branch.
-    if (req.user.role === "BRANCH_ADMIN") {
+    if (isBranchScoped(req.user)) {
       if (!req.user.branch) {
         return res.status(403).json({
           success: false,
-          message:
-            "Your account is not assigned to a branch",
+          message: "Your account is not assigned to a branch",
         });
       }
 
-      if (
-        req.user.branch.toString() !== branch.toString()
-      ) {
+      if (req.user.branch.toString() !== branch.toString()) {
         return res.status(403).json({
           success: false,
-          message:
-            "You can only create students in your branch",
+          message: "You can only create students in your branch",
         });
       }
     }
@@ -277,9 +251,7 @@ const createStudent = async (req, res) => {
       });
     }
 
-    const normalizedLoginEmail = loginEmail
-      .trim()
-      .toLowerCase();
+    const normalizedLoginEmail = loginEmail.trim().toLowerCase();
 
     const existingUser = await User.findOne({
       email: normalizedLoginEmail,
@@ -292,10 +264,7 @@ const createStudent = async (req, res) => {
       });
     }
 
-    const hashedPassword = await bcrypt.hash(
-      loginPassword,
-      10
-    );
+    const hashedPassword = await bcrypt.hash(loginPassword, 10);
 
     const user = await User.create({
       name: name.trim(),
@@ -314,20 +283,14 @@ const createStudent = async (req, res) => {
         email: email ? email.trim() : "",
         branch,
         plan,
-        currentBelt:
-          planExists.startingBelt || "White",
+        currentBelt: planExists.startingBelt || "White",
         status: "ACTIVE",
         joinDate: new Date(),
       });
 
-      const populatedStudent = await Student.findById(
-        student._id
-      )
+      const populatedStudent = await Student.findById(student._id)
         .populate("branch", "name address")
-        .populate(
-          "plan",
-          "name price duration durationUnit startingBelt"
-        )
+        .populate("plan", "name price duration durationUnit startingBelt")
         .populate("user", "name email role");
 
       return res.status(201).json({
@@ -403,14 +366,10 @@ const updateStudent = async (req, res) => {
     } = req.body;
 
     // Only Super Admin can change the branch.
-    if (
-      branch !== undefined &&
-      req.user.role !== "SUPER_ADMIN"
-    ) {
+    if (branch !== undefined && req.user.role !== "SUPER_ADMIN") {
       return res.status(403).json({
         success: false,
-        message:
-          "Only Super Admin can change a student's branch",
+        message: "Only Super Admin can change a student's branch",
       });
     }
 
@@ -514,9 +473,7 @@ const updateStudent = async (req, res) => {
 
       if (user) {
         if (loginEmail !== undefined) {
-          const normalizedLoginEmail = loginEmail
-            .trim()
-            .toLowerCase();
+          const normalizedLoginEmail = loginEmail.trim().toLowerCase();
 
           const existingUser = await User.findOne({
             email: normalizedLoginEmail,
@@ -533,22 +490,15 @@ const updateStudent = async (req, res) => {
           user.email = normalizedLoginEmail;
         }
 
-        if (
-          password !== undefined &&
-          password.trim().length > 0
-        ) {
+        if (password !== undefined && password.trim().length > 0) {
           if (password.trim().length < 6) {
             return res.status(400).json({
               success: false,
-              message:
-                "Password must be at least 6 characters",
+              message: "Password must be at least 6 characters",
             });
           }
 
-          user.password = await bcrypt.hash(
-            password.trim(),
-            10
-          );
+          user.password = await bcrypt.hash(password.trim(), 10);
         }
 
         if (name !== undefined) {
@@ -566,10 +516,7 @@ const updateStudent = async (req, res) => {
     const updatedStudent = await Student.findById(id)
       .populate("user", "name email role")
       .populate("branch", "name address")
-      .populate(
-        "plan",
-        "name price duration durationUnit startingBelt"
-      );
+      .populate("plan", "name price duration durationUnit startingBelt");
 
     return res.status(200).json({
       success: true,
@@ -613,8 +560,7 @@ const deleteStudent = async (req, res) => {
     if (req.user.role !== "SUPER_ADMIN") {
       return res.status(403).json({
         success: false,
-        message:
-          "Only Super Admin can delete students",
+        message: "Only Super Admin can delete students",
       });
     }
 
@@ -627,8 +573,7 @@ const deleteStudent = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message:
-        "Student and linked login account deleted successfully",
+      message: "Student and linked login account deleted successfully",
     });
   } catch (error) {
     console.error("Delete student error:", error);
@@ -719,23 +664,21 @@ const getStudentProgress = async (req, res) => {
     }).sort({ evaluationDate: -1 });
 
     const presentClasses = attendance.filter(
-      (record) => record.status === "PRESENT"
+      (record) => record.status === "PRESENT",
     );
 
     const absentClasses = attendance.filter(
-      (record) => record.status === "ABSENT"
+      (record) => record.status === "ABSENT",
     );
 
     const pendingMakeups = attendance.filter(
       (record) =>
-        record.makeupRequired === true &&
-        record.makeupCompleted === false
+        record.makeupRequired === true && record.makeupCompleted === false,
     );
 
     const completedMakeups = attendance.filter(
       (record) =>
-        record.makeupRequired === true &&
-        record.makeupCompleted === true
+        record.makeupRequired === true && record.makeupCompleted === true,
     );
 
     /*
@@ -748,72 +691,51 @@ const getStudentProgress = async (req, res) => {
       .filter(
         (record) =>
           record.status === "PRESENT" ||
-          (record.makeupRequired === true &&
-            record.makeupCompleted === true)
+          (record.makeupRequired === true && record.makeupCompleted === true),
       )
       .map((record) => record.planDay)
       .filter(
-        (planDay) =>
-          typeof planDay === "number" &&
-          Number.isFinite(planDay)
+        (planDay) => typeof planDay === "number" && Number.isFinite(planDay),
       );
 
-    const uniqueCompletedDays = [
-      ...new Set(completedTrainingDays),
-    ];
+    const uniqueCompletedDays = [...new Set(completedTrainingDays)];
 
     const currentTrainingDay =
-      uniqueCompletedDays.length > 0
-        ? Math.max(...uniqueCompletedDays)
-        : 0;
+      uniqueCompletedDays.length > 0 ? Math.max(...uniqueCompletedDays) : 0;
 
-    const milestones = Array.isArray(
-      student.plan.milestones
-    )
+    const milestones = Array.isArray(student.plan.milestones)
       ? student.plan.milestones
       : [];
 
-    const curriculum = Array.isArray(
-      student.plan.curriculum
-    )
+    const curriculum = Array.isArray(student.plan.curriculum)
       ? student.plan.curriculum
       : [];
 
     // Find the next milestone.
     const nextMilestone =
       milestones
-        .filter(
-          (milestone) =>
-            milestone.day > currentTrainingDay
-        )
+        .filter((milestone) => milestone.day > currentTrainingDay)
         .sort((a, b) => a.day - b.day)[0] || null;
 
     // Find the last achieved milestone.
     const achievedMilestone =
       milestones
-        .filter(
-          (milestone) =>
-            milestone.day <= currentTrainingDay
-        )
+        .filter((milestone) => milestone.day <= currentTrainingDay)
         .sort((a, b) => b.day - a.day)[0] || null;
 
     const averageRating =
       performance.length > 0
         ? Number(
             (
-              performance.reduce(
-                (sum, record) => sum + record.rating,
-                0
-              ) / performance.length
-            ).toFixed(2)
+              performance.reduce((sum, record) => sum + record.rating, 0) /
+              performance.length
+            ).toFixed(2),
           )
         : null;
 
     const currentCurriculum =
-      curriculum.find(
-        (lesson) =>
-          lesson.day === currentTrainingDay + 1
-      ) || null;
+      curriculum.find((lesson) => lesson.day === currentTrainingDay + 1) ||
+      null;
 
     return res.status(200).json({
       success: true,

@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 
 import Sidebar from "./Sidebar";
 import Header from "./Header";
+import RouteGuard from "./RouteGuard";
 
 /* =========================================================
    TYPES
@@ -315,7 +316,7 @@ export default function AppShell({
             duration-300
           "
         >
-          {children}
+          <RouteGuard>{children}</RouteGuard>
         </main>
       </div>
     </div>

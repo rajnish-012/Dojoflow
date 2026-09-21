@@ -1,11 +1,22 @@
 @import "tailwindcss";
 
+/* While Plus Jakarta Sans downloads, the page is shown in Arial that has
+   been resized to the same width and line height, so the text does not
+   jump when the real font arrives. */
+@font-face {
+  font-family: "Plus Jakarta Fallback";
+  src: local("Arial"), local("Helvetica"), local("Liberation Sans");
+  size-adjust: 105.1%;
+  ascent-override: 98.8%;
+  descent-override: 21.1%;
+  line-gap-override: 0%;
+}
+
 /* =========================================================
    TAILWIND DARK VARIANT
    ========================================================= */
 
 @custom-variant dark (&:where(.dark, .dark *));
-
 
 /* =========================================================
    DOJOFLOW THEME SYSTEM
@@ -28,11 +39,11 @@
   --foreground: #1b1a17;
 
   /* Brand */
-  --navy: #16171d;          /* ink */
+  --navy: #16171d; /* ink */
   --navy-deep: #0b0c10;
   --navy-light: #2b2d35;
 
-  --gold: #b8842f;          /* obi gold */
+  --gold: #b8842f; /* obi gold */
   --gold-light: #d9a54a;
   --gold-dark: #8a5f1e;
   --gold-soft: #f6ead2;
@@ -85,7 +96,7 @@
 
   /* Surfaces */
   --card: #ffffff;
-  --surface: #f8f6f0;        /* recessed panel inside a card */
+  --surface: #f8f6f0; /* recessed panel inside a card */
   --input: #fbf9f4;
   --surface-muted: #f1ede1;
   --section-alt: #f7f4eb;
@@ -143,15 +154,13 @@
      SaaS card shadow": depth from two light sources, not one. */
   --shadow-xs: 0 1px 2px rgba(22, 20, 14, 0.05);
   --shadow-sm:
-    0 1px 2px rgba(22, 20, 14, 0.04),
-    0 4px 12px rgba(22, 20, 14, 0.05);
+    0 1px 2px rgba(22, 20, 14, 0.04), 0 4px 12px rgba(22, 20, 14, 0.05);
   --shadow-md:
-    0 2px 4px rgba(22, 20, 14, 0.04),
-    0 12px 28px rgba(22, 20, 14, 0.09);
+    0 2px 4px rgba(22, 20, 14, 0.04), 0 12px 28px rgba(22, 20, 14, 0.09);
   --shadow-lg:
-    0 8px 16px rgba(14, 12, 8, 0.08),
-    0 28px 68px rgba(14, 12, 8, 0.16);
-  --shadow-glow: 0 0 0 1px rgba(184, 132, 47, 0.16), 0 10px 28px rgba(184, 132, 47, 0.18);
+    0 8px 16px rgba(14, 12, 8, 0.08), 0 28px 68px rgba(14, 12, 8, 0.16);
+  --shadow-glow:
+    0 0 0 1px rgba(184, 132, 47, 0.16), 0 10px 28px rgba(184, 132, 47, 0.18);
   --shadow-inset-hairline: inset 0 1px 0 rgba(255, 255, 255, 0.5);
   /* Raw tint for one-off shadow-[...var(--shadow-color)]
      arbitrary values in components — the ink-tinted color
@@ -160,15 +169,9 @@
 
   /* Type */
   --font-sans:
-    "Inter",
-    ui-sans-serif,
-    system-ui,
-    -apple-system,
-    "Segoe UI",
-    Roboto,
-    "Helvetica Neue",
-    Arial,
-    sans-serif;
+    "Plus Jakarta Sans Variable", "Plus Jakarta Fallback", ui-sans-serif,
+    system-ui, -apple-system, "Segoe UI", "Nirmala UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
 
   /* =======================================================
      PUBLIC LANDING PAGE
@@ -179,16 +182,15 @@
   --hero-muted: rgba(255, 255, 255, 0.66);
   --hero-line: rgba(255, 255, 255, 0.12);
   --hero-surface: rgba(255, 255, 255, 0.06);
-  --hero-surface-hover: rgba(255, 255, 255, 0.10);
+  --hero-surface-hover: rgba(255, 255, 255, 0.1);
 
   --dark-panel: #14161c;
-  --dark-line: rgba(255, 255, 255, 0.10);
+  --dark-line: rgba(255, 255, 255, 0.1);
 
   --footer-bg: #0b0c10;
 
   --grid-line: rgba(255, 255, 255, 0.45);
 }
-
 
 /* =========================================================
    DARK THEME
@@ -280,7 +282,7 @@ html.dark {
   --sidebar-logo-bg: #2c2418;
   --sidebar-active-text: #17130a;
   --sidebar-danger: #e08b7f;
-  --sidebar-danger-bg: rgba(224, 139, 127, 0.10);
+  --sidebar-danger-bg: rgba(224, 139, 127, 0.1);
 
   /* Tables */
   --table-header: #1c1d22;
@@ -293,16 +295,11 @@ html.dark {
 
   /* Shadows read heavier, flatter and more black-based in dark */
   --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.3);
-  --shadow-sm:
-    0 1px 2px rgba(0, 0, 0, 0.24),
-    0 4px 12px rgba(0, 0, 0, 0.22);
-  --shadow-md:
-    0 2px 4px rgba(0, 0, 0, 0.26),
-    0 12px 28px rgba(0, 0, 0, 0.32);
-  --shadow-lg:
-    0 8px 16px rgba(0, 0, 0, 0.35),
-    0 28px 68px rgba(0, 0, 0, 0.5);
-  --shadow-glow: 0 0 0 1px rgba(217, 165, 74, 0.22), 0 10px 28px rgba(217, 165, 74, 0.22);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.24), 0 4px 12px rgba(0, 0, 0, 0.22);
+  --shadow-md: 0 2px 4px rgba(0, 0, 0, 0.26), 0 12px 28px rgba(0, 0, 0, 0.32);
+  --shadow-lg: 0 8px 16px rgba(0, 0, 0, 0.35), 0 28px 68px rgba(0, 0, 0, 0.5);
+  --shadow-glow:
+    0 0 0 1px rgba(217, 165, 74, 0.22), 0 10px 28px rgba(217, 165, 74, 0.22);
   --shadow-inset-hairline: inset 0 1px 0 rgba(255, 255, 255, 0.06);
   --shadow-color: rgba(0, 0, 0, 0.45);
 
@@ -318,13 +315,12 @@ html.dark {
   --hero-surface-hover: rgba(255, 255, 255, 0.08);
 
   --dark-panel: #101116;
-  --dark-line: rgba(255, 255, 255, 0.10);
+  --dark-line: rgba(255, 255, 255, 0.1);
 
   --footer-bg: #060708;
 
   --grid-line: rgba(255, 255, 255, 0.35);
 }
-
 
 /* =========================================================
    TAILWIND v4 THEME BRIDGE
@@ -383,7 +379,6 @@ html.dark {
   --font-sans: var(--font-sans);
 }
 
-
 /* =========================================================
    GLOBAL RESET
    ========================================================= */
@@ -410,7 +405,6 @@ body {
 
   color: var(--foreground);
   font-family: var(--font-sans);
-  font-feature-settings: "cv11", "ss01";
   font-variant-numeric: tabular-nums;
 
   -webkit-font-smoothing: antialiased;
@@ -422,7 +416,12 @@ body {
     color 0.25s ease;
 }
 
-h1, h2, h3, h4, h5, h6 {
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
   font-weight: 700;
   letter-spacing: -0.02em;
 }
@@ -436,7 +435,6 @@ input[type="range"],
 progress {
   accent-color: var(--accent);
 }
-
 
 /* =========================================================
    GLOBAL ELEMENTS
@@ -488,7 +486,6 @@ a {
   color: var(--navy);
 }
 
-
 /* =========================================================
    SCROLLBAR
    ========================================================= */
@@ -516,53 +513,99 @@ a {
   background: transparent;
 }
 
-
 /* =========================================================
    ANIMATIONS
    ========================================================= */
 
 @keyframes df-fade-up {
-  from { opacity: 0; transform: translateY(14px); }
-  to   { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 @keyframes df-fade-in {
-  from { opacity: 0; }
-  to   { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 @keyframes df-slide-right {
-  from { opacity: 0; transform: translateX(-18px); }
-  to   { opacity: 1; transform: translateX(0); }
+  from {
+    opacity: 0;
+    transform: translateX(-18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
 }
 
 @keyframes df-float {
-  0%, 100% { transform: translateY(0); }
-  50%      { transform: translateY(-8px); }
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-8px);
+  }
 }
 
 @keyframes df-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(184, 132, 47, 0.28); }
-  50%      { box-shadow: 0 0 0 8px rgba(184, 132, 47, 0); }
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(184, 132, 47, 0.28);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(184, 132, 47, 0);
+  }
 }
 
 @keyframes df-shimmer {
-  from { background-position: 200% 0; }
-  to   { background-position: -200% 0; }
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
 }
 
 @keyframes df-modal-in {
-  from { opacity: 0; transform: translateY(8px) scale(0.985); }
-  to   { opacity: 1; transform: translateY(0) scale(1); }
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
-.animate-df-fade-up     { animation: df-fade-up 0.55s var(--ease-out) both; }
-.animate-df-fade-in     { animation: df-fade-in 0.4s ease both; }
-.animate-df-slide-right { animation: df-slide-right 0.5s var(--ease-out) both; }
-.animate-df-float       { animation: df-float 5s ease-in-out infinite; }
-.animate-df-pulse       { animation: df-pulse 2.5s ease-in-out infinite; }
-.animate-df-modal-in    { animation: df-modal-in 0.3s var(--ease-premium) both; }
-
+.animate-df-fade-up {
+  animation: df-fade-up 0.55s var(--ease-out) both;
+}
+.animate-df-fade-in {
+  animation: df-fade-in 0.4s ease both;
+}
+.animate-df-slide-right {
+  animation: df-slide-right 0.5s var(--ease-out) both;
+}
+.animate-df-float {
+  animation: df-float 5s ease-in-out infinite;
+}
+.animate-df-pulse {
+  animation: df-pulse 2.5s ease-in-out infinite;
+}
+.animate-df-modal-in {
+  animation: df-modal-in 0.3s var(--ease-premium) both;
+}
 
 /* =========================================================
    COMMON APPLICATION STYLES
@@ -576,10 +619,38 @@ a {
      to add its own spacing. */
   .df-page {
     min-height: calc(100vh - 72px);
-    padding: 30px;
+    width: 100%;
+    max-width: 1500px;
+    margin-inline: auto;
+    padding: 24px 16px;
     display: flex;
     flex-direction: column;
     gap: 24px;
+  }
+
+  /* Same side padding as every other page */
+  @media (min-width: 640px) {
+    .df-page {
+      padding-inline: 24px;
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .df-page {
+      padding-inline: 32px;
+    }
+  }
+
+  @media (min-width: 1280px) {
+    .df-page {
+      padding-inline: 40px;
+    }
+  }
+
+  /* The page title block already has its own bottom margin,
+     so it must not add the stack gap on top of it. */
+  .df-page > :first-child {
+    margin-bottom: 0;
   }
 
   .df-page-header {
@@ -895,14 +966,34 @@ a {
     white-space: nowrap;
   }
 
-  .df-badge-success { background: var(--success-soft); color: var(--success); }
-  .df-badge-warning { background: var(--warning-soft); color: var(--warning); }
-  .df-badge-danger  { background: var(--danger-soft);  color: var(--danger); }
-  .df-badge-neutral { background: #f1efe7; color: #6f6a5e; }
-  .df-badge-blue    { background: var(--blue-soft); color: #2d4372; }
+  .df-badge-success {
+    background: var(--success-soft);
+    color: var(--success);
+  }
+  .df-badge-warning {
+    background: var(--warning-soft);
+    color: var(--warning);
+  }
+  .df-badge-danger {
+    background: var(--danger-soft);
+    color: var(--danger);
+  }
+  .df-badge-neutral {
+    background: #f1efe7;
+    color: #6f6a5e;
+  }
+  .df-badge-blue {
+    background: var(--blue-soft);
+    color: #2d4372;
+  }
 
-  html.dark .df-badge-neutral { background: #20221f; color: #b3ada0; }
-  html.dark .df-badge-blue    { color: #a8bfe6; }
+  html.dark .df-badge-neutral {
+    background: #20221f;
+    color: #b3ada0;
+  }
+  html.dark .df-badge-blue {
+    color: #a8bfe6;
+  }
 
   /* Small status dot to pair with a badge label, e.g.
      <span class="df-badge df-badge-success"><i class="df-dot"></i>Active</span> */
@@ -931,9 +1022,15 @@ a {
     transition: width 0.4s var(--ease-premium);
   }
 
-  .df-progress-fill-success { background: var(--success); }
-  .df-progress-fill-warning { background: var(--warning); }
-  .df-progress-fill-danger  { background: var(--danger); }
+  .df-progress-fill-success {
+    background: var(--success);
+  }
+  .df-progress-fill-warning {
+    background: var(--warning);
+  }
+  .df-progress-fill-danger {
+    background: var(--danger);
+  }
 
   /* ---- Donut ring — pure CSS, drive the percentage with
      the --pct custom property from inline style, e.g.
@@ -993,10 +1090,22 @@ a {
     color: var(--accent-hover);
   }
 
-  .df-icon-tile-success { background: var(--success-soft); color: var(--success); }
-  .df-icon-tile-warning { background: var(--warning-soft); color: var(--warning); }
-  .df-icon-tile-danger  { background: var(--danger-soft);  color: var(--danger); }
-  .df-icon-tile-info    { background: var(--info-soft);    color: var(--info); }
+  .df-icon-tile-success {
+    background: var(--success-soft);
+    color: var(--success);
+  }
+  .df-icon-tile-warning {
+    background: var(--warning-soft);
+    color: var(--warning);
+  }
+  .df-icon-tile-danger {
+    background: var(--danger-soft);
+    color: var(--danger);
+  }
+  .df-icon-tile-info {
+    background: var(--info-soft);
+    color: var(--info);
+  }
 
   /* ---- Stat figure — tabular numerals, tight tracking ---- */
 
@@ -1133,7 +1242,6 @@ a {
   }
 }
 
-
 /* =========================================================
    BRAND CONSISTENCY (LIGHT + DARK, SAME RULES)
    =========================================================
@@ -1152,132 +1260,232 @@ a {
 
 /* ---- Default Tailwind blue / indigo / sky → accent ---- */
 :is(
-  [class~="bg-blue-600"], [class~="bg-blue-500"], [class~="bg-blue-400"],
-  [class~="bg-indigo-600"], [class~="bg-indigo-500"],
-  [class~="bg-sky-600"], [class~="bg-sky-500"]
-) { background-color: var(--accent) !important; }
+  [class~="bg-blue-600"],
+  [class~="bg-blue-500"],
+  [class~="bg-blue-400"],
+  [class~="bg-indigo-600"],
+  [class~="bg-indigo-500"],
+  [class~="bg-sky-600"],
+  [class~="bg-sky-500"]
+) {
+  background-color: var(--accent) !important;
+}
 
 :is(
-  [class~="bg-blue-50"], [class~="bg-blue-100"],
-  [class~="bg-indigo-50"], [class~="bg-indigo-100"],
-  [class~="bg-sky-50"], [class~="bg-sky-100"]
-) { background-color: var(--accent-soft) !important; }
+  [class~="bg-blue-50"],
+  [class~="bg-blue-100"],
+  [class~="bg-indigo-50"],
+  [class~="bg-indigo-100"],
+  [class~="bg-sky-50"],
+  [class~="bg-sky-100"]
+) {
+  background-color: var(--accent-soft) !important;
+}
 
 :is(
-  [class~="text-blue-600"], [class~="text-blue-700"],
-  [class~="text-indigo-600"], [class~="text-indigo-700"],
-  [class~="text-sky-600"], [class~="text-sky-700"]
-) { color: var(--accent-hover) !important; }
+  [class~="text-blue-600"],
+  [class~="text-blue-700"],
+  [class~="text-indigo-600"],
+  [class~="text-indigo-700"],
+  [class~="text-sky-600"],
+  [class~="text-sky-700"]
+) {
+  color: var(--accent-hover) !important;
+}
 
 :is(
-  [class~="border-blue-200"], [class~="border-blue-300"],
-  [class~="border-indigo-200"], [class~="border-sky-200"]
-) { border-color: var(--accent) !important; }
+  [class~="border-blue-200"],
+  [class~="border-blue-300"],
+  [class~="border-indigo-200"],
+  [class~="border-sky-200"]
+) {
+  border-color: var(--accent) !important;
+}
 
 /* ---- Default Tailwind green / emerald / teal → success ---- */
 :is(
-  [class~="bg-green-600"], [class~="bg-green-500"],
-  [class~="bg-emerald-600"], [class~="bg-emerald-500"],
+  [class~="bg-green-600"],
+  [class~="bg-green-500"],
+  [class~="bg-emerald-600"],
+  [class~="bg-emerald-500"],
   [class~="bg-teal-600"]
-) { background-color: var(--success) !important; }
+) {
+  background-color: var(--success) !important;
+}
 
 :is(
-  [class~="bg-green-50"], [class~="bg-green-100"],
-  [class~="bg-emerald-50"], [class~="bg-emerald-100"]
-) { background-color: var(--success-soft) !important; }
+  [class~="bg-green-50"],
+  [class~="bg-green-100"],
+  [class~="bg-emerald-50"],
+  [class~="bg-emerald-100"]
+) {
+  background-color: var(--success-soft) !important;
+}
 
 :is(
-  [class~="text-green-600"], [class~="text-green-700"],
-  [class~="text-emerald-600"], [class~="text-emerald-700"]
-) { color: var(--success) !important; }
+  [class~="text-green-600"],
+  [class~="text-green-700"],
+  [class~="text-emerald-600"],
+  [class~="text-emerald-700"]
+) {
+  color: var(--success) !important;
+}
 
 /* ---- Default Tailwind red / rose → danger ---- */
 :is(
-  [class~="bg-red-600"], [class~="bg-red-500"],
-  [class~="bg-rose-600"], [class~="bg-rose-500"]
-) { background-color: var(--danger) !important; }
+  [class~="bg-red-600"],
+  [class~="bg-red-500"],
+  [class~="bg-rose-600"],
+  [class~="bg-rose-500"]
+) {
+  background-color: var(--danger) !important;
+}
 
 :is(
-  [class~="bg-red-50"], [class~="bg-red-100"],
-  [class~="bg-rose-50"], [class~="bg-rose-100"]
-) { background-color: var(--danger-soft) !important; }
+  [class~="bg-red-50"],
+  [class~="bg-red-100"],
+  [class~="bg-rose-50"],
+  [class~="bg-rose-100"]
+) {
+  background-color: var(--danger-soft) !important;
+}
 
 :is(
-  [class~="text-red-600"], [class~="text-red-700"],
-  [class~="text-rose-600"], [class~="text-rose-700"]
-) { color: var(--danger) !important; }
+  [class~="text-red-600"],
+  [class~="text-red-700"],
+  [class~="text-rose-600"],
+  [class~="text-rose-700"]
+) {
+  color: var(--danger) !important;
+}
 
 /* ---- Default Tailwind amber / orange / yellow → warning ---- */
 :is(
-  [class~="bg-amber-600"], [class~="bg-amber-500"],
-  [class~="bg-orange-600"], [class~="bg-orange-500"],
+  [class~="bg-amber-600"],
+  [class~="bg-amber-500"],
+  [class~="bg-orange-600"],
+  [class~="bg-orange-500"],
   [class~="bg-yellow-500"]
-) { background-color: var(--warning) !important; }
+) {
+  background-color: var(--warning) !important;
+}
 
 :is(
-  [class~="bg-amber-50"], [class~="bg-amber-100"],
-  [class~="bg-orange-50"], [class~="bg-orange-100"],
+  [class~="bg-amber-50"],
+  [class~="bg-amber-100"],
+  [class~="bg-orange-50"],
+  [class~="bg-orange-100"],
   [class~="bg-yellow-50"]
-) { background-color: var(--warning-soft) !important; }
+) {
+  background-color: var(--warning-soft) !important;
+}
 
 :is(
-  [class~="text-amber-600"], [class~="text-amber-700"],
-  [class~="text-orange-600"], [class~="text-orange-700"]
-) { color: var(--warning) !important; }
+  [class~="text-amber-600"],
+  [class~="text-amber-700"],
+  [class~="text-orange-600"],
+  [class~="text-orange-700"]
+) {
+  color: var(--warning) !important;
+}
 
 /* ---- Whites ---- */
-[class~="bg-white"] { background-color: var(--card) !important; }
-[class~="bg-white/95"] { background-color: var(--header-bg) !important; }
+[class~="bg-white"] {
+  background-color: var(--card) !important;
+}
+[class~="bg-white/95"] {
+  background-color: var(--header-bg) !important;
+}
 [class~="bg-white/90"] {
   background-color: color-mix(in srgb, var(--card) 90%, transparent) !important;
 }
-[class~="ring-white"] { --tw-ring-color: var(--card) !important; }
+[class~="ring-white"] {
+  --tw-ring-color: var(--card) !important;
+}
 
 /* ---- Default Tailwind neutrals → warm ink tokens ---- */
 :is(
-  [class~="bg-slate-50"], [class~="bg-gray-50"],
-  [class~="bg-zinc-50"], [class~="bg-neutral-50"]
-) { background-color: var(--section-alt) !important; }
+  [class~="bg-slate-50"],
+  [class~="bg-gray-50"],
+  [class~="bg-zinc-50"],
+  [class~="bg-neutral-50"]
+) {
+  background-color: var(--section-alt) !important;
+}
 
 :is(
-  [class~="bg-slate-100"], [class~="bg-gray-100"],
-  [class~="bg-zinc-100"], [class~="bg-neutral-100"]
-) { background-color: var(--surface-muted) !important; }
+  [class~="bg-slate-100"],
+  [class~="bg-gray-100"],
+  [class~="bg-zinc-100"],
+  [class~="bg-neutral-100"]
+) {
+  background-color: var(--surface-muted) !important;
+}
 
 :is(
-  [class~="bg-slate-200"], [class~="bg-gray-200"],
-  [class~="bg-zinc-200"], [class~="bg-neutral-200"]
-) { background-color: var(--line-strong) !important; }
+  [class~="bg-slate-200"],
+  [class~="bg-gray-200"],
+  [class~="bg-zinc-200"],
+  [class~="bg-neutral-200"]
+) {
+  background-color: var(--line-strong) !important;
+}
 
 :is(
-  [class~="text-slate-950"], [class~="text-slate-900"], [class~="text-slate-800"],
-  [class~="text-gray-900"], [class~="text-gray-800"],
-  [class~="text-zinc-900"], [class~="text-neutral-900"]
-) { color: var(--foreground) !important; }
+  [class~="text-slate-950"],
+  [class~="text-slate-900"],
+  [class~="text-slate-800"],
+  [class~="text-gray-900"],
+  [class~="text-gray-800"],
+  [class~="text-zinc-900"],
+  [class~="text-neutral-900"]
+) {
+  color: var(--foreground) !important;
+}
 
 :is(
-  [class~="text-slate-700"], [class~="text-slate-600"],
-  [class~="text-slate-500"], [class~="text-slate-400"],
-  [class~="text-gray-700"], [class~="text-gray-600"],
-  [class~="text-gray-500"], [class~="text-gray-400"],
-  [class~="text-zinc-500"], [class~="text-neutral-500"]
-) { color: var(--ink-muted) !important; }
+  [class~="text-slate-700"],
+  [class~="text-slate-600"],
+  [class~="text-slate-500"],
+  [class~="text-slate-400"],
+  [class~="text-gray-700"],
+  [class~="text-gray-600"],
+  [class~="text-gray-500"],
+  [class~="text-gray-400"],
+  [class~="text-zinc-500"],
+  [class~="text-neutral-500"]
+) {
+  color: var(--ink-muted) !important;
+}
 
-[class~="text-white"] { color: #ffffff !important; }
+[class~="text-white"] {
+  color: #ffffff !important;
+}
 
 :is(
-  [class~="border-slate-100"], [class~="border-slate-200"], [class~="border-slate-300"],
-  [class~="border-gray-100"], [class~="border-gray-200"], [class~="border-gray-300"],
-  [class~="border-zinc-200"], [class~="border-neutral-200"],
+  [class~="border-slate-100"],
+  [class~="border-slate-200"],
+  [class~="border-slate-300"],
+  [class~="border-gray-100"],
+  [class~="border-gray-200"],
+  [class~="border-gray-300"],
+  [class~="border-zinc-200"],
+  [class~="border-neutral-200"],
   [class~="border-white"]
-) { border-color: var(--line) !important; }
+) {
+  border-color: var(--line) !important;
+}
 
 :is(
   [class~="placeholder-gray-400"],
   [class~="placeholder-gray-500"]
-)::placeholder { color: var(--ink-muted) !important; }
+)::placeholder {
+  color: var(--ink-muted) !important;
+}
 
-[class~="bg-transparent"] { background-color: transparent !important; }
+[class~="bg-transparent"] {
+  background-color: transparent !important;
+}
 
 /* ---- DojoFlow's own hex utilities, authored against the
    old navy/gold palette — remapped onto the new tokens ---- */
@@ -1285,47 +1493,86 @@ a {
 :is([class~="bg-[#f5f7fb]"], [class~="bg-[#fafbfd]"]) {
   background-color: var(--background) !important;
 }
-[class~="bg-[#fbfcfe]"] { background-color: var(--input) !important; }
+[class~="bg-[#fbfcfe]"] {
+  background-color: var(--input) !important;
+}
 :is([class~="bg-[#f8fafc]"], [class~="bg-[#f1f4f8]"]) {
   background-color: var(--surface-muted) !important;
 }
 :is([class~="bg-[#f8f9fc]"], [class~="bg-[#f7f9fc]"]) {
   background-color: var(--hover-bg) !important;
 }
-[class~="bg-[#f8efde]"] { background-color: var(--accent-soft) !important; }
-[class~="bg-[#101a33]"] { background-color: var(--dark-panel) !important; }
-[class~="bg-[#0b142b]"] { background-color: var(--sidebar-bg) !important; }
-[class~="bg-[#0a1124]"] { background-color: var(--navy-deep) !important; }
-[class~="bg-[#eaf8f1]"] { background-color: var(--success-soft) !important; }
-[class~="bg-[#fff4df]"] { background-color: var(--warning-soft) !important; }
-[class~="bg-[#fff0f0]"] { background-color: var(--danger-soft) !important; }
-[class~="bg-[#edf2ff]"] { background-color: var(--info-soft) !important; }
+[class~="bg-[#f8efde]"] {
+  background-color: var(--accent-soft) !important;
+}
+[class~="bg-[#101a33]"] {
+  background-color: var(--dark-panel) !important;
+}
+[class~="bg-[#0b142b]"] {
+  background-color: var(--sidebar-bg) !important;
+}
+[class~="bg-[#0a1124]"] {
+  background-color: var(--navy-deep) !important;
+}
+[class~="bg-[#eaf8f1]"] {
+  background-color: var(--success-soft) !important;
+}
+[class~="bg-[#fff4df]"] {
+  background-color: var(--warning-soft) !important;
+}
+[class~="bg-[#fff0f0]"] {
+  background-color: var(--danger-soft) !important;
+}
+[class~="bg-[#edf2ff]"] {
+  background-color: var(--info-soft) !important;
+}
 
 :is([class~="text-[#101a33]"], [class~="text-[#172033]"]) {
   color: var(--foreground) !important;
 }
 :is(
-  [class~="text-[#344057]"], [class~="text-[#34445d]"],
-  [class~="text-[#526078]"], [class~="text-[#697386]"],
-  [class~="text-[#7b879b]"], [class~="text-[#8b96a8]"],
-  [class~="text-[#8b98aa]"], [class~="text-[#9aa5b5]"]
-) { color: var(--ink-muted) !important; }
+  [class~="text-[#344057]"],
+  [class~="text-[#34445d]"],
+  [class~="text-[#526078]"],
+  [class~="text-[#697386]"],
+  [class~="text-[#7b879b]"],
+  [class~="text-[#8b96a8]"],
+  [class~="text-[#8b98aa]"],
+  [class~="text-[#9aa5b5]"]
+) {
+  color: var(--ink-muted) !important;
+}
 :is([class~="text-[#d7a84b]"], [class~="text-[#a87418]"]) {
   color: var(--accent) !important;
 }
-[class~="text-[#16805c]"] { color: var(--success) !important; }
-[class~="text-[#d97706]"] { color: var(--warning) !important; }
-[class~="text-[#c24141]"] { color: var(--danger) !important; }
-[class~="text-[#4169e1]"] { color: var(--info) !important; }
+[class~="text-[#16805c]"] {
+  color: var(--success) !important;
+}
+[class~="text-[#d97706]"] {
+  color: var(--warning) !important;
+}
+[class~="text-[#c24141]"] {
+  color: var(--danger) !important;
+}
+[class~="text-[#4169e1]"] {
+  color: var(--info) !important;
+}
 
 :is(
-  [class~="border-[#e5e9f1]"], [class~="border-[#e8ecf3]"],
-  [class~="border-[#e4e9f0]"], [class~="border-[#e3e8ef]"],
-  [class~="border-[#e3e8f0]"], [class~="border-[#e1e7ef]"],
-  [class~="border-[#dfe5ed]"], [class~="border-[#edf0f4]"]
-) { border-color: var(--line) !important; }
-[class~="border-[#d7a84b]"] { border-color: var(--accent) !important; }
-
+  [class~="border-[#e5e9f1]"],
+  [class~="border-[#e8ecf3]"],
+  [class~="border-[#e4e9f0]"],
+  [class~="border-[#e3e8ef]"],
+  [class~="border-[#e3e8f0]"],
+  [class~="border-[#e1e7ef]"],
+  [class~="border-[#dfe5ed]"],
+  [class~="border-[#edf0f4]"]
+) {
+  border-color: var(--line) !important;
+}
+[class~="border-[#d7a84b]"] {
+  border-color: var(--accent) !important;
+}
 
 /* =========================================================
    GOLD-CHIP BUTTON — REST + HOVER
@@ -1357,7 +1604,6 @@ a {
   background-color: var(--gold) !important;
   color: var(--sidebar-active-text) !important;
 }
-
 
 /* =========================================================
    TABLE ACTION COLUMN — ONE LOOK EVERYWHERE
@@ -1404,7 +1650,6 @@ td[class~="text-right"] > button:not(:has(svg))::after {
   line-height: 1;
 }
 
-
 /* =========================================================
    BARE-ELEMENT DARK MODE (native controls only)
    =========================================================
@@ -1433,19 +1678,30 @@ html.dark textarea:focus {
   border-color: var(--gold);
 }
 
-html.dark table { color: var(--foreground); }
-html.dark thead { background-color: var(--table-header); }
-html.dark tbody tr { border-color: var(--line); }
-html.dark tbody tr:hover { background-color: var(--hover-bg); }
-html.dark hr { border-color: var(--line); }
-
+html.dark table {
+  color: var(--foreground);
+}
+html.dark thead {
+  background-color: var(--table-header);
+}
+html.dark tbody tr {
+  border-color: var(--line);
+}
+html.dark tbody tr:hover {
+  background-color: var(--hover-bg);
+}
+html.dark hr {
+  border-color: var(--line);
+}
 
 /* =========================================================
    MOBILE
    ========================================================= */
 
 @media (max-width: 1023px) {
-  .df-page { padding: 24px; }
+  .df-page {
+    padding: 24px;
+  }
 }
 
 @media (max-width: 767px) {
@@ -1461,8 +1717,12 @@ html.dark hr { border-color: var(--line); }
     gap: 15px;
   }
 
-  .df-page-title { font-size: 25px; }
-  .df-page-subtitle { font-size: 13px; }
+  .df-page-title {
+    font-size: 25px;
+  }
+  .df-page-subtitle {
+    font-size: 13px;
+  }
 
   .df-primary,
   .df-secondary,
@@ -1482,20 +1742,22 @@ html.dark hr { border-color: var(--line); }
   }
 }
 
-
 /* =========================================================
    REDUCED MOTION
    ========================================================= */
 
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
+  /* Stops looping/entrance animations and smooth scrolling.
+     Hover transitions are left alone so cards, buttons and
+     menus still ease in gently instead of jumping. */
+  *,
+  *::before,
+  *::after {
     scroll-behavior: auto !important;
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
   }
 }
-
 
 /* =========================================================
    APP SHELL
@@ -1513,17 +1775,26 @@ html.dark hr { border-color: var(--line); }
 }
 
 @media (min-width: 768px) {
-  .df-shell-expanded { margin-left: 260px; }
-  .df-shell-collapsed { margin-left: 84px; }
+  .df-shell-expanded {
+    margin-left: 260px;
+  }
+  .df-shell-collapsed {
+    margin-left: 84px;
+  }
 }
-
 
 /* =========================================================
    APP LOADING ANIMATION
    ========================================================= */
 
 @keyframes df-loading {
-  0%   { transform: translateX(-120%); }
-  50%  { transform: translateX(100%); }
-  100% { transform: translateX(240%); }
+  0% {
+    transform: translateX(-120%);
+  }
+  50% {
+    transform: translateX(100%);
+  }
+  100% {
+    transform: translateX(240%);
+  }
 }

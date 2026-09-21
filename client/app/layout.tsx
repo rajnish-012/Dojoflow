@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Script from "next/script";
+import "@fontsource-variable/plus-jakarta-sans";
 import "./globals.css";
 import AppShell from "@/components/layout/AppShell";
 import ThemeProvider from "@/components/theme/ThemeProvider";

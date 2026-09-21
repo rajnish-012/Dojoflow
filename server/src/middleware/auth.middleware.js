@@ -1,5 +1,22 @@
 const jwt = require("jsonwebtoken");
 const User = require("../models/User");
+const Role = require("../models/Role");
+
+/**
+ * Finds out whether the user's role can see every branch
+ * ("ALL") or only their own branch ("BRANCH").
+ */
+const resolveDataScope = async (user) => {
+  if (user.role === "SUPER_ADMIN") {
+    return "ALL";
+  }
+
+  const role = await Role.findOne({ key: user.role }).select(
+    "dataScope"
+  );
+
+  return role?.dataScope === "ALL" ? "ALL" : "BRANCH";
+};
 
 const protect = async (req, res, next) => {
   try {
@@ -27,6 +44,8 @@ const protect = async (req, res, next) => {
         message: "User no longer exists",
       });
     }
+
+    user.dataScope = await resolveDataScope(user);
 
     req.user = user;
 

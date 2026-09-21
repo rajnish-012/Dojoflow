@@ -311,27 +311,15 @@ export default function MakeupsPage() {
   }
 
   return (
-    <div
-      className="
-        min-h-screen
-        bg-(--background)
-        px-4
-        py-6
-        text-(--foreground)
-        transition-colors
-        duration-300
-        sm:px-6
-        lg:px-8
-      "
-    >
-      <div className="mx-auto w-full max-w-[1440px]">
+    
+      <div className="df-page">
         <PageHeader
           eyebrow="Academy Management"
           title="Makeup Classes"
           description="Manage scheduled, completed, and cancelled makeup classes."
           actions={
             <Button
-              variant="secondary"
+              variant="outline"
               onClick={() => void loadMakeups(true)}
               disabled={refreshing}
               leftIcon={
@@ -851,6 +839,6 @@ export default function MakeupsPage() {
           </Card>
         </div>
       </div>
-    </div>
+   
   );
 }

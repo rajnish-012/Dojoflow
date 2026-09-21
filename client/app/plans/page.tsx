@@ -34,12 +34,9 @@ import {
   SummaryCard,
 } from "@/components/ui";
 
-import {
-  createPlan,
-  deletePlan,
-  getPlans,
-  updatePlan,
-} from "@/lib/api";
+import { createPlan, deletePlan, getPlans, updatePlan } from "@/lib/api";
+
+import { useCan } from "@/lib/permissions";
 
 type CurriculumItem = {
   day: number;
@@ -112,6 +109,7 @@ const BELT_STYLES: Record<string, string> = {
 };
 
 export default function PlansPage() {
+  const canManagePlans = useCan("plan.manage");
   const [plans, setPlans] = useState<Plan[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -138,9 +136,7 @@ export default function PlansPage() {
       setPlans(Array.isArray(response?.plans) ? response.plans : []);
     } catch (err: unknown) {
       setError(
-        err instanceof Error
-          ? err.message
-          : "Failed to load training plans.",
+        err instanceof Error ? err.message : "Failed to load training plans.",
       );
     } finally {
       setLoading(false);
@@ -232,8 +228,7 @@ export default function PlansPage() {
         itemIndex === index
           ? {
               ...item,
-              [field]:
-                field === "day" ? Number(value) || 1 : value,
+              [field]: field === "day" ? Number(value) || 1 : value,
             }
           : item,
       ),
@@ -275,8 +270,7 @@ export default function PlansPage() {
         itemIndex === index
           ? {
               ...item,
-              [field]:
-                field === "day" ? Number(value) || 1 : value,
+              [field]: field === "day" ? Number(value) || 1 : value,
             }
           : item,
       ),
@@ -374,9 +368,7 @@ export default function PlansPage() {
       setFormError(
         err instanceof Error
           ? err.message
-          : `Failed to ${
-              editingPlan ? "update" : "create"
-            } the training plan.`,
+          : `Failed to ${editingPlan ? "update" : "create"} the training plan.`,
       );
     } finally {
       setSaving(false);
@@ -420,14 +412,12 @@ export default function PlansPage() {
         title="Training Plans"
         description="Create and manage structured training programs, curriculum, pricing, and belt progression."
         actions={
-          <Button
-            variant="primary"
-            size="lg"
-            onClick={openCreateModal}
-          >
-            <Plus size={18} />
-            Add Training Plan
-          </Button>
+          canManagePlans ? (
+            <Button variant="primary" size="lg" onClick={openCreateModal}>
+              <Plus size={18} />
+              Add Training Plan
+            </Button>
+          ) : undefined
         }
       />
 
@@ -494,13 +484,12 @@ export default function PlansPage() {
             description="Create your first plan to organize classes, curriculum, pricing, and belt progression."
             icon={<Layers3 size={22} />}
             action={
-              <Button
-                variant="secondary"
-                onClick={openCreateModal}
-              >
-                <Plus size={17} />
-                Create First Plan
-              </Button>
+              canManagePlans ? (
+                <Button variant="secondary" onClick={openCreateModal}>
+                  <Plus size={17} />
+                  Create First Plan
+                </Button>
+              ) : undefined
             }
           />
         ) : (
@@ -509,6 +498,7 @@ export default function PlansPage() {
               <PlanCard
                 key={plan._id}
                 plan={plan}
+                canManage={canManagePlans}
                 onEdit={() => openEditModal(plan)}
                 onDelete={() => void handleDelete(plan)}
               />
@@ -521,19 +511,11 @@ export default function PlansPage() {
         open={modalOpen}
         onClose={closeModal}
         size="xl"
-        title={
-          editingPlan
-            ? "Edit Training Plan"
-            : "Create Training Plan"
-        }
+        title={editingPlan ? "Edit Training Plan" : "Create Training Plan"}
         description="Configure pricing, schedule, curriculum, and belt progression."
         footer={
           <>
-            <Button
-              variant="outline"
-              onClick={closeModal}
-              disabled={saving}
-            >
+            <Button variant="outline" onClick={closeModal} disabled={saving}>
               Cancel
             </Button>
 
@@ -548,11 +530,7 @@ export default function PlansPage() {
           </>
         }
       >
-        <form
-          id="plan-form"
-          onSubmit={handleSubmit}
-          className="space-y-8"
-        >
+        <form id="plan-form" onSubmit={handleSubmit} className="space-y-8">
           {formError && (
             <div className="rounded-xl border border-(--danger-soft) bg-(--danger-soft) px-4 py-3 text-sm font-medium text-(--danger)">
               {formError}
@@ -756,10 +734,12 @@ export default function PlansPage() {
 
 function PlanCard({
   plan,
+  canManage,
   onEdit,
   onDelete,
 }: {
   plan: Plan;
+  canManage: boolean;
   onEdit: () => void;
   onDelete: () => void;
 }) {
@@ -767,10 +747,7 @@ function PlanCard({
   const milestones = plan.milestones ?? [];
 
   return (
-    <Card
-      padding="none"
-      className="group overflow-hidden hover:-translate-y-1 hover:shadow-[0_18px_45px_var(--shadow-color)]"
-    >
+    <Card padding="none" hoverable className="group overflow-hidden">
       <div className="h-1 bg-gradient-to-r from-(--accent) via-(--gold) to-(--orange)" />
 
       <div className="p-5 sm:p-6">
@@ -793,18 +770,13 @@ function PlanCard({
             <div className="mt-2 flex flex-wrap gap-2">
               <span
                 className={`rounded-full border px-2.5 py-1 text-[10px] font-bold ${
-                  BELT_STYLES[plan.startingBelt] ??
-                  BELT_STYLES.White
+                  BELT_STYLES[plan.startingBelt] ?? BELT_STYLES.White
                 }`}
               >
                 {plan.startingBelt || "White"} Belt
               </span>
 
-              <Badge
-                variant={
-                  plan.isActive ? "success" : "default"
-                }
-              >
+              <Badge variant={plan.isActive ? "success" : "default"}>
                 {plan.isActive ? "Active" : "Inactive"}
               </Badge>
             </div>
@@ -823,9 +795,7 @@ function PlanCard({
 
             <span className="text-xs font-medium text-(--ink-muted)">
               / {plan.duration}{" "}
-              {plan.durationUnit === "MONTHS"
-                ? "months"
-                : "days"}
+              {plan.durationUnit === "MONTHS" ? "months" : "days"}
             </span>
           </div>
         </div>
@@ -860,10 +830,7 @@ function PlanCard({
           <div className="mt-4 rounded-2xl border border-(--line) bg-(--hover-bg) p-4">
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-2">
-                <CalendarDays
-                  size={15}
-                  className="text-(--accent)"
-                />
+                <CalendarDays size={15} className="text-(--accent)" />
                 <span className="text-xs font-bold text-(--foreground)">
                   Curriculum Preview
                 </span>
@@ -909,18 +876,14 @@ function PlanCard({
 
         {milestones.length > 0 && (
           <div className="mt-4 flex items-center gap-2 overflow-hidden">
-            <Award
-              size={14}
-              className="shrink-0 text-(--gold)"
-            />
+            <Award size={14} className="shrink-0 text-(--gold)" />
 
             <div className="flex min-w-0 flex-wrap gap-1.5">
               {milestones.slice(0, 4).map((milestone, index) => (
                 <span
                   key={`${plan._id}-milestone-${index}`}
                   className={`rounded-full border px-2 py-1 text-[9px] font-bold ${
-                    BELT_STYLES[milestone.belt] ??
-                    BELT_STYLES.White
+                    BELT_STYLES[milestone.belt] ?? BELT_STYLES.White
                   }`}
                 >
                   Day {milestone.day} · {milestone.belt}
@@ -936,27 +899,29 @@ function PlanCard({
           </div>
         )}
 
-        <div className="mt-5 flex gap-2 border-t border-(--line) pt-4">
-          <Button
-            variant="outline"
-            size="sm"
-            className="flex-1"
-            onClick={onEdit}
-          >
-            <Edit3 size={14} />
-            Edit
-          </Button>
+        {canManage && (
+          <div className="mt-5 flex gap-2 border-t border-(--line) pt-4">
+            <Button
+              variant="outline"
+              size="sm"
+              className="flex-1"
+              onClick={onEdit}
+            >
+              <Edit3 size={14} />
+              Edit
+            </Button>
 
-          <Button
-            variant="danger"
-            size="sm"
-            className="flex-1"
-            onClick={onDelete}
-          >
-            <Trash2 size={14} />
-            Delete
-          </Button>
-        </div>
+            <Button
+              variant="danger"
+              size="sm"
+              className="flex-1"
+              onClick={onDelete}
+            >
+              <Trash2 size={14} />
+              Delete
+            </Button>
+          </div>
+        )}
       </div>
     </Card>
   );
@@ -975,9 +940,7 @@ function PlanStat({
     <div className="rounded-xl border border-(--line) bg-(--card) px-3 py-2.5">
       <div className="flex items-center gap-1.5 text-(--ink-faint)">
         {icon}
-        <span className="text-[9px] font-semibold">
-          {label}
-        </span>
+        <span className="text-[9px] font-semibold">{label}</span>
       </div>
 
       <p className="mt-1 truncate text-xs font-extrabold text-(--foreground)">
@@ -1040,11 +1003,7 @@ function Field({
     <div>
       <label className="mb-1.5 block text-xs font-semibold text-(--foreground-soft)">
         {label}
-        {required && (
-          <span className="ml-1 text-(--danger)">
-            *
-          </span>
-        )}
+        {required && <span className="ml-1 text-(--danger)">*</span>}
       </label>
 
       {children}
@@ -1060,11 +1019,7 @@ function CurriculumEditor({
 }: {
   item: CurriculumItem;
   index: number;
-  onChange: (
-    index: number,
-    field: keyof CurriculumItem,
-    value: string,
-  ) => void;
+  onChange: (index: number, field: keyof CurriculumItem, value: string) => void;
   onRemove: (index: number) => void;
 }) {
   return (
@@ -1103,18 +1058,14 @@ function CurriculumEditor({
             type="number"
             min="1"
             value={item.day}
-            onChange={(event) =>
-              onChange(index, "day", event.target.value)
-            }
+            onChange={(event) => onChange(index, "day", event.target.value)}
           />
         </Field>
 
         <Field label="Title" required>
           <Input
             value={item.title}
-            onChange={(event) =>
-              onChange(index, "title", event.target.value)
-            }
+            onChange={(event) => onChange(index, "title", event.target.value)}
             placeholder="e.g. Warm-up + Basic Stance"
           />
         </Field>
@@ -1122,9 +1073,7 @@ function CurriculumEditor({
         <Field label="Skill">
           <Input
             value={item.skill}
-            onChange={(event) =>
-              onChange(index, "skill", event.target.value)
-            }
+            onChange={(event) => onChange(index, "skill", event.target.value)}
             placeholder="e.g. Stance"
           />
         </Field>
@@ -1133,11 +1082,7 @@ function CurriculumEditor({
           <Input
             value={item.description}
             onChange={(event) =>
-              onChange(
-                index,
-                "description",
-                event.target.value,
-              )
+              onChange(index, "description", event.target.value)
             }
             placeholder="Brief lesson description"
           />
@@ -1155,11 +1100,7 @@ function MilestoneEditor({
 }: {
   item: MilestoneItem;
   index: number;
-  onChange: (
-    index: number,
-    field: keyof MilestoneItem,
-    value: string,
-  ) => void;
+  onChange: (index: number, field: keyof MilestoneItem, value: string) => void;
   onRemove: (index: number) => void;
 }) {
   return (
@@ -1198,18 +1139,14 @@ function MilestoneEditor({
             type="number"
             min="1"
             value={item.day}
-            onChange={(event) =>
-              onChange(index, "day", event.target.value)
-            }
+            onChange={(event) => onChange(index, "day", event.target.value)}
           />
         </Field>
 
         <Field label="Belt" required>
           <Select
             value={item.belt}
-            onChange={(event) =>
-              onChange(index, "belt", event.target.value)
-            }
+            onChange={(event) => onChange(index, "belt", event.target.value)}
           >
             <option value="">Select belt</option>
             {BELTS.map((belt) => (
@@ -1223,9 +1160,7 @@ function MilestoneEditor({
         <Field label="Skill" required>
           <Input
             value={item.skill}
-            onChange={(event) =>
-              onChange(index, "skill", event.target.value)
-            }
+            onChange={(event) => onChange(index, "skill", event.target.value)}
             placeholder="e.g. Kicks & Blocking"
           />
         </Field>
@@ -1234,11 +1169,7 @@ function MilestoneEditor({
           <Input
             value={item.description}
             onChange={(event) =>
-              onChange(
-                index,
-                "description",
-                event.target.value,
-              )
+              onChange(index, "description", event.target.value)
             }
             placeholder="Milestone description"
           />

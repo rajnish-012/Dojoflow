@@ -2,15 +2,166 @@ const API_URL = (
   process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api"
 ).replace(/\/+$/, "");
 
+/* =========================================================
+   MODULES (DYNAMIC SIDEBAR)
+========================================================= */
+
+export interface NavigationModule {
+  _id: string;
+  key: string;
+  label: string;
+  href: string;
+  icon: string;
+  order: number;
+}
+
+export interface ManagedModule extends NavigationModule {
+  allowedRoles: string[];
+  isActive: boolean;
+  isSystem: boolean;
+}
+
+export interface ModulePayload {
+  key?: string;
+  label?: string;
+  href?: string;
+  icon?: string;
+  order?: number;
+  allowedRoles?: string[];
+  isActive?: boolean;
+}
+
+async function moduleRequest(
+  path: string,
+  options: {
+    method?: string;
+    body?: unknown;
+  } = {},
+) {
+  const token = localStorage.getItem("token");
+
+  const response = await fetch(`${API_URL}/modules${path}`, {
+    method: options.method || "GET",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: options.body === undefined ? undefined : JSON.stringify(options.body),
+    cache: "no-store",
+  });
+
+  const data = await response.json().catch(() => ({}));
+
+  // Expired or invalid login: clear it and go to the login page.
+  if (response.status === 401) {
+    localStorage.removeItem("token");
+    localStorage.removeItem("user");
+    localStorage.removeItem("dojoUser");
+    localStorage.removeItem("currentUser");
+
+    window.location.href = "/login";
+  }
+
+  if (!response.ok) {
+    throw new Error(data.message || "Request failed");
+  }
+
+  return data;
+}
+
+// The sidebar and the page guard both need the menu. They share one
+// request instead of each asking the server separately.
+let navigationRequest: Promise<NavigationModule[]> | null = null;
+let navigationToken: string | null = null;
+let navigationAt = 0;
+
+const NAVIGATION_SHARE_MS = 5000;
+
+/** Sidebar items for the logged-in user. */
+export function getMyNavigation(): Promise<NavigationModule[]> {
+  const token = localStorage.getItem("token");
+  const now = Date.now();
+
+  if (
+    navigationRequest &&
+    navigationToken === token &&
+    now - navigationAt < NAVIGATION_SHARE_MS
+  ) {
+    return navigationRequest;
+  }
+
+  navigationToken = token;
+  navigationAt = now;
+
+  const request = moduleRequest("/navigation")
+    .then((data) => data.modules as NavigationModule[])
+    .catch((error) => {
+      // Do not remember a failed request.
+      if (navigationRequest === request) {
+        navigationRequest = null;
+      }
+
+      throw error;
+    });
+
+  navigationRequest = request;
+
+  return request;
+}
+
+/** Every module (Super Admin only). */
+export async function getModules(): Promise<ManagedModule[]> {
+  const data = await moduleRequest("");
+
+  return data.modules;
+}
+
+export async function createModule(
+  payload: ModulePayload,
+): Promise<ManagedModule> {
+  const data = await moduleRequest("", {
+    method: "POST",
+    body: payload,
+  });
+
+  return data.module;
+}
+
+export async function updateModule(
+  id: string,
+  payload: ModulePayload,
+): Promise<ManagedModule> {
+  const data = await moduleRequest(`/${id}`, {
+    method: "PUT",
+    body: payload,
+  });
+
+  return data.module;
+}
+
+export async function deleteModule(id: string) {
+  return moduleRequest(`/${id}`, { method: "DELETE" });
+}
+
+export async function reorderModules(items: { id: string; order: number }[]) {
+  return moduleRequest("/reorder", {
+    method: "PUT",
+    body: { items },
+  });
+}
+
+/** Tell the sidebar to reload its items. */
+export function notifyNavigationChanged() {
+  navigationRequest = null;
+
+  window.dispatchEvent(new Event("dojoflow:navigation-updated"));
+}
 
 /* =========================================================
    MAKEUP CLASSES
 ========================================================= */
 
-export type MakeupStatus =
-  | "SCHEDULED"
-  | "COMPLETED"
-  | "CANCELLED";
+export type MakeupStatus = "SCHEDULED" | "COMPLETED" | "CANCELLED";
 
 export interface MakeupStudent {
   _id: string;
@@ -37,17 +188,11 @@ export interface MakeupAttendance {
 
 export interface Makeup {
   _id: string;
-  student:
-    | string
-    | MakeupStudent;
+  student: string | MakeupStudent;
 
-  branch:
-    | string
-    | MakeupBranch;
+  branch: string | MakeupBranch;
 
-  originalAttendance:
-    | string
-    | MakeupAttendance;
+  originalAttendance: string | MakeupAttendance;
 
   planDay: number;
   originalDate: string;
@@ -93,9 +238,7 @@ export interface GetMakeupsParams {
 /**
  * Get all makeup classes.
  */
-export async function getMakeups(
-  params?: GetMakeupsParams
-) {
+export async function getMakeups(params?: GetMakeupsParams) {
   const token = localStorage.getItem("token");
 
   const searchParams = new URLSearchParams();
@@ -127,15 +270,13 @@ export async function getMakeups(
         Authorization: `Bearer ${token}`,
       },
       cache: "no-store",
-    }
+    },
   );
 
   const data = await response.json();
 
   if (!response.ok) {
-    throw new Error(
-      data.message || "Failed to fetch makeup classes"
-    );
+    throw new Error(data.message || "Failed to fetch makeup classes");
   }
 
   return data;
@@ -147,24 +288,19 @@ export async function getMakeups(
 export async function getMakeupById(id: string) {
   const token = localStorage.getItem("token");
 
-  const response = await fetch(
-    `${API_URL}/makeups/${id}`,
-    {
-      method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      cache: "no-store",
-    }
-  );
+  const response = await fetch(`${API_URL}/makeups/${id}`, {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    cache: "no-store",
+  });
 
   const data = await response.json();
 
   if (!response.ok) {
-    throw new Error(
-      data.message || "Failed to fetch makeup class"
-    );
+    throw new Error(data.message || "Failed to fetch makeup class");
   }
 
   return data;
@@ -173,9 +309,7 @@ export async function getMakeupById(id: string) {
 /**
  * Schedule a new makeup class.
  */
-export async function createMakeup(
-  makeup: CreateMakeupPayload
-) {
+export async function createMakeup(makeup: CreateMakeupPayload) {
   const token = localStorage.getItem("token");
 
   const response = await fetch(`${API_URL}/makeups`, {
@@ -190,9 +324,7 @@ export async function createMakeup(
   const data = await response.json();
 
   if (!response.ok) {
-    throw new Error(
-      data.message || "Failed to schedule makeup class"
-    );
+    throw new Error(data.message || "Failed to schedule makeup class");
   }
 
   return data;
@@ -204,23 +336,18 @@ export async function createMakeup(
 export async function completeMakeup(id: string) {
   const token = localStorage.getItem("token");
 
-  const response = await fetch(
-    `${API_URL}/makeups/${id}/complete`,
-    {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-    }
-  );
+  const response = await fetch(`${API_URL}/makeups/${id}/complete`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+  });
 
   const data = await response.json();
 
   if (!response.ok) {
-    throw new Error(
-      data.message || "Failed to complete makeup class"
-    );
+    throw new Error(data.message || "Failed to complete makeup class");
   }
 
   return data;
@@ -232,23 +359,18 @@ export async function completeMakeup(id: string) {
 export async function cancelMakeup(id: string) {
   const token = localStorage.getItem("token");
 
-  const response = await fetch(
-    `${API_URL}/makeups/${id}/cancel`,
-    {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-    }
-  );
+  const response = await fetch(`${API_URL}/makeups/${id}/cancel`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+  });
 
   const data = await response.json();
 
   if (!response.ok) {
-    throw new Error(
-      data.message || "Failed to cancel makeup class"
-    );
+    throw new Error(data.message || "Failed to cancel makeup class");
   }
 
   return data;
@@ -294,7 +416,6 @@ export async function getStudents() {
   return data;
 }
 
-
 export async function createStudent(student: {
   name: string;
   age: number;
@@ -325,7 +446,6 @@ export async function createStudent(student: {
   return data;
 }
 
-
 export async function getPlans() {
   const token = localStorage.getItem("token");
 
@@ -345,7 +465,6 @@ export async function getPlans() {
 
   return data;
 }
-
 
 export async function getStudentById(id: string) {
   const token = localStorage.getItem("token");
@@ -370,94 +489,72 @@ export async function getStudentById(id: string) {
 export async function getStudentProgress(studentId: string) {
   const token = localStorage.getItem("token");
 
-  const response = await fetch(
-    `${API_URL}/progress/student/${studentId}`,
-    {
-      method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-    }
-  );
+  const response = await fetch(`${API_URL}/progress/student/${studentId}`, {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+  });
 
   const data = await response.json();
 
   if (!response.ok) {
-    throw new Error(
-      data.message || "Failed to fetch student progress"
-    );
+    throw new Error(data.message || "Failed to fetch student progress");
   }
 
   return data;
 }
-
 
 /* =========================================================
    STUDENT ATTENDANCE
 ========================================================= */
 
-export async function getStudentAttendance(
-  studentId: string
-) {
+export async function getStudentAttendance(studentId: string) {
   const token = localStorage.getItem("token");
 
-  const response = await fetch(
-    `${API_URL}/attendance/student/${studentId}`,
-    {
-      method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      cache: "no-store",
-    }
-  );
+  const response = await fetch(`${API_URL}/attendance/student/${studentId}`, {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    cache: "no-store",
+  });
 
   const data = await response.json();
 
   if (!response.ok) {
-    throw new Error(
-      data.message || "Failed to fetch student attendance"
-    );
+    throw new Error(data.message || "Failed to fetch student attendance");
   }
 
   return data;
 }
-
 
 /* =========================================================
    STUDENT PERFORMANCE
 ========================================================= */
 
-export async function getStudentPerformance(
-  studentId: string
-) {
+export async function getStudentPerformance(studentId: string) {
   const token = localStorage.getItem("token");
 
-  const response = await fetch(
-    `${API_URL}/performance/student/${studentId}`,
-    {
-      method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      cache: "no-store",
-    }
-  );
+  const response = await fetch(`${API_URL}/performance/student/${studentId}`, {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    cache: "no-store",
+  });
 
   const data = await response.json();
 
   if (!response.ok) {
-    throw new Error(
-      data.message || "Failed to fetch student performance"
-    );
+    throw new Error(data.message || "Failed to fetch student performance");
   }
 
   return data;
 }
-
 
 export async function updateStudent(
   id: string,
@@ -513,8 +610,6 @@ export async function deleteStudent(id: string) {
 
   return data;
 }
-
-
 
 export async function getPlanById(id: string) {
   const token = localStorage.getItem("token");
@@ -600,7 +695,7 @@ export async function updatePlan(
       skill?: string;
     }[];
     isActive: boolean;
-  }>
+  }>,
 ) {
   const token = localStorage.getItem("token");
 
@@ -644,14 +739,13 @@ export async function deletePlan(id: string) {
 
 export const updateInquiryStatus = async (
   id: string,
-  status: "NEW" | "CONTACTED" | "ENROLLED" | "CLOSED"
+  status: "NEW" | "CONTACTED" | "ENROLLED" | "CLOSED",
 ) => {
   const token = localStorage.getItem("token");
 
   const response = await fetch(
     `${
-      process.env.NEXT_PUBLIC_API_URL ||
-      "http://localhost:5000/api"
+      process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api"
     }/inquiries/${id}/status`,
     {
       method: "PATCH",
@@ -660,15 +754,13 @@ export const updateInquiryStatus = async (
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ status }),
-    }
+    },
   );
 
   const data = await response.json();
 
   if (!response.ok) {
-    throw new Error(
-      data.message || "Unable to update inquiry status."
-    );
+    throw new Error(data.message || "Unable to update inquiry status.");
   }
 
   return data;
@@ -697,9 +789,6 @@ export const getInquiries = async () => {
 
   return data;
 };
-
-
-
 
 export async function getBranches() {
   const token = localStorage.getItem("token");
@@ -745,14 +834,12 @@ export async function createBranch(data: {
   return result;
 }
 
-
-
 export async function updateStaffUser(
   id: string,
   data: {
     name: string;
     email: string;
-    role: "BRANCH_ADMIN" | "COACH";
+    role: string;
     branch: string;
     password?: string;
   },
@@ -771,14 +858,141 @@ export async function updateStaffUser(
   const result = await response.json();
 
   if (!response.ok) {
-    throw new Error(
-      result.message || "Failed to update staff user",
-    );
+    throw new Error(result.message || "Failed to update staff user");
   }
 
   return result;
 }
 
+/* =========================================================
+   ROLES
+========================================================= */
 
+export type DataScope = "ALL" | "BRANCH";
 
+export interface RoleRecord {
+  _id: string;
+  key: string;
+  name: string;
+  description: string;
+  dataScope: DataScope;
+  isSystem: boolean;
+  userCount: number;
+}
 
+export interface RolePayload {
+  name?: string;
+  description?: string;
+  dataScope?: DataScope;
+}
+
+async function roleRequest(
+  path: string,
+  options: {
+    method?: string;
+    body?: unknown;
+  } = {},
+) {
+  const token = localStorage.getItem("token");
+
+  const response = await fetch(`${API_URL}/roles${path}`, {
+    method: options.method || "GET",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: options.body === undefined ? undefined : JSON.stringify(options.body),
+    cache: "no-store",
+  });
+
+  const data = await response.json().catch(() => ({}));
+
+  if (response.status === 401) {
+    localStorage.removeItem("token");
+    localStorage.removeItem("user");
+    localStorage.removeItem("dojoUser");
+    localStorage.removeItem("currentUser");
+
+    window.location.href = "/login";
+  }
+
+  if (!response.ok) {
+    throw new Error(data.message || "Request failed");
+  }
+
+  return data;
+}
+
+/** Every role with its user count (Super Admin only). */
+export async function getRoles(): Promise<RoleRecord[]> {
+  const data = await roleRequest("");
+
+  return data.roles;
+}
+
+export async function createRole(payload: RolePayload): Promise<RoleRecord> {
+  const data = await roleRequest("", {
+    method: "POST",
+    body: payload,
+  });
+
+  return data.role;
+}
+
+export async function updateRole(
+  id: string,
+  payload: RolePayload,
+): Promise<RoleRecord> {
+  const data = await roleRequest(`/${id}`, {
+    method: "PUT",
+    body: payload,
+  });
+
+  return data.role;
+}
+
+export async function deleteRole(id: string) {
+  return roleRequest(`/${id}`, { method: "DELETE" });
+}
+
+/* =========================================================
+   CURRENT USER
+========================================================= */
+
+export interface CurrentUserRecord {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  branch?: string | null;
+}
+
+/** The logged-in user as the server knows them right now. */
+export async function getCurrentUser(): Promise<CurrentUserRecord> {
+  const token = localStorage.getItem("token");
+
+  const response = await fetch(`${API_URL}/auth/me`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    cache: "no-store",
+  });
+
+  const data = await response.json().catch(() => ({}));
+
+  // Expired login, or the account was deleted.
+  if (response.status === 401) {
+    localStorage.removeItem("token");
+    localStorage.removeItem("user");
+    localStorage.removeItem("dojoUser");
+    localStorage.removeItem("currentUser");
+
+    window.location.href = "/login";
+  }
+
+  if (!response.ok) {
+    throw new Error(data.message || "Failed to load user");
+  }
+
+  return data.user;
+}

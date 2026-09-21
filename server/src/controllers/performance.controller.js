@@ -1,5 +1,6 @@
 const mongoose = require("mongoose");
 
+const { isBranchScoped } = require("../utils/access");
 const Performance = require("../models/Performance");
 const Student = require("../models/Student");
 const Branch = require("../models/Branch");
@@ -14,7 +15,7 @@ const getPerformance = async (req, res) => {
 
     // Branch admins and coaches can only see
     // performance records from their assigned branch
-    if (["BRANCH_ADMIN", "COACH"].includes(req.user.role)) {
+    if (isBranchScoped(req.user)) {
       if (!req.user.branch) {
         return res.status(403).json({
           success: false,
@@ -115,7 +116,7 @@ const getPerformanceByStudent = async (req, res) => {
 
     // Branch admins and coaches can only access
     // students from their assigned branch
-    if (["BRANCH_ADMIN", "COACH"].includes(req.user.role)) {
+    if (isBranchScoped(req.user)) {
       if (!req.user.branch) {
         return res.status(403).json({
           success: false,
@@ -186,7 +187,7 @@ const getPerformanceById = async (req, res) => {
 
     // Branch admins and coaches can only access
     // performance records from their assigned branch
-    if (["BRANCH_ADMIN", "COACH"].includes(req.user.role)) {
+    if (isBranchScoped(req.user)) {
       if (!req.user.branch) {
         return res.status(403).json({
           success: false,
@@ -304,7 +305,7 @@ const createPerformance = async (req, res) => {
 
     // Branch admins and coaches can only create
     // performance records for their own branch
-    if (["BRANCH_ADMIN", "COACH"].includes(req.user.role)) {
+    if (isBranchScoped(req.user)) {
       if (!req.user.branch) {
         return res.status(403).json({
           success: false,

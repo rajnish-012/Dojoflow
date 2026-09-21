@@ -3,53 +3,23 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
-import {
-  BarChart3,
-  BookOpen,
-  CalendarCheck,
-  ChevronLeft,
-  ClipboardList,
-  FileText,
-  LayoutDashboard,
-  LogOut,
-  RefreshCw,
-  Settings,
-  Trophy,
-  Users,
-  X,
-} from "lucide-react";
+import { ChevronLeft, LogOut, X } from "lucide-react";
+
+import { getMyNavigation, type NavigationModule } from "@/lib/api";
+import { useCurrentUser } from "@/lib/current-user";
+import { getNavigationIcon } from "@/lib/navigation-icons";
 
 /* =========================================================
    TYPES
    ========================================================= */
-
-type UserRole =
-  | "SUPER_ADMIN"
-  | "BRANCH_ADMIN"
-  | "COACH"
-  | "STUDENT"
-  | string;
 
 type SidebarProps = {
   isOpen?: boolean;
   onClose?: () => void;
   collapsed?: boolean;
   onToggleCollapse?: () => void;
-};
-
-type NavigationItem = {
-  label: string;
-  href: string;
-  icon: React.ElementType;
-  roles?: UserRole[];
-};
-
-type StoredUser = {
-  name?: string;
-  email?: string;
-  role?: string;
 };
 
 /* =========================================================
@@ -62,126 +32,14 @@ const SIDEBAR_WIDTH = {
 } as const;
 
 /* =========================================================
-   MAIN NAVIGATION
-   ========================================================= */
-
-const navigationItems: NavigationItem[] = [
-  {
-    label: "Dashboard",
-    href: "/dashboard",
-    icon: LayoutDashboard,
-    roles: ["SUPER_ADMIN", "BRANCH_ADMIN", "COACH"],
-  },
-  {
-    label: "Students",
-    href: "/students",
-    icon: Users,
-    roles: ["SUPER_ADMIN", "BRANCH_ADMIN", "COACH"],
-  },
-  {
-    label: "Plans",
-    href: "/plans",
-    icon: ClipboardList,
-    roles: ["SUPER_ADMIN", "BRANCH_ADMIN"],
-  },
-  {
-    label: "Curriculum",
-    href: "/curriculum",
-    icon: BookOpen,
-    roles: ["SUPER_ADMIN", "BRANCH_ADMIN", "COACH"],
-  },
-  {
-    label: "Attendance",
-    href: "/attendance",
-    icon: CalendarCheck,
-    roles: ["SUPER_ADMIN", "BRANCH_ADMIN", "COACH"],
-  },
-  {
-    label: "Performance",
-    href: "/performance",
-    icon: BarChart3,
-    roles: ["SUPER_ADMIN", "BRANCH_ADMIN", "COACH"],
-  },
-  {
-    label: "Makeups",
-    href: "/makeups",
-    icon: RefreshCw,
-    roles: ["SUPER_ADMIN", "BRANCH_ADMIN", "COACH"],
-  },
-  {
-    label: "Inquiries",
-    href: "/inquiries",
-    icon: FileText,
-    roles: ["SUPER_ADMIN", "BRANCH_ADMIN", "COACH"],
-  },
-  {
-    label: "Branches",
-    href: "/branches",
-    icon: Trophy,
-    roles: ["SUPER_ADMIN"],
-  },
-  {
-    label: "Settings",
-    href: "/settings",
-    icon: Settings,
-    roles: ["SUPER_ADMIN"],
-  },
-];
-
-/* =========================================================
-   STUDENT NAVIGATION
-   ========================================================= */
-
-const studentNavigationItems: NavigationItem[] = [
-  {
-    label: "My Dashboard",
-    href: "/student-dashboard",
-    icon: LayoutDashboard,
-    roles: ["STUDENT"],
-  },
-];
-
-/* =========================================================
    USER HELPERS
    ========================================================= */
-
-function getStoredUser(): StoredUser | null {
-  if (typeof window === "undefined") {
-    return null;
-  }
-
-  try {
-    const storedUser =
-      localStorage.getItem("user") ||
-      localStorage.getItem("dojoUser") ||
-      localStorage.getItem("currentUser");
-
-    if (!storedUser) {
-      return null;
-    }
-
-    const parsedUser = JSON.parse(storedUser);
-
-    if (
-      !parsedUser ||
-      typeof parsedUser !== "object"
-    ) {
-      return null;
-    }
-
-    return parsedUser as StoredUser;
-  } catch {
-    return null;
-  }
-}
 
 function formatRole(role: string) {
   return role
     .replaceAll("_", " ")
     .toLowerCase()
-    .replace(/\b\w/g, (letter) =>
-      letter.toUpperCase()
-    );
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 /* =========================================================
@@ -196,92 +54,81 @@ export default function Sidebar({
 }: SidebarProps) {
   const pathname = usePathname();
 
-  const [user, setUser] =
-    useState<StoredUser | null>(null);
-
-  /* =======================================================
-     LOAD USER
-     ======================================================= */
-
-  useEffect(() => {
-    const loadUser = () => {
-      setUser(getStoredUser());
-    };
-
-    loadUser();
-
-    window.addEventListener(
-      "storage",
-      loadUser
-    );
-
-    return () => {
-      window.removeEventListener(
-        "storage",
-        loadUser
-      );
-    };
-  }, []);
+  // Real data of the logged-in user (saved at login).
+  const user = useCurrentUser();
 
   /* =======================================================
      ROLE
      ======================================================= */
 
-  const role = String(
-    user?.role || "SUPER_ADMIN"
-  ).toUpperCase() as UserRole;
+  const role = String(user?.role || "").toUpperCase();
 
   /* =======================================================
      LOGO DESTINATION
      ======================================================= */
 
-  const logoHref =
-    role === "STUDENT"
-      ? "/student-dashboard"
-      : "/dashboard";
+  const logoHref = role === "STUDENT" ? "/student-dashboard" : "/dashboard";
 
   /* =======================================================
-     NAVIGATION ITEMS
+     NAVIGATION ITEMS (loaded from the database)
      ======================================================= */
 
-  const visibleItems = useMemo(() => {
-    const items =
-      role === "STUDENT"
-        ? studentNavigationItems
-        : navigationItems;
+  const [navItems, setNavItems] = useState<NavigationModule[]>([]);
 
-    return items.filter((item) => {
-      if (
-        !item.roles ||
-        item.roles.length === 0
-      ) {
-        return true;
-      }
+  const [navLoading, setNavLoading] = useState(true);
 
-      return item.roles.some(
-        (allowedRole) =>
-          String(allowedRole).toUpperCase() ===
-          String(role).toUpperCase()
-      );
-    });
-  }, [role]);
+  const [navError, setNavError] = useState("");
+
+  // Bump this number to load the menu again.
+  const [navReload, setNavReload] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    getMyNavigation()
+      .then((modules) => {
+        if (cancelled) return;
+
+        setNavItems(modules);
+        setNavError("");
+      })
+      .catch((error) => {
+        if (cancelled) return;
+
+        setNavError(
+          error instanceof Error ? error.message : "Failed to load menu",
+        );
+      })
+      .finally(() => {
+        if (!cancelled) setNavLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [navReload]);
+
+  useEffect(() => {
+    // The Modules page fires this after every change.
+    const reload = () => setNavReload((count) => count + 1);
+
+    window.addEventListener("dojoflow:navigation-updated", reload);
+
+    return () => {
+      window.removeEventListener("dojoflow:navigation-updated", reload);
+    };
+  }, []);
 
   /* =======================================================
      ACTIVE ROUTE
      ======================================================= */
 
   const isActive = (href: string) => {
-    if (
-      href === "/dashboard" ||
-      href === "/student-dashboard"
-    ) {
+    if (href === "/dashboard" || href === "/student-dashboard") {
       return pathname === href;
     }
 
-    return (
-      pathname === href ||
-      pathname.startsWith(`${href}/`)
-    );
+    return pathname === href || pathname.startsWith(`${href}/`);
   };
 
   /* =======================================================
@@ -347,14 +194,10 @@ export default function Sidebar({
           "text-(--sidebar-text)",
           "shadow-[10px_0_40px_rgba(15,23,42,0.08)]",
           "transition-[width,transform] duration-300 ease-out",
-          isOpen
-            ? "translate-x-0"
-            : "-translate-x-full md:translate-x-0",
+          isOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0",
         ].join(" ")}
         style={{
-          width: collapsed
-            ? SIDEBAR_WIDTH.collapsed
-            : SIDEBAR_WIDTH.expanded,
+          width: collapsed ? SIDEBAR_WIDTH.collapsed : SIDEBAR_WIDTH.expanded,
         }}
       >
         {/* =================================================
@@ -365,9 +208,7 @@ export default function Sidebar({
           className={[
             "flex h-[72px] shrink-0 items-center",
             "border-b border-(--line)",
-            collapsed
-              ? "justify-center px-3"
-              : "justify-between px-5",
+            collapsed ? "justify-center px-3" : "justify-between px-5",
           ].join(" ")}
         >
           {/* Brand */}
@@ -380,9 +221,7 @@ export default function Sidebar({
               "flex min-w-0 items-center",
               "transition-opacity duration-200",
               "hover:opacity-90",
-              collapsed
-                ? "justify-center"
-                : "gap-3",
+              collapsed ? "justify-center" : "gap-3",
             ].join(" ")}
           >
             {/* Logo */}
@@ -431,9 +270,7 @@ export default function Sidebar({
                   "
                 >
                   Dojo
-                  <span className="text-(--gold)">
-                    Flow
-                  </span>
+                  <span className="text-(--gold)">Flow</span>
                 </p>
 
                 <p
@@ -472,10 +309,7 @@ export default function Sidebar({
               md:hidden
             "
           >
-            <X
-              size={18}
-              strokeWidth={2}
-            />
+            <X size={18} strokeWidth={2} />
           </button>
         </div>
 
@@ -513,28 +347,47 @@ export default function Sidebar({
             [scrollbar-width:thin]
           "
         >
+          {navLoading && (
+            <div aria-hidden="true" className="space-y-2">
+              {Array.from({ length: 6 }).map((_, index) => (
+                <div
+                  key={index}
+                  className="h-11 animate-pulse rounded-xl bg-(--sidebar-hover)"
+                />
+              ))}
+            </div>
+          )}
+
+          {!navLoading && navError && (
+            <div className="rounded-xl border border-(--line) p-3 text-center">
+              {!collapsed && (
+                <p className="mb-2 text-[11px] font-medium text-(--sidebar-muted)">
+                  {navError}
+                </p>
+              )}
+
+              <button
+                type="button"
+                onClick={() => setNavReload((count) => count + 1)}
+                className="text-[11px] font-bold text-(--gold) hover:underline"
+              >
+                Retry
+              </button>
+            </div>
+          )}
+
           <div className="space-y-1">
-            {visibleItems.map((item) => {
-              const Icon = item.icon;
-              const active = isActive(
-                item.href
-              );
+            {navItems.map((item) => {
+              const Icon = getNavigationIcon(item.icon);
+              const active = isActive(item.href);
 
               return (
                 <Link
                   key={item.href}
                   href={item.href}
                   onClick={handleNavigation}
-                  title={
-                    collapsed
-                      ? item.label
-                      : undefined
-                  }
-                  aria-current={
-                    active
-                      ? "page"
-                      : undefined
-                  }
+                  title={collapsed ? item.label : undefined}
+                  aria-current={active ? "page" : undefined}
                   className={[
                     "group relative flex min-h-11",
                     "items-center rounded-xl",
@@ -543,9 +396,7 @@ export default function Sidebar({
                     "focus-visible:outline-none",
                     "focus-visible:ring-2",
                     "focus-visible:ring-(--gold)",
-                    collapsed
-                      ? "justify-center px-3"
-                      : "gap-3 px-3.5",
+                    collapsed ? "justify-center px-3" : "gap-3 px-3.5",
 
                     active
                       ? [
@@ -583,11 +434,7 @@ export default function Sidebar({
 
                   <Icon
                     size={18}
-                    strokeWidth={
-                      active
-                        ? 2.3
-                        : 1.9
-                    }
+                    strokeWidth={active ? 2.3 : 1.9}
                     className={[
                       "shrink-0",
                       "transition-colors duration-200",
@@ -602,19 +449,14 @@ export default function Sidebar({
 
                   {/* Label */}
 
-                  {!collapsed && (
-                    <span className="truncate">
-                      {item.label}
-                    </span>
-                  )}
+                  {!collapsed && <span className="truncate">{item.label}</span>}
 
                   {/* Active indicator dot */}
 
-                  {!collapsed &&
-                    active && (
-                      <span
-                        aria-hidden="true"
-                        className="
+                  {!collapsed && active && (
+                    <span
+                      aria-hidden="true"
+                      className="
                           ml-auto
                           h-1.5
                           w-1.5
@@ -622,8 +464,8 @@ export default function Sidebar({
                           rounded-full
                           bg-(--sidebar-active-text)
                         "
-                      />
-                    )}
+                    />
+                  )}
                 </Link>
               );
             })}
@@ -677,43 +519,46 @@ export default function Sidebar({
                     text-(--gold)
                   "
                 >
-                  {user?.name
-                    ?.trim()
-                    ?.charAt(0)
-                    ?.toUpperCase() ||
-                    "D"}
+                  {user?.name?.trim()?.charAt(0)?.toUpperCase() ?? ""}
                 </div>
 
                 {/* User details */}
 
                 <div className="min-w-0">
-                  <p
-                    className="
-                      truncate
-                      text-xs
-                      font-bold
-                      text-(--sidebar-text)
-                    "
-                  >
-                    {user?.name ||
-                      "Dojo Administrator"}
-                  </p>
+                  {user ? (
+                    <>
+                      <p
+                        className="
+                          truncate
+                          text-xs
+                          font-bold
+                          text-(--sidebar-text)
+                        "
+                      >
+                        {user.name}
+                      </p>
 
-                  <p
-                    className="
-                      mt-0.5
-                      truncate
-                      text-[9px]
-                      font-medium
-                      uppercase
-                      tracking-wide
-                      text-(--sidebar-muted)
-                    "
-                  >
-                    {formatRole(
-                      String(role)
-                    )}
-                  </p>
+                      <p
+                        className="
+                          mt-0.5
+                          truncate
+                          text-[9px]
+                          font-medium
+                          uppercase
+                          tracking-wide
+                          text-(--sidebar-muted)
+                        "
+                      >
+                        {role ? formatRole(role) : ""}
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <div className="h-3 w-24 animate-pulse rounded bg-(--sidebar-hover)" />
+
+                      <div className="mt-1.5 h-2.5 w-16 animate-pulse rounded bg-(--sidebar-hover)" />
+                    </>
+                  )}
                 </div>
               </div>
             </div>
@@ -726,11 +571,7 @@ export default function Sidebar({
           <button
             type="button"
             onClick={handleLogout}
-            title={
-              collapsed
-                ? "Logout"
-                : undefined
-            }
+            title={collapsed ? "Logout" : undefined}
             aria-label="Logout"
             className={[
               "group flex min-h-11 w-full",
@@ -743,9 +584,7 @@ export default function Sidebar({
               "focus-visible:outline-none",
               "focus-visible:ring-2",
               "focus-visible:ring-(--gold)",
-              collapsed
-                ? "justify-center px-3"
-                : "gap-3 px-3.5",
+              collapsed ? "justify-center px-3" : "gap-3 px-3.5",
             ].join(" ")}
           >
             <LogOut
@@ -759,9 +598,7 @@ export default function Sidebar({
               "
             />
 
-            {!collapsed && (
-              <span>Logout</span>
-            )}
+            {!collapsed && <span>Logout</span>}
           </button>
 
           {/* =================================================
@@ -771,19 +608,9 @@ export default function Sidebar({
           {onToggleCollapse && (
             <button
               type="button"
-              onClick={
-                onToggleCollapse
-              }
-              title={
-                collapsed
-                  ? "Expand sidebar"
-                  : "Collapse sidebar"
-              }
-              aria-label={
-                collapsed
-                  ? "Expand sidebar"
-                  : "Collapse sidebar"
-              }
+              onClick={onToggleCollapse}
+              title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+              aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
               className={[
                 "mt-2 hidden min-h-11 w-full",
                 "items-center rounded-xl",
@@ -796,9 +623,7 @@ export default function Sidebar({
                 "focus-visible:ring-2",
                 "focus-visible:ring-(--gold)",
                 "md:flex",
-                collapsed
-                  ? "justify-center px-3"
-                  : "gap-3 px-3.5",
+                collapsed ? "justify-center px-3" : "gap-3 px-3.5",
               ].join(" ")}
             >
               <ChevronLeft
@@ -807,17 +632,11 @@ export default function Sidebar({
                 className={[
                   "shrink-0",
                   "transition-transform duration-300",
-                  collapsed
-                    ? "rotate-180"
-                    : "",
+                  collapsed ? "rotate-180" : "",
                 ].join(" ")}
               />
 
-              {!collapsed && (
-                <span>
-                  Collapse sidebar
-                </span>
-              )}
+              {!collapsed && <span>Collapse sidebar</span>}
             </button>
           )}
         </div>

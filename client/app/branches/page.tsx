@@ -28,6 +28,7 @@ import {
 } from "@/components/ui";
 
 import { createBranch, getBranches } from "@/lib/api";
+import { useCan } from "@/lib/permissions";
 
 type Branch = {
   _id: string;
@@ -50,6 +51,7 @@ const initialForm: BranchForm = {
 };
 
 export default function BranchesPage() {
+  const canManageBranches = useCan("branch.manage");
   const [branches, setBranches] = useState<Branch[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -168,20 +170,8 @@ export default function BranchesPage() {
   const inactiveBranches = branches.length - activeBranches;
 
   return (
-    <div
-      className="
-        min-h-screen
-        bg-(--background)
-        px-4
-        py-6
-        text-(--foreground)
-        transition-colors
-        duration-300
-        sm:px-6
-        lg:px-8
-      "
-    >
-      <div className="mx-auto w-full max-w-[1440px]">
+    <div>
+      <div className="df-page">
         <PageHeader
           eyebrow="Academy Management"
           title="Branch Management"
@@ -200,10 +190,12 @@ export default function BranchesPage() {
                 Refresh
               </Button>
 
-              <Button variant="primary" onClick={openForm}>
-                <Plus size={18} />
-                Add Branch
-              </Button>
+              {canManageBranches && (
+                <Button variant="primary" onClick={openForm}>
+                  <Plus size={18} />
+                  Add Branch
+                </Button>
+              )}
             </div>
           }
         />
@@ -275,9 +267,7 @@ export default function BranchesPage() {
                   Branch Directory
                 </h2>
 
-                <Badge variant="neutral">
-                  {branches.length}
-                </Badge>
+                <Badge variant="neutral">{branches.length}</Badge>
               </div>
 
               <p className="mt-1 text-sm text-(--ink-muted)">
@@ -327,7 +317,7 @@ export default function BranchesPage() {
                     : "Create your first branch using the Add Branch button."
                 }
                 action={
-                  !search ? (
+                  !search && canManageBranches ? (
                     <Button variant="primary" onClick={openForm}>
                       <Plus size={17} />
                       Create First Branch
@@ -355,8 +345,7 @@ export default function BranchesPage() {
               "
             >
               <p className="text-xs font-medium text-(--ink-faint)">
-                Showing {filteredBranches.length} of {branches.length}{" "}
-                branches
+                Showing {filteredBranches.length} of {branches.length} branches
               </p>
             </div>
           )}
@@ -548,9 +537,7 @@ function BranchCard({ branch }: { branch: Branch }) {
           <span
             className={[
               "h-1.5 w-1.5 rounded-full",
-              branch.isActive
-                ? "bg-(--green)"
-                : "bg-(--ink-faint)",
+              branch.isActive ? "bg-(--green)" : "bg-(--ink-faint)",
             ].join(" ")}
           />
           {branch.isActive ? "Active" : "Inactive"}
@@ -563,10 +550,7 @@ function BranchCard({ branch }: { branch: Branch }) {
 
       <div className="mt-4 space-y-3">
         <div className="flex items-start gap-3">
-          <MapPin
-            size={17}
-            className="mt-0.5 shrink-0 text-(--ink-faint)"
-          />
+          <MapPin size={17} className="mt-0.5 shrink-0 text-(--ink-faint)" />
 
           <p className="text-sm leading-6 text-(--ink-muted)">
             {branch.address}
@@ -575,14 +559,9 @@ function BranchCard({ branch }: { branch: Branch }) {
 
         {branch.phone && (
           <div className="flex items-center gap-3">
-            <Phone
-              size={16}
-              className="shrink-0 text-(--ink-faint)"
-            />
+            <Phone size={16} className="shrink-0 text-(--ink-faint)" />
 
-            <p className="text-sm text-(--ink-muted)">
-              {branch.phone}
-            </p>
+            <p className="text-sm text-(--ink-muted)">{branch.phone}</p>
           </div>
         )}
       </div>

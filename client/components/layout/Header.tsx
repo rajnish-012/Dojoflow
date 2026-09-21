@@ -13,90 +13,44 @@ import {
 import { useRouter } from "next/navigation";
 
 import { useTheme } from "@/components/theme/ThemeProvider";
+import { useCurrentUser } from "@/lib/current-user";
 
 type HeaderProps = {
   onMenuClick?: () => void;
   onProfileClick?: () => void;
 };
 
-type User = {
-  name?: string;
-  email?: string;
-  role?: string;
-};
-
-export default function Header({
-  onMenuClick,
-  onProfileClick,
-}: HeaderProps) {
+export default function Header({ onMenuClick, onProfileClick }: HeaderProps) {
   const router = useRouter();
 
   const { theme, toggleTheme } = useTheme();
 
-  const [user, setUser] = useState<User | null>(null);
-  const [showProfileMenu, setShowProfileMenu] =
-    useState(false);
+  // Real data of the logged-in user (refreshed from the server).
+  const user = useCurrentUser({ refresh: true });
+  const [showProfileMenu, setShowProfileMenu] = useState(false);
 
   const profileRef = useRef<HTMLDivElement>(null);
-
-  /* =====================================================
-     LOAD USER
-     ===================================================== */
-
-  useEffect(() => {
-    try {
-      const storedUser =
-        localStorage.getItem("user") ||
-        localStorage.getItem("dojoUser") ||
-        localStorage.getItem("currentUser");
-
-      if (!storedUser) {
-        return;
-      }
-
-      const parsedUser = JSON.parse(storedUser);
-
-      if (
-        parsedUser &&
-        typeof parsedUser === "object"
-      ) {
-        setUser(parsedUser);
-      }
-    } catch {
-      setUser(null);
-    }
-  }, []);
 
   /* =====================================================
      CLOSE PROFILE MENU WHEN CLICKING OUTSIDE
      ===================================================== */
 
   useEffect(() => {
-    const handleClickOutside = (
-      event: MouseEvent
-    ) => {
+    const handleClickOutside = (event: MouseEvent) => {
       if (
         profileRef.current &&
-        !profileRef.current.contains(
-          event.target as Node
-        )
+        !profileRef.current.contains(event.target as Node)
       ) {
         setShowProfileMenu(false);
       }
     };
 
     if (showProfileMenu) {
-      document.addEventListener(
-        "mousedown",
-        handleClickOutside
-      );
+      document.addEventListener("mousedown", handleClickOutside);
     }
 
     return () => {
-      document.removeEventListener(
-        "mousedown",
-        handleClickOutside
-      );
+      document.removeEventListener("mousedown", handleClickOutside);
     };
   }, [showProfileMenu]);
 
@@ -105,26 +59,18 @@ export default function Header({
      ===================================================== */
 
   useEffect(() => {
-    const handleEscape = (
-      event: KeyboardEvent
-    ) => {
+    const handleEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         setShowProfileMenu(false);
       }
     };
 
     if (showProfileMenu) {
-      document.addEventListener(
-        "keydown",
-        handleEscape
-      );
+      document.addEventListener("keydown", handleEscape);
     }
 
     return () => {
-      document.removeEventListener(
-        "keydown",
-        handleEscape
-      );
+      document.removeEventListener("keydown", handleEscape);
     };
   }, [showProfileMenu]);
 
@@ -133,40 +79,37 @@ export default function Header({
      ===================================================== */
 
   const getInitials = () => {
-    const name =
-      user?.name?.trim() || "Admin";
+    const name = user?.name?.trim();
+
+    if (!name) {
+      return "";
+    }
 
     const parts = name.split(/\s+/);
 
     if (parts.length === 1) {
-      return parts[0]
-        .slice(0, 2)
-        .toUpperCase();
+      return parts[0].slice(0, 2).toUpperCase();
     }
 
     return parts
       .slice(0, 2)
-      .map((part) =>
-        part.charAt(0)
-      )
+      .map((part) => part.charAt(0))
       .join("")
       .toUpperCase();
   };
 
   const getRoleLabel = () => {
-    return String(
-      user?.role || "SUPER_ADMIN"
-    )
+    if (!user?.role) {
+      return "";
+    }
+
+    return String(user.role)
       .replaceAll("_", " ")
       .toLowerCase()
-      .replace(/\b\w/g, (letter) =>
-        letter.toUpperCase()
-      );
+      .replace(/\b\w/g, (letter) => letter.toUpperCase());
   };
 
-  const isSuperAdmin =
-    String(user?.role || "").toLowerCase() ===
-    "super_admin";
+  const isSuperAdmin = String(user?.role || "").toLowerCase() === "super_admin";
 
   /* =====================================================
      LOGOUT
@@ -197,9 +140,7 @@ export default function Header({
      ===================================================== */
 
   const handleProfileToggle = () => {
-    setShowProfileMenu(
-      (previous) => !previous
-    );
+    setShowProfileMenu((previous) => !previous);
 
     onProfileClick?.();
   };
@@ -228,7 +169,6 @@ export default function Header({
           ================================================= */}
 
       <div className="flex min-w-0 items-center gap-3">
-
         {/* -----------------------------------------------
             MOBILE MENU
             ----------------------------------------------- */}
@@ -260,10 +200,7 @@ export default function Header({
             md:hidden
           "
         >
-          <Menu
-            size={19}
-            strokeWidth={2}
-          />
+          <Menu size={19} strokeWidth={2} />
         </button>
 
         {/* -----------------------------------------------
@@ -310,9 +247,7 @@ export default function Header({
             "
           >
             Dojo
-            <span className="text-(--accent)">
-              Flow
-            </span>
+            <span className="text-(--accent)">Flow</span>
           </p>
 
           <p
@@ -333,7 +268,6 @@ export default function Header({
           ================================================= */}
 
       <div className="flex items-center gap-2 sm:gap-3">
-
         {/* -----------------------------------------------
             THEME TOGGLE
             ----------------------------------------------- */}
@@ -342,14 +276,10 @@ export default function Header({
           type="button"
           onClick={toggleTheme}
           aria-label={
-            theme === "light"
-              ? "Switch to dark mode"
-              : "Switch to light mode"
+            theme === "light" ? "Switch to dark mode" : "Switch to light mode"
           }
           title={
-            theme === "light"
-              ? "Switch to dark mode"
-              : "Switch to light mode"
+            theme === "light" ? "Switch to dark mode" : "Switch to light mode"
           }
           className="
             group
@@ -458,10 +388,7 @@ export default function Header({
             PROFILE
             ----------------------------------------------- */}
 
-        <div
-          ref={profileRef}
-          className="relative"
-        >
+        <div ref={profileRef} className="relative">
           <button
             type="button"
             onClick={handleProfileToggle}
@@ -522,29 +449,38 @@ export default function Header({
                 sm:block
               "
             >
-              <p
-                className="
-                  truncate
-                  text-xs
-                  font-bold
-                  text-(--foreground)
-                "
-              >
-                {user?.name ||
-                  "Administrator"}
-              </p>
+              {user ? (
+                <>
+                  <p
+                    className="
+                      truncate
+                      text-xs
+                      font-bold
+                      text-(--foreground)
+                    "
+                  >
+                    {user.name}
+                  </p>
 
-              <p
-                className="
-                  mt-0.5
-                  truncate
-                  text-[10px]
-                  font-medium
-                  text-(--ink-muted)
-                "
-              >
-                {getRoleLabel()}
-              </p>
+                  <p
+                    className="
+                      mt-0.5
+                      truncate
+                      text-[10px]
+                      font-medium
+                      text-(--ink-muted)
+                    "
+                  >
+                    {getRoleLabel()}
+                  </p>
+                </>
+              ) : (
+                <>
+                  <div className="h-3 w-20 animate-pulse rounded bg-(--line)" />
+
+                  <div className="mt-1.5 h-2.5 w-14 animate-pulse rounded bg-(--line)" />
+                </>
+              )}
             </div>
 
             {/* Chevron */}
@@ -554,9 +490,7 @@ export default function Header({
               strokeWidth={2}
               className={[
                 "hidden text-(--ink-muted) transition-transform duration-200 sm:block",
-                showProfileMenu
-                  ? "rotate-180"
-                  : "",
+                showProfileMenu ? "rotate-180" : "",
               ].join(" ")}
             />
           </button>
@@ -579,11 +513,11 @@ export default function Header({
                 rounded-2xl
                 border
                 border-(--line)
-                bg-(--card-elevated)
+                bg-(--card)
                 p-2
                 text-(--foreground)
-                shadow-[0_20px_60px_rgba(0,0,0,0.14)]
-                df-scale-in
+                shadow-[0_20px_60px_var(--shadow-color)]
+                animate-df-fade-in
               "
             >
               {/* -------------------------------------------
@@ -601,7 +535,6 @@ export default function Header({
                 "
               >
                 <div className="flex items-center gap-3">
-
                   <div
                     className="
                       flex
@@ -632,8 +565,7 @@ export default function Header({
                         text-(--foreground)
                       "
                     >
-                      {user?.name ||
-                        "Administrator"}
+                      {user?.name}
                     </p>
 
                     <p
@@ -645,9 +577,28 @@ export default function Header({
                         text-(--ink-muted)
                       "
                     >
-                      {user?.email ||
-                        "admin@dojoflow.com"}
+                      {user?.email}
                     </p>
+
+                    {getRoleLabel() && (
+                      <span
+                        className="
+                        mt-1.5
+                        inline-flex
+                        rounded-full
+                        bg-(--accent-soft)
+                        px-2
+                        py-0.5
+                        text-[9px]
+                        font-bold
+                        uppercase
+                        tracking-wide
+                        text-(--accent)
+                      "
+                      >
+                        {getRoleLabel()}
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>
@@ -656,25 +607,27 @@ export default function Header({
                   ROLE
                   ------------------------------------------- */}
 
-              <div
-                className="
-                  mb-1
-                  px-3
-                  py-1.5
-                "
-              >
-                <span
+              {isSuperAdmin && (
+                <div
                   className="
-                    text-[9px]
-                    font-bold
-                    uppercase
-                    tracking-[0.12em]
-                    text-(--ink-muted)
+                    mb-1
+                    px-3
+                    py-1.5
                   "
                 >
-                  Account
-                </span>
-              </div>
+                  <span
+                    className="
+                      text-[9px]
+                      font-bold
+                      uppercase
+                      tracking-[0.12em]
+                      text-(--ink-muted)
+                    "
+                  >
+                    Account
+                  </span>
+                </div>
+              )}
 
               {/* -------------------------------------------
                   SETTINGS
@@ -685,9 +638,7 @@ export default function Header({
                   <button
                     type="button"
                     role="menuitem"
-                    onClick={
-                      handleSettingsClick
-                    }
+                    onClick={handleSettingsClick}
                     className="
                       flex
                       w-full
@@ -718,15 +669,10 @@ export default function Header({
                         text-(--ink-muted)
                       "
                     >
-                      <Settings
-                        size={15}
-                        strokeWidth={2}
-                      />
+                      <Settings size={15} strokeWidth={2} />
                     </span>
 
-                    <span>
-                      Account settings
-                    </span>
+                    <span>Account settings</span>
                   </button>
 
                   <div
@@ -776,15 +722,10 @@ export default function Header({
                     text-(--danger)
                   "
                 >
-                  <LogOut
-                    size={15}
-                    strokeWidth={2}
-                  />
+                  <LogOut size={15} strokeWidth={2} />
                 </span>
 
-                <span>
-                  Logout
-                </span>
+                <span>Logout</span>
               </button>
             </div>
           )}
