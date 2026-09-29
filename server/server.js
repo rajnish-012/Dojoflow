@@ -1,10 +1,23 @@
+/* =========================================================
+   ENVIRONMENT — must be first, before any other require
+   so that route files that read process.env at load
+   time receive the correct values.
+========================================================= */
+
+const dotenv = require("dotenv");
+dotenv.config();
+
 const express = require("express");
 const cors = require("cors");
-const dotenv = require("dotenv");
+const helmet = require("helmet");
+const rateLimit = require("express-rate-limit");
 
 const connectDB = require("./src/config/db");
 
-// Routes
+/* =========================================================
+   ROUTES
+========================================================= */
+
 const authRoutes = require("./src/routes/auth.routes");
 const studentRoutes = require("./src/routes/student.routes");
 const planRoutes = require("./src/routes/plan.routes");
@@ -17,48 +30,276 @@ const branchRoutes = require("./src/routes/branch.routes");
 const userRoutes = require("./src/routes/user.routes");
 const inquiryRoutes = require("./src/routes/inquiry.routes");
 const moduleRoutes = require("./src/routes/module.routes");
-const { ensureDefaultModules } = require("./src/config/defaultModules");
 const roleRoutes = require("./src/routes/role.routes");
-const { ensureDefaultRoles } = require("./src/config/defaultRoles");
+const promotionRoutes = require("./src/routes/promotion.routes");
+const reportsRoutes = require("./src/routes/reports.routes");
+const coachAssignmentRoutes = require("./src/routes/coachAssignment.routes");
+const holidayRoutes = require("./src/routes/holiday.routes");
+const academySettingRoutes = require("./src/routes/academySettings.routes");
+const websiteRoutes = require("./src/routes/website.routes");
+const publicWebsiteRoutes = require("./src/routes/publicWebsite.routes");
 
+/*
+ * Branch Schedule
+ *
+ * Handles:
+ * - Branch weekly timings
+ * - Opening / closing time
+ * - Day-wise availability
+ * - Session slots
+ * - Branch-specific schedules
+ */
+const branchScheduleRoutes = require(
+  "./src/routes/branchSchedule.routes",
+);
 
-// Load environment variables
-dotenv.config();
+/* =========================================================
+   CONFIG / SEEDERS
+========================================================= */
+
+const {
+  ensureDefaultModules,
+} = require("./src/config/defaultModules");
+
+const {
+  ensureDefaultRoles,
+} = require("./src/config/defaultRoles");
+
+/* =========================================================
+   APP
+========================================================= */
 
 const app = express();
 
-// Connect to MongoDB
-connectDB()
-  .then(() => ensureDefaultRoles())
-  .then(() => ensureDefaultModules());
+/* =========================================================
+   SECURITY MIDDLEWARE
+========================================================= */
 
-// Middleware
+/*
+ * Helmet sets secure HTTP response headers:
+ * X-Frame-Options, X-Content-Type-Options,
+ * Strict-Transport-Security, Content-Security-Policy, etc.
+ */
+app.use(helmet());
+
+/*
+ * Rate limiter for the login endpoint.
+ * Prevents brute-force password attacks.
+ *
+ * 10 attempts per 15 minutes per IP.
+ *
+ * Skipped in development so local testing is never blocked.
+ * In production this protects against credential stuffing.
+ */
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  /*
+   * Skip rate limiting when running locally.
+   * NODE_ENV must be set to "production" in the deployment
+   * environment for this limiter to take effect.
+   */
+  skip: () => process.env.NODE_ENV !== "production",
+  message: {
+    success: false,
+    message:
+      "Too many login attempts. Please try again in 15 minutes.",
+  },
+});
+
+/*
+ * General API rate limiter.
+ * Prevents DoS / scraping attacks.
+ *
+ * 300 requests per minute per IP.
+ */
+const apiLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    success: false,
+    message: "Too many requests. Please slow down.",
+  },
+});
+
+/* Apply the general limiter to all API routes */
+app.use("/api/", apiLimiter);
+
+/* =========================================================
+   CORS
+========================================================= */
+
 app.use(
   cors({
     origin: process.env.CLIENT_URL,
     credentials: true,
-  })
+  }),
 );
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+/* =========================================================
+   BODY PARSING
+   10kb limit prevents payload-based DoS attacks.
+========================================================= */
 
-// API Routes
-app.use("/api/auth", authRoutes);
+app.use(express.json({ limit: "10kb" }));
+app.use(
+  express.urlencoded({
+    extended: true,
+    limit: "10kb",
+  }),
+);
+
+/* =========================================================
+   API ROUTES
+========================================================= */
+
+/* -------------------------
+   Authentication
+   Login gets a stricter rate limiter.
+------------------------- */
+
+app.use("/api/auth", loginLimiter, authRoutes);
+
+/* -------------------------
+   Students
+------------------------- */
+
 app.use("/api/students", studentRoutes);
+
+/* -------------------------
+   Plans
+------------------------- */
+
 app.use("/api/plans", planRoutes);
+
+/* -------------------------
+   Attendance
+------------------------- */
+
 app.use("/api/attendance", attendanceRoutes);
+
+/* -------------------------
+   Makeup Classes
+------------------------- */
+
 app.use("/api/makeups", makeupRoutes);
+
+/* -------------------------
+   Performance
+------------------------- */
+
 app.use("/api/performance", performanceRoutes);
+
+/* -------------------------
+   Student Progress
+------------------------- */
+
 app.use("/api/progress", progressRoutes);
+
+/* -------------------------
+   Dashboard
+------------------------- */
+
 app.use("/api/dashboard", dashboardRoutes);
+
+/* -------------------------
+   Branches
+------------------------- */
+
 app.use("/api/branches", branchRoutes);
+
+/* -------------------------
+   Users / Staff
+------------------------- */
+
 app.use("/api/users", userRoutes);
+
+/* -------------------------
+   Inquiries
+------------------------- */
+
 app.use("/api/inquiries", inquiryRoutes);
+
+/* -------------------------
+   Modules
+------------------------- */
+
 app.use("/api/modules", moduleRoutes);
+
+/* -------------------------
+   Roles
+------------------------- */
+
 app.use("/api/roles", roleRoutes);
 
-// Health Check
+/* -------------------------
+   Promotions
+------------------------- */
+
+app.use("/api/promotions", promotionRoutes);
+
+/* -------------------------
+   Reports
+------------------------- */
+
+app.use("/api/reports", reportsRoutes);
+
+/* -------------------------
+   Coach Assignments
+------------------------- */
+
+app.use(
+  "/api/coach-assignments",
+  coachAssignmentRoutes,
+);
+
+/* -------------------------
+   Holidays
+------------------------- */
+
+app.use("/api/holidays", holidayRoutes);
+
+/* -------------------------
+   Academy Settings
+------------------------- */
+
+app.use(
+  "/api/settings",
+  academySettingRoutes,
+);
+
+/* -------------------------
+   Website CMS
+------------------------- */
+
+app.use("/api/website", websiteRoutes);
+
+/* -------------------------
+   Public Website
+------------------------- */
+
+app.use(
+  "/api/public/website",
+  publicWebsiteRoutes,
+);
+
+/* =========================================================
+   BRANCH SCHEDULES
+========================================================= */
+
+app.use(
+  "/api/branch-schedules",
+  branchScheduleRoutes,
+);
+
+/* =========================================================
+   HEALTH CHECK
+========================================================= */
+
 app.get("/api/health", (req, res) => {
   res.status(200).json({
     success: true,
@@ -66,7 +307,10 @@ app.get("/api/health", (req, res) => {
   });
 });
 
-// 404 Handler
+/* =========================================================
+   404 HANDLER
+========================================================= */
+
 app.use((req, res) => {
   res.status(404).json({
     success: false,
@@ -74,21 +318,78 @@ app.use((req, res) => {
   });
 });
 
-// Global Error Handler
+/* =========================================================
+   GLOBAL ERROR HANDLER
+   In production, never expose raw error.message to clients.
+   Log internally, return a generic message.
+========================================================= */
+
 app.use((error, req, res, next) => {
   console.error("Server error:", error);
 
+  const isProduction =
+    process.env.NODE_ENV === "production";
+
   res.status(error.status || 500).json({
     success: false,
-    message: error.message || "Internal server error",
+    message: isProduction
+      ? error.status
+        ? error.message
+        : "Internal server error"
+      : error.message || "Internal server error",
   });
 });
 
-// Start Server
+/* =========================================================
+   START SERVER
+========================================================= */
+
 const PORT = process.env.PORT || 5000;
-const URL = process.env.MONGO_URI;
 
+const startServer = async () => {
+  try {
+    /*
+     * Connect to MongoDB first.
+     */
+    await connectDB();
 
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`DojoFlow server running on port ${PORT}`);
-});
+    /*
+     * Make sure default roles exist.
+     */
+    await ensureDefaultRoles();
+
+    /*
+     * Make sure default modules exist.
+     */
+    await ensureDefaultModules();
+
+    /*
+     * Start HTTP server only after
+     * database initialization succeeds.
+     */
+    app.listen(
+      PORT,
+      "0.0.0.0",
+      () => {
+        console.log(
+          `DojoFlow server running on port ${PORT}`,
+        );
+
+        console.log(
+          `Branch Schedule API: /api/branch-schedules`,
+        );
+      },
+    );
+  } catch (error) {
+    console.error(
+      "Failed to start DojoFlow server:",
+      error,
+    );
+
+    process.exit(1);
+  }
+};
+
+startServer();
+
+module.exports = app;

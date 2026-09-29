@@ -49,7 +49,7 @@ type Student = {
   plan?: {
     _id: string;
     name: string;
-  };
+  } | null;
 };
 
 type CurriculumItem = {

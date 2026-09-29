@@ -4,6 +4,7 @@ const {
   getMakeups,
   getMakeupById,
   createMakeup,
+  scheduleMakeup,
   completeMakeup,
   cancelMakeup,
 } = require("../controllers/makeup.controller");
@@ -13,43 +14,95 @@ const authorize = require("../middleware/role.middleware");
 
 const router = express.Router();
 
-// View makeup records
+const STAFF_ROLES = [
+  "SUPER_ADMIN",
+  "BRANCH_ADMIN",
+  "COACH",
+];
+
+/*
+ * ======================================================
+ * GET ALL MAKEUPS
+ * ======================================================
+ *
+ * GET /api/makeups
+ */
 router.get(
   "/",
   protect,
-  authorize("SUPER_ADMIN", "BRANCH_ADMIN", "COACH"),
+  authorize(...STAFF_ROLES),
   getMakeups
 );
 
-// View a specific makeup
-router.get(
-  "/:id",
-  protect,
-  authorize("SUPER_ADMIN", "BRANCH_ADMIN", "COACH"),
-  getMakeupById
-);
-
-// Schedule a makeup
+/*
+ * ======================================================
+ * CREATE / SCHEDULE MAKEUP
+ * ======================================================
+ *
+ * POST /api/makeups
+ */
 router.post(
   "/",
   protect,
-  authorize("SUPER_ADMIN", "BRANCH_ADMIN", "COACH"),
+  authorize(...STAFF_ROLES),
   createMakeup
 );
 
-// Mark makeup as completed
+/*
+ * ======================================================
+ * GET MAKEUP BY ID
+ * ======================================================
+ *
+ * IMPORTANT:
+ * This route must remain after "/" routes and before
+ * no conflicting dynamic routes.
+ */
+router.get(
+  "/:id",
+  protect,
+  authorize(...STAFF_ROLES),
+  getMakeupById
+);
+
+/*
+ * ======================================================
+ * SCHEDULE AUTOMATICALLY CREATED MAKEUP
+ * ======================================================
+ *
+ * PUT /api/makeups/:id/schedule
+ */
+router.put(
+  "/:id/schedule",
+  protect,
+  authorize(...STAFF_ROLES),
+  scheduleMakeup
+);
+
+/*
+ * ======================================================
+ * COMPLETE MAKEUP
+ * ======================================================
+ *
+ * PUT /api/makeups/:id/complete
+ */
 router.put(
   "/:id/complete",
   protect,
-  authorize("SUPER_ADMIN", "BRANCH_ADMIN", "COACH"),
+  authorize(...STAFF_ROLES),
   completeMakeup
 );
 
-// Cancel a scheduled makeup
+/*
+ * ======================================================
+ * CANCEL MAKEUP
+ * ======================================================
+ *
+ * PUT /api/makeups/:id/cancel
+ */
 router.put(
   "/:id/cancel",
   protect,
-  authorize("SUPER_ADMIN", "BRANCH_ADMIN", "COACH"),
+  authorize(...STAFF_ROLES),
   cancelMakeup
 );
 

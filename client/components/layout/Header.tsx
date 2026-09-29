@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+
 import {
   Bell,
   ChevronDown,
@@ -10,90 +11,235 @@ import {
   Settings,
   Sun,
 } from "lucide-react";
+
 import { useRouter } from "next/navigation";
 
 import { useTheme } from "@/components/theme/ThemeProvider";
-import { useCurrentUser } from "@/lib/current-user";
+
+import {
+  useAcademyBrand,
+} from "@/components/settings/AcademyBrandProvider";
+
+import {
+  useCurrentUser,
+} from "@/lib/current-user";
+
+import { getBranches } from "@/lib/api";
 
 type HeaderProps = {
   onMenuClick?: () => void;
   onProfileClick?: () => void;
 };
 
-export default function Header({ onMenuClick, onProfileClick }: HeaderProps) {
+export default function Header({
+  onMenuClick,
+  onProfileClick,
+}: HeaderProps) {
   const router = useRouter();
 
-  const { theme, toggleTheme } = useTheme();
+  const {
+    theme,
+    toggleTheme,
+  } = useTheme();
 
-  // Real data of the logged-in user (refreshed from the server).
-  const user = useCurrentUser({ refresh: true });
-  const [showProfileMenu, setShowProfileMenu] = useState(false);
+  const {
+    settings: academySettings,
+  } = useAcademyBrand();
 
-  const profileRef = useRef<HTMLDivElement>(null);
+  // Real data of the logged-in user.
+  const user =
+    useCurrentUser({
+      refresh: true,
+    });
+
+  const [
+    showProfileMenu,
+    setShowProfileMenu,
+  ] = useState(false);
+
+  const [
+    branchName,
+    setBranchName,
+  ] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!user?.branch) {
+      setBranchName(
+        "All Branches",
+      );
+      return;
+    }
+
+    const branchValue =
+      user.branch as unknown as
+        | string
+        | {
+            _id?: string;
+            name?: string;
+          }
+        | null
+        | undefined;
+
+    if (
+      branchValue &&
+      typeof branchValue ===
+        "object" &&
+      branchValue.name
+    ) {
+      setBranchName(
+        branchValue.name,
+      );
+      return;
+    }
+
+    const branchId =
+      typeof branchValue ===
+      "string"
+        ? branchValue
+        : branchValue?._id;
+
+    if (!branchId) {
+      setBranchName(
+        "All Branches",
+      );
+      return;
+    }
+
+    getBranches()
+      .then((result) => {
+        if (cancelled) {
+          return;
+        }
+
+        const branches =
+          Array.isArray(
+            result?.branches,
+          )
+            ? result.branches
+            : [];
+
+        const branch =
+          branches.find(
+            (item: {
+              _id?: string;
+            }) =>
+              item._id ===
+              branchId,
+          );
+
+        setBranchName(
+          branch?.name ||
+            "Assigned Branch",
+        );
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setBranchName(
+            "Assigned Branch",
+          );
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.branch]);
+
+  const profileRef =
+    useRef<HTMLDivElement>(
+      null,
+    );
 
   /* =====================================================
      CLOSE PROFILE MENU WHEN CLICKING OUTSIDE
-     ===================================================== */
+  ===================================================== */
 
   useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
+    const handleClickOutside = (
+      event: MouseEvent,
+    ) => {
       if (
         profileRef.current &&
-        !profileRef.current.contains(event.target as Node)
+        !profileRef.current.contains(
+          event.target as Node,
+        )
       ) {
         setShowProfileMenu(false);
       }
     };
 
     if (showProfileMenu) {
-      document.addEventListener("mousedown", handleClickOutside);
+      document.addEventListener(
+        "mousedown",
+        handleClickOutside,
+      );
     }
 
     return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener(
+        "mousedown",
+        handleClickOutside,
+      );
     };
   }, [showProfileMenu]);
 
   /* =====================================================
      CLOSE PROFILE MENU WITH ESCAPE
-     ===================================================== */
+  ===================================================== */
 
   useEffect(() => {
-    const handleEscape = (event: KeyboardEvent) => {
+    const handleEscape = (
+      event: KeyboardEvent,
+    ) => {
       if (event.key === "Escape") {
         setShowProfileMenu(false);
       }
     };
 
     if (showProfileMenu) {
-      document.addEventListener("keydown", handleEscape);
+      document.addEventListener(
+        "keydown",
+        handleEscape,
+      );
     }
 
     return () => {
-      document.removeEventListener("keydown", handleEscape);
+      document.removeEventListener(
+        "keydown",
+        handleEscape,
+      );
     };
   }, [showProfileMenu]);
 
   /* =====================================================
      USER HELPERS
-     ===================================================== */
+  ===================================================== */
 
   const getInitials = () => {
-    const name = user?.name?.trim();
+    const name =
+      user?.name?.trim();
 
     if (!name) {
       return "";
     }
 
-    const parts = name.split(/\s+/);
+    const parts =
+      name.split(/\s+/);
 
     if (parts.length === 1) {
-      return parts[0].slice(0, 2).toUpperCase();
+      return parts[0]
+        .slice(0, 2)
+        .toUpperCase();
     }
 
     return parts
       .slice(0, 2)
-      .map((part) => part.charAt(0))
+      .map(
+        (part) =>
+          part.charAt(0),
+      )
       .join("")
       .toUpperCase();
   };
@@ -106,20 +252,39 @@ export default function Header({ onMenuClick, onProfileClick }: HeaderProps) {
     return String(user.role)
       .replaceAll("_", " ")
       .toLowerCase()
-      .replace(/\b\w/g, (letter) => letter.toUpperCase());
+      .replace(
+        /\b\w/g,
+        (letter) =>
+          letter.toUpperCase(),
+      );
   };
 
-  const isSuperAdmin = String(user?.role || "").toLowerCase() === "super_admin";
+  const isSuperAdmin =
+    String(
+      user?.role || "",
+    ).toLowerCase() ===
+    "super_admin";
 
   /* =====================================================
      LOGOUT
-     ===================================================== */
+  ===================================================== */
 
   const handleLogout = () => {
-    localStorage.removeItem("token");
-    localStorage.removeItem("user");
-    localStorage.removeItem("dojoUser");
-    localStorage.removeItem("currentUser");
+    localStorage.removeItem(
+      "token",
+    );
+
+    localStorage.removeItem(
+      "user",
+    );
+
+    localStorage.removeItem(
+      "dojoUser",
+    );
+
+    localStorage.removeItem(
+      "currentUser",
+    );
 
     setShowProfileMenu(false);
 
@@ -128,22 +293,27 @@ export default function Header({ onMenuClick, onProfileClick }: HeaderProps) {
 
   /* =====================================================
      SETTINGS
-     ===================================================== */
+  ===================================================== */
 
-  const handleSettingsClick = () => {
-    setShowProfileMenu(false);
-    router.push("/settings");
-  };
+  const handleSettingsClick =
+    () => {
+      setShowProfileMenu(false);
+      router.push("/settings");
+    };
 
   /* =====================================================
      PROFILE TOGGLE
-     ===================================================== */
+  ===================================================== */
 
-  const handleProfileToggle = () => {
-    setShowProfileMenu((previous) => !previous);
+  const handleProfileToggle =
+    () => {
+      setShowProfileMenu(
+        (previous) =>
+          !previous,
+      );
 
-    onProfileClick?.();
-  };
+      onProfileClick?.();
+    };
 
   return (
     <header
@@ -166,12 +336,12 @@ export default function Header({ onMenuClick, onProfileClick }: HeaderProps) {
     >
       {/* =================================================
           LEFT SECTION
-          ================================================= */}
+      ================================================= */}
 
       <div className="flex min-w-0 items-center gap-3">
         {/* -----------------------------------------------
             MOBILE MENU
-            ----------------------------------------------- */}
+        ----------------------------------------------- */}
 
         <button
           type="button"
@@ -200,25 +370,77 @@ export default function Header({ onMenuClick, onProfileClick }: HeaderProps) {
             md:hidden
           "
         >
-          <Menu size={19} strokeWidth={2} />
+          <Menu
+            size={19}
+            strokeWidth={2}
+          />
         </button>
 
         {/* -----------------------------------------------
             DESKTOP WORKSPACE TITLE
-            ----------------------------------------------- */}
+        ----------------------------------------------- */}
 
         <div className="hidden min-w-0 sm:block">
-          <p
-            className="
-              text-[10px]
-              font-bold
-              uppercase
-              tracking-[0.18em]
-              text-(--accent)
-            "
-          >
-            DojoFlow Workspace
-          </p>
+          <div className="flex min-w-0 items-center gap-2">
+            <div
+              className="
+                flex
+                h-8
+                w-8
+                shrink-0
+                items-center
+                justify-center
+                overflow-hidden
+                rounded-lg
+                border
+                border-(--line)
+                bg-(--card)
+              "
+            >
+              {academySettings.logoUrl ? (
+                <img
+                  src={
+                    academySettings.logoUrl
+                  }
+                  alt={
+                    academySettings.academyName
+                  }
+                  className="
+                    h-full
+                    w-full
+                    object-contain
+                    p-1
+                  "
+                />
+              ) : (
+                <span
+                  className="
+                    text-xs
+                    font-black
+                    text-(--accent)
+                  "
+                >
+                  {academySettings.academyName
+                    ?.charAt(0)
+                    ?.toUpperCase() ||
+                    "D"}
+                </span>
+              )}
+            </div>
+
+            <p
+              className="
+                truncate
+                text-[10px]
+                font-bold
+                uppercase
+                tracking-[0.18em]
+                text-(--accent)
+              "
+            >
+              {academySettings.academyName}
+            </p>
+          </div>
 
           <p
             className="
@@ -229,57 +451,111 @@ export default function Header({ onMenuClick, onProfileClick }: HeaderProps) {
               text-(--foreground)
             "
           >
-            Manage your academy with clarity
+            {academySettings.tagline ||
+              "Manage your academy with clarity"}
           </p>
         </div>
 
         {/* -----------------------------------------------
             MOBILE BRAND
-            ----------------------------------------------- */}
+        ----------------------------------------------- */}
 
-        <div className="sm:hidden">
-          <p
+        <div className="flex min-w-0 items-center gap-2 sm:hidden">
+          <div
             className="
-              text-[17px]
-              font-extrabold
-              tracking-tight
-              text-(--foreground)
+              flex
+              h-9
+              w-9
+              shrink-0
+              items-center
+              justify-center
+              overflow-hidden
+              rounded-lg
+              border
+              border-(--line)
+              bg-(--card)
             "
           >
-            Dojo
-            <span className="text-(--accent)">Flow</span>
-          </p>
+            {academySettings.logoUrl ? (
+              <img
+                src={
+                  academySettings.logoUrl
+                }
+                alt={
+                  academySettings.academyName
+                }
+                className="
+                  h-full
+                  w-full
+                  object-contain
+                  p-1
+                "
+              />
+            ) : (
+              <span
+                className="
+                  text-sm
+                  font-black
+                  text-(--accent)
+                "
+              >
+                {academySettings.academyName
+                  ?.charAt(0)
+                  ?.toUpperCase() ||
+                  "D"}
+              </span>
+            )}
+          </div>
 
-          <p
-            className="
-              mt-0.5
-              text-[10px]
-              font-medium
-              text-(--ink-muted)
-            "
-          >
-            Academy workspace
-          </p>
+          <div className="min-w-0">
+            <p
+              className="
+                truncate
+                text-[15px]
+                font-extrabold
+                tracking-tight
+                text-(--foreground)
+              "
+            >
+              {academySettings.academyName}
+            </p>
+
+            <p
+              className="
+                mt-0.5
+                truncate
+                text-[10px]
+                font-medium
+                text-(--ink-muted)
+              "
+            >
+              Academy workspace
+            </p>
+          </div>
         </div>
       </div>
 
       {/* =================================================
           RIGHT SECTION
-          ================================================= */}
+      ================================================= */}
 
       <div className="flex items-center gap-2 sm:gap-3">
         {/* -----------------------------------------------
             THEME TOGGLE
-            ----------------------------------------------- */}
+        ----------------------------------------------- */}
 
         <button
           type="button"
           onClick={toggleTheme}
           aria-label={
-            theme === "light" ? "Switch to dark mode" : "Switch to light mode"
+            theme === "light"
+              ? "Switch to dark mode"
+              : "Switch to light mode"
           }
           title={
-            theme === "light" ? "Switch to dark mode" : "Switch to light mode"
+            theme === "light"
+              ? "Switch to dark mode"
+              : "Switch to light mode"
           }
           className="
             group
@@ -328,7 +604,7 @@ export default function Header({ onMenuClick, onProfileClick }: HeaderProps) {
 
         {/* -----------------------------------------------
             NOTIFICATIONS
-            ----------------------------------------------- */}
+        ----------------------------------------------- */}
 
         <button
           type="button"
@@ -367,7 +643,6 @@ export default function Header({ onMenuClick, onProfileClick }: HeaderProps) {
             "
           />
 
-          {/* Notification dot */}
           <span
             aria-hidden="true"
             className="
@@ -386,13 +661,20 @@ export default function Header({ onMenuClick, onProfileClick }: HeaderProps) {
 
         {/* -----------------------------------------------
             PROFILE
-            ----------------------------------------------- */}
+        ----------------------------------------------- */}
 
-        <div ref={profileRef} className="relative">
+        <div
+          ref={profileRef}
+          className="relative"
+        >
           <button
             type="button"
-            onClick={handleProfileToggle}
-            aria-expanded={showProfileMenu}
+            onClick={
+              handleProfileToggle
+            }
+            aria-expanded={
+              showProfileMenu
+            }
             aria-haspopup="menu"
             className="
               group
@@ -473,6 +755,20 @@ export default function Header({ onMenuClick, onProfileClick }: HeaderProps) {
                   >
                     {getRoleLabel()}
                   </p>
+
+                  {branchName && (
+                    <p
+                      className="
+                        mt-0.5
+                        truncate
+                        text-[9px]
+                        font-semibold
+                        text-(--accent)
+                      "
+                    >
+                      {branchName}
+                    </p>
+                  )}
                 </>
               ) : (
                 <>
@@ -490,14 +786,16 @@ export default function Header({ onMenuClick, onProfileClick }: HeaderProps) {
               strokeWidth={2}
               className={[
                 "hidden text-(--ink-muted) transition-transform duration-200 sm:block",
-                showProfileMenu ? "rotate-180" : "",
+                showProfileMenu
+                  ? "rotate-180"
+                  : "",
               ].join(" ")}
             />
           </button>
 
           {/* =================================================
               PROFILE MENU
-              ================================================= */}
+          ================================================= */}
 
           {showProfileMenu && (
             <div
@@ -522,7 +820,7 @@ export default function Header({ onMenuClick, onProfileClick }: HeaderProps) {
             >
               {/* -------------------------------------------
                   USER INFORMATION
-                  ------------------------------------------- */}
+              ------------------------------------------- */}
 
               <div
                 className="
@@ -583,21 +881,35 @@ export default function Header({ onMenuClick, onProfileClick }: HeaderProps) {
                     {getRoleLabel() && (
                       <span
                         className="
-                        mt-1.5
-                        inline-flex
-                        rounded-full
-                        bg-(--accent-soft)
-                        px-2
-                        py-0.5
-                        text-[9px]
-                        font-bold
-                        uppercase
-                        tracking-wide
-                        text-(--accent)
-                      "
+                          mt-1.5
+                          inline-flex
+                          rounded-full
+                          bg-(--accent-soft)
+                          px-2
+                          py-0.5
+                          text-[9px]
+                          font-bold
+                          uppercase
+                          tracking-wide
+                          text-(--accent)
+                        "
                       >
                         {getRoleLabel()}
                       </span>
+                    )}
+
+                    {branchName && (
+                      <p
+                        className="
+                          mt-1.5
+                          truncate
+                          text-[9px]
+                          font-semibold
+                          text-(--accent)
+                        "
+                      >
+                        {branchName}
+                      </p>
                     )}
                   </div>
                 </div>
@@ -605,7 +917,7 @@ export default function Header({ onMenuClick, onProfileClick }: HeaderProps) {
 
               {/* -------------------------------------------
                   ROLE
-                  ------------------------------------------- */}
+              ------------------------------------------- */}
 
               {isSuperAdmin && (
                 <div
@@ -631,14 +943,16 @@ export default function Header({ onMenuClick, onProfileClick }: HeaderProps) {
 
               {/* -------------------------------------------
                   SETTINGS
-                  ------------------------------------------- */}
+              ------------------------------------------- */}
 
               {isSuperAdmin && (
                 <>
                   <button
                     type="button"
                     role="menuitem"
-                    onClick={handleSettingsClick}
+                    onClick={
+                      handleSettingsClick
+                    }
                     className="
                       flex
                       w-full
@@ -669,10 +983,15 @@ export default function Header({ onMenuClick, onProfileClick }: HeaderProps) {
                         text-(--ink-muted)
                       "
                     >
-                      <Settings size={15} strokeWidth={2} />
+                      <Settings
+                        size={15}
+                        strokeWidth={2}
+                      />
                     </span>
 
-                    <span>Account settings</span>
+                    <span>
+                      Account settings
+                    </span>
                   </button>
 
                   <div
@@ -687,12 +1006,14 @@ export default function Header({ onMenuClick, onProfileClick }: HeaderProps) {
 
               {/* -------------------------------------------
                   LOGOUT
-                  ------------------------------------------- */}
+              ------------------------------------------- */}
 
               <button
                 type="button"
                 role="menuitem"
-                onClick={handleLogout}
+                onClick={
+                  handleLogout
+                }
                 className="
                   flex
                   w-full
@@ -722,7 +1043,10 @@ export default function Header({ onMenuClick, onProfileClick }: HeaderProps) {
                     text-(--danger)
                   "
                 >
-                  <LogOut size={15} strokeWidth={2} />
+                  <LogOut
+                    size={15}
+                    strokeWidth={2}
+                  />
                 </span>
 
                 <span>Logout</span>

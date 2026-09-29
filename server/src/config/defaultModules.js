@@ -2,8 +2,22 @@ const Module = require("../models/Module");
 
 const ALL_STAFF = ["SUPER_ADMIN", "BRANCH_ADMIN", "COACH"];
 
-// The modules the sidebar used to have hard-coded.
+/**
+ * Default modules available in the ForceStrike application.
+ *
+ * These modules are used to build the dynamic sidebar/navigation.
+ *
+ * Role meanings:
+ * - SUPER_ADMIN  -> Full academy/system access
+ * - BRANCH_ADMIN -> Branch-level management
+ * - COACH        -> Training/attendance/performance access
+ * - STUDENT      -> Student-facing dashboard
+ */
 const DEFAULT_MODULES = [
+  // =========================================================
+  // CORE
+  // =========================================================
+
   {
     key: "dashboard",
     label: "Dashboard",
@@ -13,6 +27,7 @@ const DEFAULT_MODULES = [
     allowedRoles: ALL_STAFF,
     isSystem: true,
   },
+
   {
     key: "students",
     label: "Students",
@@ -21,6 +36,16 @@ const DEFAULT_MODULES = [
     order: 20,
     allowedRoles: ALL_STAFF,
   },
+
+  {
+    key: "coach-assignments",
+    label: "Coach Assignments",
+    href: "/coach-assignments",
+    icon: "Users",
+    order: 25,
+    allowedRoles: ["SUPER_ADMIN", "BRANCH_ADMIN"],
+  },
+
   {
     key: "plans",
     label: "Plans",
@@ -29,6 +54,7 @@ const DEFAULT_MODULES = [
     order: 30,
     allowedRoles: ["SUPER_ADMIN", "BRANCH_ADMIN"],
   },
+
   {
     key: "curriculum",
     label: "Curriculum",
@@ -37,6 +63,11 @@ const DEFAULT_MODULES = [
     order: 40,
     allowedRoles: ALL_STAFF,
   },
+
+  // =========================================================
+  // ATTENDANCE / TRAINING
+  // =========================================================
+
   {
     key: "attendance",
     label: "Attendance",
@@ -45,6 +76,16 @@ const DEFAULT_MODULES = [
     order: 50,
     allowedRoles: ALL_STAFF,
   },
+
+  {
+    key: "holidays",
+    label: "Holidays",
+    href: "/holidays",
+    icon: "CalendarOff",
+    order: 55,
+    allowedRoles: ["SUPER_ADMIN", "BRANCH_ADMIN", "COACH"],
+  },
+
   {
     key: "performance",
     label: "Performance",
@@ -53,6 +94,7 @@ const DEFAULT_MODULES = [
     order: 60,
     allowedRoles: ALL_STAFF,
   },
+
   {
     key: "makeups",
     label: "Makeups",
@@ -61,6 +103,11 @@ const DEFAULT_MODULES = [
     order: 70,
     allowedRoles: ALL_STAFF,
   },
+
+  // =========================================================
+  // ENQUIRIES
+  // =========================================================
+
   {
     key: "inquiries",
     label: "Inquiries",
@@ -69,14 +116,51 @@ const DEFAULT_MODULES = [
     order: 80,
     allowedRoles: ALL_STAFF,
   },
+
+  // =========================================================
+  // BRANCH MANAGEMENT
+  // =========================================================
+
   {
     key: "branches",
     label: "Branches",
     href: "/branches",
-    icon: "Trophy",
+    icon: "Building2",
     order: 90,
     allowedRoles: ["SUPER_ADMIN"],
   },
+
+  /**
+   * Branch Schedule Management
+   *
+   * Allows administrators to manage the normal weekly
+   * training availability for every branch.
+   *
+   * Examples:
+   * - Monday 06:00 AM - 07:00 AM
+   * - Monday 07:00 AM - 08:00 AM
+   * - Tuesday 05:00 PM - 06:00 PM
+   *
+   * SUPER_ADMIN:
+   * - Can manage schedules for all branches.
+   *
+   * BRANCH_ADMIN:
+   * - Can manage schedules for assigned branch(es),
+   *   according to backend authorization rules.
+   */
+  {
+    key: "branch-schedules",
+    label: "Branch Schedules",
+    href: "/branch-schedules",
+    icon: "CalendarClock",
+    order: 95,
+    allowedRoles: ["SUPER_ADMIN", "BRANCH_ADMIN"],
+  },
+
+  // =========================================================
+  // SYSTEM / ADMINISTRATION
+  // =========================================================
+
   {
     key: "settings",
     label: "Settings",
@@ -86,15 +170,7 @@ const DEFAULT_MODULES = [
     allowedRoles: ["SUPER_ADMIN"],
     isSystem: true,
   },
-  {
-    key: "modules",
-    label: "Modules",
-    href: "/modules",
-    icon: "LayoutGrid",
-    order: 110,
-    allowedRoles: ["SUPER_ADMIN"],
-    isSystem: true,
-  },
+
   {
     key: "roles",
     label: "Roles",
@@ -104,6 +180,21 @@ const DEFAULT_MODULES = [
     allowedRoles: ["SUPER_ADMIN"],
     isSystem: true,
   },
+
+  {
+    key: "modules",
+    label: "Modules",
+    href: "/modules",
+    icon: "LayoutGrid",
+    order: 110,
+    allowedRoles: ["SUPER_ADMIN"],
+    isSystem: true,
+  },
+
+  // =========================================================
+  // STUDENT
+  // =========================================================
+
   {
     key: "student-dashboard",
     label: "My Dashboard",
@@ -116,37 +207,73 @@ const DEFAULT_MODULES = [
 ];
 
 /**
- * Runs once when the server starts.
+ * Modules that must always exist.
  *
- * - Empty collection  -> insert every default module.
- * - Otherwise         -> only make sure the "modules" management
- *                        module exists, so the Super Admin can never
- *                        be locked out of the page that fixes things.
+ * These modules are required for administration and
+ * recovery of the application's module configuration.
+ */
+const REQUIRED_MODULE_KEYS = [
+  "modules",
+  "roles",
+  "coach-assignments",
+  "holidays",
+  "branch-schedules",
+];
+
+/**
+ * Seed / repair default modules.
+ *
+ * Behaviour:
+ *
+ * 1. Empty collection
+ *    -> Insert all default modules.
+ *
+ * 2. Existing collection
+ *    -> Do not overwrite existing module configuration.
+ *    -> Only insert missing required modules.
+ *
+ * This is important because administrators may customize
+ * modules from the Modules management page.
  */
 const ensureDefaultModules = async () => {
   try {
     const count = await Module.countDocuments();
 
+    // ---------------------------------------------------------
+    // First installation
+    // ---------------------------------------------------------
+
     if (count === 0) {
       await Module.insertMany(DEFAULT_MODULES);
+
       console.log(
-        `Seeded ${DEFAULT_MODULES.length} default modules`
+        `Seeded ${DEFAULT_MODULES.length} default ForceStrike modules`,
       );
+
       return;
     }
 
-    // Pages the Super Admin must never lose access to.
-    const mustExist = DEFAULT_MODULES.filter((item) =>
-      ["modules", "roles"].includes(item.key)
+    // ---------------------------------------------------------
+    // Existing installation
+    // ---------------------------------------------------------
+
+    const requiredModules = DEFAULT_MODULES.filter((module) =>
+      REQUIRED_MODULE_KEYS.includes(module.key),
     );
 
-    for (const item of mustExist) {
+    for (const module of requiredModules) {
       await Module.updateOne(
-        { key: item.key },
-        { $setOnInsert: item },
-        { upsert: true }
+        { key: module.key },
+        {
+          $setOnInsert: module,
+        },
+        {
+          upsert: true,
+        },
       );
     }
+
+    console.log("Default ForceStrike modules verified");
   } catch (error) {
     console.error("Default module seeding failed:", error);
   }
@@ -154,5 +281,6 @@ const ensureDefaultModules = async () => {
 
 module.exports = {
   DEFAULT_MODULES,
+  REQUIRED_MODULE_KEYS,
   ensureDefaultModules,
 };

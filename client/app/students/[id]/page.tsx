@@ -14,6 +14,7 @@ import {
   ArrowUpRight,
   Award,
   CalendarCheck,
+  CalendarRange,
   CheckCircle2,
   ChevronRight,
   Clock3,
@@ -1140,6 +1141,16 @@ export default function StudentDetailsPage() {
                   View Progress
                 </Button>
 
+                <Button
+                  variant="outline"
+                  onClick={() =>
+                    router.push(`/students/${studentId}/timeline`)
+                  }
+                >
+                  <CalendarRange size={17} />
+                  Training Timeline
+                </Button>
+
                 {canEditStudent && (
                   <Button variant="outline" onClick={openEditModal}>
                     <Pencil size={16} />
@@ -1187,6 +1198,75 @@ export default function StudentDetailsPage() {
             icon={<Clock3 size={20} />}
           />
         </div>
+
+        {/* Training Timeline */}
+        <Card padding="lg">
+          <div
+            className="
+              flex flex-col gap-5
+              lg:flex-row lg:items-center
+              lg:justify-between
+            "
+          >
+            <div className="flex min-w-0 items-center gap-4">
+              <div
+                className="
+                  flex h-12 w-12 shrink-0
+                  items-center justify-center
+                  rounded-xl
+                  bg-(--accent-soft)
+                  text-(--accent)
+                "
+              >
+                <CalendarRange size={22} />
+              </div>
+
+              <div className="min-w-0">
+                <p
+                  className="
+                    text-[10px] font-black
+                    uppercase tracking-[0.16em]
+                    text-(--accent)
+                  "
+                >
+                  Training Journey
+                </p>
+
+                <h2
+                  className="
+                    mt-1 text-lg font-extrabold
+                    tracking-tight
+                    text-(--foreground)
+                  "
+                >
+                  Student Training Timeline
+                </h2>
+
+                <p
+                  className="
+                    mt-1 max-w-2xl
+                    text-sm leading-6
+                    text-(--ink-muted)
+                  "
+                >
+                  View every curriculum day, attendance result,
+                  completed makeup and upcoming belt milestone
+                  from the student's joining date.
+                </p>
+              </div>
+            </div>
+
+            <Button
+              variant="outline"
+              onClick={() =>
+                router.push(`/students/${studentId}/timeline`)
+              }
+            >
+              Open Timeline
+              <ArrowUpRight size={16} />
+            </Button>
+          </div>
+        </Card>
 
         {/* Profile / Plan / Progress */}
         <div

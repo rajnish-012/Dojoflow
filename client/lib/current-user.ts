@@ -1,4 +1,10 @@
-import { useEffect, useMemo, useSyncExternalStore } from "react";
+"use client";
+
+import {
+  useEffect,
+  useMemo,
+  useSyncExternalStore,
+} from "react";
 
 import { getCurrentUser } from "@/lib/api";
 
@@ -8,26 +14,119 @@ export type CurrentUser = {
   email?: string;
   role?: string;
   branch?: string | null;
+  permissions?: string[];
 };
 
-const USER_KEYS = ["user", "dojoUser", "currentUser"];
-const USER_UPDATED_EVENT = "dojoflow:user-updated";
+/** Return the default landing page for a signed-in account role. */
+export function getRoleDashboardPath(role?: string | null) {
+  return String(role || "").toUpperCase() === "STUDENT"
+    ? "/student-dashboard"
+    : "/dashboard";
+}
 
-function subscribe(callback: () => void) {
-  window.addEventListener("storage", callback);
-  window.addEventListener(USER_UPDATED_EVENT, callback);
+export const USER_KEYS = [
+  "user",
+  "dojoUser",
+  "currentUser",
+] as const;
+
+export const USER_UPDATED_EVENT =
+  "forcstrike:user-updated";
+
+export const AUTH_CHANGED_EVENT =
+  "forcstrike:auth-changed";
+
+/**
+ * Clear all client-side authentication state.
+ */
+export function clearAuthSession() {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  USER_KEYS.forEach((key) => {
+    localStorage.removeItem(key);
+  });
+
+  localStorage.removeItem("token");
+
+  sessionStorage.removeItem(
+    "dojoflow.allowed-pages",
+  );
+
+  window.dispatchEvent(
+    new Event(USER_UPDATED_EVENT),
+  );
+
+  window.dispatchEvent(
+    new Event(AUTH_CHANGED_EVENT),
+  );
+}
+
+/**
+ * Store the authenticated user.
+ */
+export function setCurrentUser(
+  user: CurrentUser,
+) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  localStorage.setItem(
+    "user",
+    JSON.stringify(user),
+  );
+
+  window.dispatchEvent(
+    new Event(USER_UPDATED_EVENT),
+  );
+}
+
+function subscribe(
+  callback: () => void,
+) {
+  const handleStorage = () =>
+    callback();
+
+  const handleUserUpdated = () =>
+    callback();
+
+  window.addEventListener(
+    "storage",
+    handleStorage,
+  );
+
+  window.addEventListener(
+    USER_UPDATED_EVENT,
+    handleUserUpdated,
+  );
 
   return () => {
-    window.removeEventListener("storage", callback);
-    window.removeEventListener(USER_UPDATED_EVENT, callback);
+    window.removeEventListener(
+      "storage",
+      handleStorage,
+    );
+
+    window.removeEventListener(
+      USER_UPDATED_EVENT,
+      handleUserUpdated,
+    );
   };
 }
 
 function getSnapshot(): string | null {
-  for (const key of USER_KEYS) {
-    const value = localStorage.getItem(key);
+  if (typeof window === "undefined") {
+    return null;
+  }
 
-    if (value) return value;
+  for (const key of USER_KEYS) {
+    const value =
+      localStorage.getItem(key);
+
+    if (value) {
+      return value;
+    }
   }
 
   return null;
@@ -38,50 +137,48 @@ function getServerSnapshot(): string | null {
 }
 
 /**
- * The logged-in user. Returns null until the data is available.
+ * Returns the locally available authenticated user.
  *
- * It shows what was saved at login straight away. With
- * { refresh: true } it also asks the server for the current name,
- * email and role, so a change made by the Super Admin shows up
- * without logging in again.
+ * With refresh: true, /auth/me is also called.
  */
 export function useCurrentUser(
-  options: { refresh?: boolean } = {},
+  options: {
+    refresh?: boolean;
+  } = {},
 ): CurrentUser | null {
-  const { refresh = false } = options;
+  const {
+    refresh = false,
+  } = options;
 
-  const raw = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+  const raw =
+    useSyncExternalStore(
+      subscribe,
+      getSnapshot,
+      getServerSnapshot,
+    );
 
   useEffect(() => {
-    if (!refresh) return;
+    if (!refresh) {
+      return;
+    }
 
     let cancelled = false;
 
     getCurrentUser()
       .then((fresh) => {
-        if (cancelled) return;
-
-        const key =
-          USER_KEYS.find((item) => localStorage.getItem(item)) || "user";
-
-        let stored: CurrentUser = {};
-
-        try {
-          stored = JSON.parse(localStorage.getItem(key) || "{}");
-        } catch {
-          stored = {};
+        if (cancelled) {
+          return;
         }
 
-        const merged = { ...stored, ...fresh };
-
-        // Only write (and notify) when something really changed.
-        if (JSON.stringify(merged) !== JSON.stringify(stored)) {
-          localStorage.setItem(key, JSON.stringify(merged));
-          window.dispatchEvent(new Event(USER_UPDATED_EVENT));
-        }
+        setCurrentUser(fresh);
       })
       .catch(() => {
-        // Keep showing the saved user if the server cannot be reached.
+        /*
+         * Do not immediately destroy cached UI state
+         * for ordinary network failures.
+         *
+         * 401 is handled by getCurrentUser().
+         */
       });
 
     return () => {
@@ -90,14 +187,22 @@ export function useCurrentUser(
   }, [refresh]);
 
   return useMemo(() => {
-    if (!raw) return null;
+    if (!raw) {
+      return null;
+    }
 
     try {
-      const parsed = JSON.parse(raw);
+      const parsed =
+        JSON.parse(raw);
 
-      return parsed && typeof parsed === "object"
-        ? (parsed as CurrentUser)
-        : null;
+      if (
+        parsed &&
+        typeof parsed === "object"
+      ) {
+        return parsed as CurrentUser;
+      }
+
+      return null;
     } catch {
       return null;
     }

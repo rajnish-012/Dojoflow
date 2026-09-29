@@ -4,8 +4,7 @@ const Plan = require("../models/Plan");
 // Get all plans
 const getPlans = async (req, res) => {
   try {
-    const plans = await Plan.find()
-      .sort({ createdAt: -1 });
+    const plans = await Plan.find().sort({ createdAt: -1 });
 
     res.status(200).json({
       success: true,
@@ -178,7 +177,7 @@ const getPublicPlans = async (req, res) => {
       isActive: true,
     })
       .select(
-        "name price duration durationUnit classesPerWeek startingBelt progressReports milestones curriculum"
+        "name price duration durationUnit classesPerWeek startingBelt progressReports milestones curriculum",
       )
       .sort({ createdAt: -1 });
 
@@ -218,11 +217,15 @@ const deletePlan = async (req, res) => {
       });
     }
 
-    await Plan.findByIdAndDelete(id);
+    // Plans are referenced by student, attendance and progress history.
+    // Deactivate instead of removing the referenced document.
+    plan.isActive = false;
+    await plan.save();
 
     res.status(200).json({
       success: true,
-      message: "Plan deleted successfully",
+      message: "Plan deactivated successfully",
+      plan,
     });
   } catch (error) {
     console.error("Delete plan error:", error);

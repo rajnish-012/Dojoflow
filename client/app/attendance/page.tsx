@@ -1,1182 +1,786 @@
 "use client";
 
-import {
-  ChangeEvent,
-  FormEvent,
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
-import {
-  AlertCircle,
-  CalendarDays,
-  CheckCircle2,
-  ClipboardCheck,
-  Clock3,
-  Plus,
-  RefreshCw,
-  Users,
-  X,
-  XCircle,
-} from "lucide-react";
+import { CalendarDays, RefreshCw } from "lucide-react";
 
-import {
-  Badge,
-  Button,
-  Card,
-  EmptyState,
-  ErrorState,
-  Input,
-  LoadingSpinner,
-  Modal,
-  PageHeader,
-  Select,
-  SummaryCard,
-} from "@/components/ui";
+import { Button, Card, ErrorState, PageHeader } from "@/components/ui";
 
-import { getStudentAttendance } from "@/lib/api";
+import AttendanceStats from "@/components/attendance/AttendanceStats";
+import AttendanceSheet from "@/components/attendance/AttendanceSheet";
+import AttendanceModal from "@/components/attendance/AttendanceModal";
 
-const API_URL =
-  process.env.NEXT_PUBLIC_API_URL ||
-  "http://localhost:5000/api";
+import type { DailyAttendanceRow } from "@/components/attendance/AttendanceRow";
 
-type Student = {
-  _id: string;
-  name: string;
-  phone?: string;
-  email?: string;
-  currentBelt?: string;
-  registrationDate?: string;
-  branch?: {
-    _id: string;
-    name: string;
-  } | null;
-  plan?: {
-    _id: string;
-    name: string;
-  } | null;
-};
+import { getAttendanceDailySheet, markAttendance } from "@/lib/attendanceApi";
 
-type AttendanceRecord = {
-  _id: string;
-  student:
-    | {
-        _id: string;
-        name: string;
-      }
-    | string;
-  date: string;
-  planDay: number;
-  curriculumTitle?: string;
-  status: "PRESENT" | "ABSENT";
-  makeupRequired: boolean;
-  makeupCompleted: boolean;
-};
+/* ==========================================
+   LOCAL DATE HELPERS
+========================================== */
 
-type AttendanceForm = {
-  student: string;
-  curriculumTitle: string;
-  status: "PRESENT" | "ABSENT";
-  makeupRequired: boolean;
-};
+function getLocalDate(daysFromToday = 0) {
+  const date = new Date();
 
-function formatDate(date?: string) {
-  if (!date) return "—";
+  date.setDate(date.getDate() + daysFromToday);
 
-  const parsed = new Date(date);
+  const year = date.getFullYear();
 
-  if (Number.isNaN(parsed.getTime())) {
-    return "—";
-  }
+  const month = String(date.getMonth() + 1).padStart(2, "0");
 
-  return parsed.toLocaleDateString("en-IN", {
+  const day = String(date.getDate()).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+}
+
+function formatDate(value: string) {
+  return new Date(`${value}T00:00:00`).toLocaleDateString("en-IN", {
+    weekday: "long",
     day: "2-digit",
-    month: "short",
+    month: "long",
     year: "numeric",
   });
 }
 
-function getStudentName(
-  student: AttendanceRecord["student"],
-) {
-  if (
-    typeof student === "object" &&
-    student !== null
-  ) {
-    return student.name || "Unknown Student";
+/*
+ * Convert YYYY-MM-DD to a local
+ * calendar date.
+ *
+ * This avoids the JavaScript UTC
+ * date conversion issue.
+ */
+
+function parseLocalDate(value: string | Date | undefined) {
+  if (!value) {
+    return null;
   }
 
-  return "Unknown Student";
+  if (value instanceof Date) {
+    const date = new Date(value);
+
+    return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  }
+
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    const [year, month, day] = value.split("-").map(Number);
+
+    return new Date(year, month - 1, day);
+  }
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
 }
 
-function getInitials(name: string) {
-  return (
-    name
-      .split(" ")
-      .filter(Boolean)
-      .map((part) => part[0])
-      .join("")
-      .slice(0, 2)
-      .toUpperCase() || "ST"
-  );
+function formatLocalDateKey(value: string | Date | undefined) {
+  const date = parseLocalDate(value);
+
+  if (!date) {
+    return "";
+  }
+
+  const year = date.getFullYear();
+
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+
+  const day = String(date.getDate()).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
 }
+
+/* ==========================================
+   FRONTEND TRAINING DAY DISPLAY
+========================================== */
+
+/*
+ * The joining date is always
+ * Day 1.
+ *
+ * The backend remains the final
+ * source of truth.
+ */
+
+function getDisplayPlanDay(row: DailyAttendanceRow, selectedDate: string) {
+  const joinDate = row.student?.joinDate;
+
+  if (!joinDate) {
+    return Number(row.planDay || 1);
+  }
+
+  const joinDateKey = formatLocalDateKey(joinDate);
+
+  if (joinDateKey === selectedDate) {
+    return 1;
+  }
+
+  return Number(row.planDay || 1);
+}
+
+/* ==========================================
+   PAGE
+========================================== */
 
 export default function AttendancePage() {
-  const [students, setStudents] = useState<Student[]>(
-    [],
-  );
-  const [attendance, setAttendance] = useState<
-    AttendanceRecord[]
-  >([]);
+  /*
+   * Attendance rules:
+   *
+   * Previous dates → allowed
+   * Today          → allowed
+   * Tomorrow       → not allowed
+   * Future dates   → not allowed
+   */
+
+  const today = useMemo(() => getLocalDate(0), []);
+
+  const [selectedDate, setSelectedDate] = useState(today);
+
+  const [rows, setRows] = useState<DailyAttendanceRow[]>([]);
 
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
 
   const [error, setError] = useState("");
-  const [formError, setFormError] = useState("");
-  const [success, setSuccess] = useState("");
 
-  const [selectedDate, setSelectedDate] = useState(
-    new Date().toLocaleDateString("en-CA"),
+  const [selectedRow, setSelectedRow] = useState<DailyAttendanceRow | null>(
+    null,
   );
 
-  const [showForm, setShowForm] = useState(false);
+  const [selectedStatus, setSelectedStatus] = useState<
+    "PRESENT" | "ABSENT" | null
+  >(null);
 
-  const [form, setForm] = useState<AttendanceForm>({
-    student: "",
-    curriculumTitle: "",
-    status: "PRESENT",
-    makeupRequired: false,
-  });
+  const [savingStudentId, setSavingStudentId] = useState<string | null>(null);
 
-  const [studentTrainingDay, setStudentTrainingDay] =
-    useState<number | null>(null);
-  const [loadingTrainingDay, setLoadingTrainingDay] =
-    useState(false);
+  const [formError, setFormError] = useState("");
 
-  useEffect(() => {
-    void loadData();
-  }, [selectedDate]);
+  /* ==========================================
+     LOAD ATTENDANCE SHEET
+  ========================================== */
 
-  // The next training day for a student is whatever comes
-  // after their highest already-marked planDay — not a
-  // function of the calendar date being viewed. Fetch their
-  // real history whenever the selected student changes.
-  useEffect(() => {
-    if (!form.student) {
-      setStudentTrainingDay(null);
-      setLoadingTrainingDay(false);
-      return;
-    }
-
-    let cancelled = false;
-
-    async function loadNextTrainingDay(studentId: string) {
-      try {
-        setLoadingTrainingDay(true);
-
-        const data = await getStudentAttendance(studentId);
-
-        const history: AttendanceRecord[] = Array.isArray(
-          data?.attendance,
-        )
-          ? data.attendance
-          : [];
-
-        const highestMarkedDay = history.reduce(
-          (max, record) =>
-            Math.max(max, Number(record.planDay) || 0),
-          0,
-        );
-
-        if (!cancelled) {
-          setStudentTrainingDay(highestMarkedDay + 1);
-        }
-      } catch (trainingDayError) {
-        console.error(
-          "Failed to load student's attendance history:",
-          trainingDayError,
-        );
-
-        if (!cancelled) {
-          setStudentTrainingDay(null);
-        }
-      } finally {
-        if (!cancelled) {
-          setLoadingTrainingDay(false);
-        }
-      }
-    }
-
-    void loadNextTrainingDay(form.student);
-
-    return () => {
-      cancelled = true;
-    };
-  }, [form.student]);
-
-  async function loadData(
-    showRefreshLoader = false,
-  ) {
+  const loadSheet = useCallback(async () => {
     try {
-      if (showRefreshLoader) {
-        setRefreshing(true);
-      } else {
-        setLoading(true);
-      }
-
+      setLoading(true);
       setError("");
 
-      const token = localStorage.getItem("token");
+      const data = await getAttendanceDailySheet(selectedDate);
 
-      if (!token) {
-        window.location.href = "/login";
-        return;
-      }
+      setRows(data.rows || []);
+    } catch (err) {
+      console.error("Attendance daily sheet error:", err);
 
-      const [studentResponse, attendanceResponse] =
-        await Promise.all([
-          fetch(`${API_URL}/students`, {
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-          }),
-          fetch(
-            `${API_URL}/attendance?date=${encodeURIComponent(
-              selectedDate,
-            )}`,
-            {
-              headers: {
-                Authorization: `Bearer ${token}`,
-              },
-            },
-          ),
-        ]);
-
-      if (
-        studentResponse.status === 401 ||
-        attendanceResponse.status === 401
-      ) {
-        localStorage.removeItem("token");
-        window.location.href = "/login";
-        return;
-      }
-
-      if (!studentResponse.ok) {
-        throw new Error(
-          `Failed to load students: ${studentResponse.status}`,
-        );
-      }
-
-      if (!attendanceResponse.ok) {
-        throw new Error(
-          `Failed to load attendance: ${attendanceResponse.status}`,
-        );
-      }
-
-      const studentsData =
-        await studentResponse.json();
-      const attendanceData =
-        await attendanceResponse.json();
-
-      setStudents(
-        Array.isArray(studentsData?.students)
-          ? studentsData.students
-          : Array.isArray(studentsData?.data)
-            ? studentsData.data
-            : [],
-      );
-
-      setAttendance(
-        Array.isArray(attendanceData?.attendance)
-          ? attendanceData.attendance
-          : Array.isArray(attendanceData?.records)
-            ? attendanceData.records
-            : Array.isArray(attendanceData?.data)
-              ? attendanceData.data
-              : [],
-      );
-    } catch (loadError) {
-      console.error(
-        "Attendance loading error:",
-        loadError,
-      );
+      setRows([]);
 
       setError(
-        loadError instanceof Error
-          ? loadError.message
-          : "Unable to load attendance data.",
+        err instanceof Error ? err.message : "Failed to load attendance sheet.",
       );
     } finally {
       setLoading(false);
-      setRefreshing(false);
     }
+  }, [selectedDate]);
+
+  useEffect(() => {
+    loadSheet();
+  }, [loadSheet]);
+
+  /* ==========================================
+     ATTENDANCE STATS
+  ========================================== */
+
+  const stats = useMemo(() => {
+    const total = rows.length;
+
+    const present = rows.filter(
+      (row) => row.attendance?.status === "PRESENT",
+    ).length;
+
+    const absent = rows.filter(
+      (row) => row.attendance?.status === "ABSENT",
+    ).length;
+
+    const pendingMakeups = rows.filter(
+      (row) =>
+        row.attendance?.makeupRequired && !row.attendance.makeupCompleted,
+    ).length;
+
+    return {
+      total,
+      present,
+      absent,
+      pendingMakeups,
+    };
+  }, [rows]);
+
+  /* ==========================================
+     DATE CHANGE
+  ========================================== */
+
+  function handleDateChange(value: string) {
+    if (value > today) {
+      setError("Attendance can only be marked for today or previous dates.");
+
+      return;
+    }
+
+    setError("");
+    setSelectedDate(value);
   }
 
-  function handleDateChange(
-    event: ChangeEvent<HTMLInputElement>,
+  /* ==========================================
+     OPEN MARK MODAL
+  ========================================== */
+
+  function openMarkModal(
+    row: DailyAttendanceRow,
+    status: "PRESENT" | "ABSENT",
   ) {
-    setSelectedDate(event.target.value);
-  }
+    /*
+     * Already marked:
+     * no changes from this sheet.
+     */
 
-  function handleFormChange(
-    event:
-      | ChangeEvent<HTMLSelectElement>
-      | ChangeEvent<HTMLInputElement>,
-  ) {
-    const { name, value, type } = event.target;
-
-    if (type === "checkbox") {
-      setForm((previous) => ({
-        ...previous,
-        [name]: (
-          event.target as HTMLInputElement
-        ).checked,
-      }));
+    if (row.attendance) {
       return;
     }
 
-    setForm((previous) => ({
-      ...previous,
-      [name]: value,
-    }));
-  }
+    /*
+     * Holiday:
+     * absolutely no attendance.
+     */
 
-  async function handleSubmit(
-    event: FormEvent<HTMLFormElement>,
-  ) {
-    event.preventDefault();
-
-    setFormError("");
-    setSuccess("");
-
-    if (!form.student) {
-      setFormError("Please select a student.");
-      return;
-    }
-
-    if (!form.curriculumTitle.trim()) {
+    if (row.holiday) {
       setFormError(
-        "Please enter the curriculum for this training day.",
+        `Attendance cannot be marked because this date is a holiday: ${
+          row.holiday.name || "Holiday"
+        }.`,
       );
+
       return;
     }
 
-    if (loadingTrainingDay) {
-      setFormError(
-        "Still checking this student's training history — please wait a moment.",
-      );
-      return;
-    }
-
-    if (!studentTrainingDay) {
-      setFormError(
-        "Training day could not be determined for this student.",
-      );
-      return;
-    }
+    /*
+     * Branch schedule:
+     *
+     * If the exact calendar date
+     * is closed, do not even open
+     * the attendance modal.
+     *
+     * This prevents the user from
+     * reaching the backend error:
+     *
+     * "Monday is closed for this branch..."
+     */
 
     if (
-      form.status === "ABSENT" &&
-      !form.makeupRequired
+      row.branchSchedule?.configured === true &&
+      row.branchSchedule.isOpen === false
     ) {
-      const confirmed = window.confirm(
-        "This student is absent. Do you want to continue without scheduling a makeup class?",
+      setFormError(
+        `${
+          row.branchSchedule.dayName || "This day"
+        } is closed for this branch. No training session is scheduled.`,
       );
 
-      if (!confirmed) return;
+      return;
     }
+
+    setSelectedRow(row);
+    setSelectedStatus(status);
+    setFormError("");
+  }
+
+  /* ==========================================
+     CLOSE MODAL
+  ========================================== */
+
+  function closeMarkModal() {
+    if (savingStudentId) {
+      return;
+    }
+
+    setSelectedRow(null);
+    setSelectedStatus(null);
+    setFormError("");
+  }
+
+  /* ==========================================
+     CONFIRM ATTENDANCE
+  ========================================== */
+
+  async function confirmAttendance() {
+    if (!selectedRow || !selectedStatus) {
+      return;
+    }
+
+    /*
+     * Future protection.
+     */
+
+    if (selectedDate > today) {
+      setFormError(
+        "Future attendance cannot be marked. Please select today or a previous date.",
+      );
+
+      return;
+    }
+
+    /*
+     * Holiday protection.
+     */
+
+    if (selectedRow.holiday) {
+      setFormError(
+        `Attendance cannot be marked because this date is a holiday: ${
+          selectedRow.holiday.name || "Holiday"
+        }.`,
+      );
+
+      return;
+    }
+
+    /*
+     * Branch schedule protection.
+     *
+     * The backend remains the final
+     * authority, but the frontend
+     * prevents an unnecessary request.
+     */
+
+    if (
+      selectedRow.branchSchedule?.configured === true &&
+      selectedRow.branchSchedule.isOpen === false
+    ) {
+      setFormError(
+        `${
+          selectedRow.branchSchedule.dayName || "This day"
+        } is closed for this branch. No training session is scheduled.`,
+      );
+
+      return;
+    }
+
+    const studentId = selectedRow.student._id;
+
+    /*
+     * Always send the attendance date
+     * as a strict YYYY-MM-DD calendar key.
+     *
+     * This prevents accidental values such as:
+     *
+     * 2026-09-29T00:00:00.000Z
+     * Tue Sep 29 2026
+     * 29/09/2026
+     *
+     * from reaching the API.
+     */
+    const attendanceDate = formatLocalDateKey(selectedDate);
+
+    if (!attendanceDate) {
+      setFormError(
+        "Unable to determine the attendance date. Please select the date again.",
+      );
+
+      return;
+    }
+
+    /*
+     * Compatibility value only.
+     *
+     * Backend calculates the
+     * authoritative training day.
+     */
+    const displayPlanDay = getDisplayPlanDay(selectedRow, attendanceDate);
 
     try {
-      setSaving(true);
+      setSavingStudentId(studentId);
 
-      const token = localStorage.getItem("token");
+      setFormError("");
 
-      if (!token) {
-        window.location.href = "/login";
-        return;
-      }
+      await markAttendance({
+        student: studentId,
 
-      const response = await fetch(
-        `${API_URL}/attendance`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            student: form.student,
-            date: selectedDate,
-            planDay: studentTrainingDay,
-            curriculumTitle:
-              form.curriculumTitle,
-            status: form.status,
-            makeupRequired:
-              form.status === "ABSENT"
-                ? form.makeupRequired
-                : false,
-          }),
-        },
-      );
+        date: attendanceDate,
 
-      const data = await response.json();
+        planDay: displayPlanDay,
 
-      if (response.status === 401) {
-        localStorage.removeItem("token");
-        window.location.href = "/login";
-        return;
-      }
+        curriculumTitle: selectedRow.curriculum?.title || "",
 
-      if (!response.ok) {
-        throw new Error(
-          data?.message ||
-            "Failed to mark attendance.",
-        );
-      }
+        status: selectedStatus,
 
-      setSuccess(
-        data?.message ||
-          "Attendance marked successfully.",
-      );
-
-      setForm({
-        student: "",
-        curriculumTitle: "",
-        status: "PRESENT",
-        makeupRequired: false,
+        makeupRequired: selectedStatus === "ABSENT",
       });
 
-      setShowForm(false);
-      await loadData();
-    } catch (submitError) {
-      console.error(
-        "Attendance submit error:",
-        submitError,
-      );
+      closeMarkModal();
+
+      await loadSheet();
+    } catch (err) {
+      console.error("Mark attendance error:", err);
+
+      /*
+       * The backend may still reject
+       * the request if the schedule was
+       * changed after this page loaded.
+       *
+       * Show that response inside the
+       * modal rather than crashing the
+       * page.
+       */
+
+      if (err && typeof err === "object" && "data" in err) {
+        const apiError = err as {
+          data?: {
+            branchSchedule?: {
+              configured?: boolean;
+              isOpen?: boolean;
+              dayName?: string | null;
+            };
+            holiday?: {
+              name?: string;
+            } | null;
+          };
+          message?: string;
+        };
+
+        if (
+          apiError.data?.branchSchedule?.configured === true &&
+          apiError.data?.branchSchedule?.isOpen === false
+        ) {
+          setFormError(
+            `${
+              apiError.data.branchSchedule.dayName || "This day"
+            } is closed for this branch. No training session is scheduled.`,
+          );
+
+          return;
+        }
+
+        if (apiError.data?.holiday) {
+          setFormError(
+            `Attendance cannot be marked because this date is a holiday: ${
+              apiError.data.holiday.name || "Holiday"
+            }.`,
+          );
+
+          return;
+        }
+      }
 
       setFormError(
-        submitError instanceof Error
-          ? submitError.message
-          : "Failed to mark attendance.",
+        err instanceof Error ? err.message : "Failed to mark attendance.",
       );
     } finally {
-      setSaving(false);
+      setSavingStudentId(null);
     }
   }
 
-  const presentCount = useMemo(
-    () =>
-      attendance.filter(
-        (record) => record.status === "PRESENT",
-      ).length,
-    [attendance],
-  );
+  /* ==========================================
+     PREPARE DISPLAY ROWS
+  ========================================== */
 
-  const absentCount = useMemo(
-    () =>
-      attendance.filter(
-        (record) => record.status === "ABSENT",
-      ).length,
-    [attendance],
-  );
+  const displayRows = useMemo(() => {
+    return rows.map((row) => ({
+      ...row,
 
-  const pendingMakeupCount = useMemo(
-    () =>
-      attendance.filter(
-        (record) =>
-          record.status === "ABSENT" &&
-          record.makeupRequired &&
-          !record.makeupCompleted,
-      ).length,
-    [attendance],
-  );
+      /*
+       * Joining date must always
+       * display as Day 1.
+       */
 
-  const attendancePercentage =
-    attendance.length > 0
-      ? Math.round(
-          (presentCount / attendance.length) * 100,
-        )
-      : 0;
+      planDay: getDisplayPlanDay(row, selectedDate),
+    }));
+  }, [rows, selectedDate]);
 
-  const selectedStudent = students.find(
-    (student) => student._id === form.student,
-  );
+  /*
+   * Determine whether the selected
+   * date contains at least one
+   * closed branch row.
+   *
+   * This is mainly useful for the
+   * date-level notice.
+   */
 
-  const markedStudentIds = useMemo(
-    () =>
-      new Set(
-        attendance.map((record) =>
-          typeof record.student === "object" &&
-          record.student !== null
-            ? record.student._id
-            : record.student,
-        ),
-      ),
-    [attendance],
-  );
+  const closedBranches = useMemo(() => {
+    const branches = new Map<string, string>();
 
-  const availableStudents = useMemo(
-    () =>
-      students.filter((student) => {
-        if (markedStudentIds.has(student._id)) {
-          return false;
-        }
+    for (const row of rows) {
+      if (
+        row.holiday ||
+        !row.branchSchedule?.configured ||
+        row.branchSchedule.isOpen
+      ) {
+        continue;
+      }
 
-        if (!student.registrationDate) {
-          return true;
-        }
+      const branchId =
+        row.student.branch?._id || row.student.branch?.name || row.student._id;
 
-        const registration = new Date(
-          `${student.registrationDate.slice(0, 10)}T00:00:00`,
-        );
-        const attendanceDate = new Date(
-          `${selectedDate}T00:00:00`,
-        );
+      const branchName = row.student.branch?.name || "Branch";
 
-        if (
-          Number.isNaN(registration.getTime()) ||
-          Number.isNaN(attendanceDate.getTime())
-        ) {
-          return true;
-        }
+      if (branchId && !branches.has(branchId)) {
+        branches.set(branchId, branchName);
+      }
+    }
 
-        return registration <= attendanceDate;
-      }),
-    [students, markedStudentIds, selectedDate],
-  );
+    return Array.from(branches.values());
+  }, [rows]);
 
-  if (loading) {
-    return (
-      <div className="df-page">
-        <Card className="min-h-[420px]">
-          <LoadingSpinner
-            size="lg"
-            text="Loading attendance..."
-            fullPage
-          />
-        </Card>
-      </div>
-    );
-  }
+  /* ==========================================
+     RENDER
+  ========================================== */
 
   return (
-    <div className="df-page">
-      <PageHeader
-        eyebrow="Academy Management"
-        title="Attendance"
-        description="Track daily student attendance, training days, and missed-class makeups."
-        actions={
-          <Button
-            variant="primary"
-            size="lg"
-            onClick={() => {
-              setFormError("");
-              setShowForm(true);
-            }}
-          >
-            <Plus size={17} />
-            Mark Attendance
-          </Button>
-        }
-      />
-
-      {error && (
-        <div className="mb-5">
-          <ErrorState
-            title="Attendance data could not be loaded"
-            message={error}
-            action={
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() =>
-                  void loadData(true)
-                }
-              >
-                <RefreshCw size={15} />
-                Try Again
-              </Button>
-            }
-          />
-        </div>
-      )}
-
-      {success && (
-        <div className="mb-5 flex items-center justify-between gap-4 rounded-2xl border border-(--green)/25 bg-(--green-soft) px-4 py-3.5">
-          <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-(--green-soft) text-(--green)">
-              <CheckCircle2 size={18} />
-            </div>
-            <p className="text-sm font-semibold text-(--green)">
-              {success}
-            </p>
-          </div>
-
-          <button
-            type="button"
-            onClick={() => setSuccess("")}
-            className="rounded-lg p-1.5 text-(--green) transition hover:bg-(--green)/10"
-            aria-label="Dismiss success message"
-          >
-            <X size={16} />
-          </button>
-        </div>
-      )}
-
-      <Card padding="md">
-        <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex min-w-0 items-center gap-4">
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-(--accent-soft) text-(--accent)">
-              <CalendarDays size={22} />
-            </div>
-
-            <div>
-              <h2 className="text-base font-extrabold text-(--foreground)">
-                Attendance Date
-              </h2>
-              <p className="mt-1 text-sm text-(--ink-muted)">
-                Select a date to view or manage
-                attendance.
-              </p>
-            </div>
-          </div>
-
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-            <label
-              htmlFor="attendance-date"
-              className="text-xs font-bold uppercase tracking-wide text-(--ink-muted)"
-            >
-              Selected date
-            </label>
-
-            <Input
-              id="attendance-date"
-              type="date"
-              value={selectedDate}
-              onChange={handleDateChange}
-              className="h-11 sm:w-48"
-            />
-
+    <main>
+      <div className="df-page">
+        <PageHeader
+          eyebrow="Training operations"
+          title="Attendance"
+          description="Manage daily attendance, training days and curriculum progress for your academy."
+          actions={
             <Button
+              type="button"
               variant="outline"
-              size="md"
-              onClick={() =>
-                void loadData(true)
-              }
-              disabled={refreshing}
-              aria-label="Refresh attendance"
+              onClick={loadSheet}
+              disabled={loading}
             >
-              <RefreshCw
-                size={16}
-                className={
-                  refreshing
-                    ? "animate-spin"
-                    : ""
-                }
-              />
-              <span className="hidden sm:inline">
-                Refresh
-              </span>
+              <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
+              Refresh
             </Button>
+          }
+        />
+
+        {/* ==================================
+            ERROR
+        ================================== */}
+
+        {error && (
+          <div>
+            <ErrorState
+              title="Attendance notice"
+              message={error}
+              action={
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setError("");
+                    loadSheet();
+                  }}
+                >
+                  Try again
+                </Button>
+              }
+            />
           </div>
-        </div>
-      </Card>
+        )}
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <SummaryCard
-          title="Total Marked"
-          value={attendance.length}
-          subtitle="Records for selected date"
-          icon={<Users size={19} />}
-        />
+        {/* ==================================
+            DATE SELECTOR
+        ================================== */}
 
-        <SummaryCard
-          title="Present"
-          value={presentCount}
-          subtitle="Students present today"
-          icon={<CheckCircle2 size={19} />}
-        />
+        <Card padding="md">
+          <div
+            className="
+              flex flex-col gap-5
+              xl:flex-row
+              xl:items-center
+              xl:justify-between
+            "
+          >
+            {/* LEFT */}
 
-        <SummaryCard
-          title="Absent"
-          value={absentCount}
-          subtitle="Students absent today"
-          icon={<XCircle size={19} />}
-        />
+            <div className="min-w-0">
+              <div className="mb-2 flex items-center gap-2">
+                <div
+                  className="
+                    flex h-8 w-8
+                    items-center justify-center
+                    rounded-lg
+                    bg-(--accent-soft)
+                    text-(--accent)
+                  "
+                >
+                  <CalendarDays size={16} />
+                </div>
 
-        <SummaryCard
-          title="Pending Makeups"
-          value={pendingMakeupCount}
-          subtitle="Absences needing attention"
-          icon={<Clock3 size={19} />}
-        />
-      </div>
-
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
-        <Card padding="none" className="overflow-hidden">
-          <div className="border-b border-(--line) px-5 py-5 sm:px-6">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <p className="text-[10px] font-extrabold uppercase tracking-[0.18em] text-(--accent)">
-                  Daily records
-                </p>
-                <h2 className="mt-1 text-xl font-extrabold tracking-tight text-(--foreground)">
-                  Attendance Records
-                </h2>
-                <p className="mt-1 text-sm text-(--ink-muted)">
-                  {formatDate(selectedDate)}
+                <p
+                  className="
+                    text-sm font-extrabold
+                    text-(--foreground)
+                  "
+                >
+                  Attendance Date
                 </p>
               </div>
 
-              <Badge variant="default">
-                {attendance.length}{" "}
-                {attendance.length === 1
-                  ? "Record"
-                  : "Records"}
-              </Badge>
-            </div>
-          </div>
-
-          {attendance.length === 0 ? (
-            <EmptyState
-              title="No attendance records"
-              description="There are no attendance records for the selected date. Mark attendance to create the first record."
-              icon={<CalendarDays size={24} />}
-              className="py-20"
-            />
-          ) : (
-            <AttendanceTable
-              attendance={attendance}
-            />
-          )}
-        </Card>
-
-        <Card>
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-(--accent-soft) text-(--accent)">
-              <ClipboardCheck size={18} />
-            </div>
-
-            <div>
-              <h2 className="text-base font-extrabold text-(--foreground)">
-                Daily Overview
-              </h2>
-              <p className="mt-1 text-xs text-(--ink-muted)">
-                Selected date summary
-              </p>
-            </div>
-          </div>
-
-          <div className="mt-7 flex justify-center">
-            <AttendanceRing
-              percentage={attendancePercentage}
-            />
-          </div>
-
-          <div className="mt-7 space-y-3">
-            <OverviewRow
-              label="Present"
-              value={presentCount}
-              dotClass="bg-(--green)"
-            />
-            <OverviewRow
-              label="Absent"
-              value={absentCount}
-              dotClass="bg-(--red)"
-            />
-            <OverviewRow
-              label="Pending Makeups"
-              value={pendingMakeupCount}
-              dotClass="bg-(--orange)"
-            />
-            <div className="border-t border-(--line) pt-3">
-              <OverviewRow
-                label="Total Marked"
-                value={attendance.length}
-                dotClass="bg-(--accent)"
-              />
-            </div>
-          </div>
-        </Card>
-      </div>
-
-      <Modal
-        open={showForm}
-        onClose={() => {
-          if (!saving) {
-            setShowForm(false);
-            setFormError("");
-          }
-        }}
-        title="Mark Attendance"
-        description={`Create an attendance record for ${formatDate(
-          selectedDate,
-        )}.`}
-        size="md"
-        footer={
-          <div className="flex justify-end gap-2">
-            <Button
-              variant="outline"
-              onClick={() => {
-                setShowForm(false);
-                setFormError("");
-              }}
-              disabled={saving}
-            >
-              Cancel
-            </Button>
-
-            <Button
-              variant="primary"
-              type="submit"
-              form="attendance-form"
-              loading={saving}
-              disabled={loadingTrainingDay}
-            >
-              Save Attendance
-            </Button>
-          </div>
-        }
-      >
-        <form
-          id="attendance-form"
-          onSubmit={handleSubmit}
-          className="space-y-5"
-        >
-          {formError && (
-            <div className="flex items-start gap-3 rounded-xl border border-(--red)/25 bg-(--red-soft) p-3.5">
-              <AlertCircle
-                size={17}
-                className="mt-0.5 shrink-0 text-(--red)"
-              />
-              <p className="text-sm font-semibold text-(--red)">
-                {formError}
-              </p>
-            </div>
-          )}
-
-          <div>
-            <label
-              htmlFor="student"
-              className="mb-2 block text-xs font-bold uppercase tracking-wide text-(--foreground-soft)"
-            >
-              Student
-            </label>
-
-            <Select
-              id="student"
-              name="student"
-              value={form.student}
-              onChange={handleFormChange}
-              disabled={availableStudents.length === 0}
-            >
-              <option value="">
-                {availableStudents.length === 0
-                  ? "No eligible students for this date"
-                  : "Select student"}
-              </option>
-
-              {availableStudents.map(
-                (student) => (
-                  <option
-                    key={student._id}
-                    value={student._id}
-                  >
-                    {student.name}
-                    {student.plan?.name
-                      ? ` • ${student.plan.name}`
-                      : ""}
-                  </option>
-                ),
-              )}
-            </Select>
-          </div>
-
-          {selectedStudent && (
-            <StudentContext
-              student={selectedStudent}
-              trainingDay={studentTrainingDay}
-              loading={loadingTrainingDay}
-            />
-          )}
-
-          <div>
-            <label
-              htmlFor="curriculumTitle"
-              className="mb-2 block text-xs font-bold uppercase tracking-wide text-(--foreground-soft)"
-            >
-              Curriculum
-              <span className="ml-1 text-(--danger)">
-                *
-              </span>
-            </label>
-
-            <Input
-              id="curriculumTitle"
-              name="curriculumTitle"
-              value={form.curriculumTitle}
-              onChange={handleFormChange}
-              placeholder="e.g. Warm-up + Basic Stance"
-              required
-            />
-          </div>
-
-          <div>
-            <label
-              htmlFor="status"
-              className="mb-2 block text-xs font-bold uppercase tracking-wide text-(--foreground-soft)"
-            >
-              Attendance Status
-            </label>
-
-            <Select
-              id="status"
-              name="status"
-              value={form.status}
-              onChange={handleFormChange}
-            >
-              <option value="PRESENT">
-                Present
-              </option>
-              <option value="ABSENT">
-                Absent
-              </option>
-            </Select>
-          </div>
-
-          {form.status === "ABSENT" && (
-            <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-(--orange)/25 bg-(--orange-soft) p-4">
-              <input
-                type="checkbox"
-                name="makeupRequired"
-                checked={form.makeupRequired}
-                onChange={handleFormChange}
-                className="mt-0.5 h-4 w-4 rounded border-(--line-strong) accent-(--orange)"
-              />
-
-              <span>
-                <span className="block text-sm font-bold text-(--foreground)">
-                  Require makeup class
-                </span>
-                <span className="mt-1 block text-xs leading-5 text-(--ink-muted)">
-                  Schedule this missed class for
-                  makeup training.
-                </span>
-              </span>
-            </label>
-          )}
-        </form>
-      </Modal>
-    </div>
-  );
-}
-
-function AttendanceTable({
-  attendance,
-}: {
-  attendance: AttendanceRecord[];
-}) {
-  return (
-    <div className="overflow-x-auto">
-      <table className="w-full min-w-[760px]">
-        <thead>
-          <tr className="border-b border-(--line) bg-(--surface)">
-            <TableHead>Student</TableHead>
-            <TableHead>Training Day</TableHead>
-            <TableHead>Curriculum</TableHead>
-            <TableHead>Status</TableHead>
-            <TableHead>Makeup</TableHead>
-          </tr>
-        </thead>
-
-        <tbody>
-          {attendance.map((record) => {
-            const studentName =
-              getStudentName(record.student);
-            const isPresent =
-              record.status === "PRESENT";
-
-            return (
-              <tr
-                key={record._id}
-                className="border-b border-(--line) last:border-b-0 transition-colors hover:bg-(--hover-bg)"
+              <p
+                className="
+                  text-sm font-bold
+                  text-(--foreground-soft)
+                "
               >
-                <td className="px-4 py-4">
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-(--accent-soft) text-xs font-extrabold text-(--accent)">
-                      {getInitials(
-                        studentName,
-                      )}
-                    </div>
+                {formatDate(selectedDate)}
+              </p>
 
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-bold text-(--foreground)">
-                        {studentName}
-                      </p>
-                      <p className="mt-0.5 text-xs text-(--ink-muted)">
-                        {formatDate(record.date)}
-                      </p>
-                    </div>
-                  </div>
-                </td>
+              <p
+                className="
+                  mt-1 text-xs
+                  text-(--ink-muted)
+                "
+              >
+                You can mark attendance for today or any previous date.
+              </p>
+            </div>
 
-                <td className="px-4 py-4 text-sm font-semibold text-(--foreground-soft)">
-                  Day {record.planDay ?? "—"}
-                </td>
+            {/* DATE INPUT */}
 
-                <td className="max-w-[230px] px-4 py-4">
-                  <span className="block truncate text-sm text-(--ink-muted)">
-                    {record.curriculumTitle ||
-                      "No curriculum recorded"}
-                  </span>
-                </td>
+            <label className="relative block w-full xl:w-auto">
+              <span className="sr-only">Select attendance date</span>
 
-                <td className="px-4 py-4">
-                  {isPresent ? (
-                    <Badge variant="success">
-                      <CheckCircle2 size={13} />
-                      Present
-                    </Badge>
-                  ) : (
-                    <Badge variant="danger">
-                      <XCircle size={13} />
-                      Absent
-                    </Badge>
-                  )}
-                </td>
+              <CalendarDays
+                size={17}
+                className="
+                  pointer-events-none
+                  absolute
+                  left-3.5
+                  top-1/2
+                  -translate-y-1/2
+                  text-(--ink-faint)
+                "
+              />
 
-                <td className="px-4 py-4">
-                  {!record.makeupRequired ? (
-                    <span className="text-sm text-(--ink-faint)">
-                      —
+              <input
+                type="date"
+                value={selectedDate}
+                max={today}
+                onChange={(event) => handleDateChange(event.target.value)}
+                className="
+                  df-input
+                  h-11
+                  w-full
+                  pl-10
+                  xl:w-auto
+                "
+              />
+            </label>
+          </div>
+        </Card>
+
+        {/* ==================================
+            DATE-LEVEL SCHEDULE NOTICE
+        ================================== */}
+
+        {!loading && closedBranches.length > 0 && (
+          <div
+            className="
+                mt-5
+                rounded-2xl
+                border
+                border-(--line)
+                bg-(--surface)
+                px-5 py-4
+              "
+          >
+            <div className="flex items-start gap-3">
+              <div
+                className="
+                    flex h-9 w-9
+                    shrink-0
+                    items-center
+                    justify-center
+                    rounded-xl
+                    bg-(--accent-soft)
+                    text-(--accent)
+                  "
+              >
+                <CalendarDays size={17} />
+              </div>
+
+              <div className="min-w-0">
+                <p
+                  className="
+                      text-sm font-extrabold
+                      text-(--foreground)
+                    "
+                >
+                  Training availability
+                </p>
+
+                <p
+                  className="
+                      mt-1 text-xs leading-5
+                      text-(--ink-muted)
+                    "
+                >
+                  Some branches are closed on {formatDate(selectedDate)}.
+                  Attendance cannot be marked for those branches.
+                </p>
+
+                <div
+                  className="
+                      mt-3 flex flex-wrap
+                      gap-2
+                    "
+                >
+                  {closedBranches.map((branchName) => (
+                    <span
+                      key={branchName}
+                      className="
+                            inline-flex
+                            items-center
+                            rounded-full
+                            border
+                            border-(--line)
+                            bg-(--card)
+                            px-3 py-1.5
+                            text-[11px]
+                            font-bold
+                            text-(--ink-muted)
+                          "
+                    >
+                      {branchName} · Closed
                     </span>
-                  ) : record.makeupCompleted ? (
-                    <Badge variant="success">
-                      Completed
-                    </Badge>
-                  ) : (
-                    <Badge variant="warning">
-                      Pending
-                    </Badge>
-                  )}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-function TableHead({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
-  return (
-    <th className="px-4 py-3.5 text-left text-[10px] font-extrabold uppercase tracking-[0.12em] text-(--ink-muted)">
-      {children}
-    </th>
-  );
-}
-
-function AttendanceRing({
-  percentage,
-}: {
-  percentage: number;
-}) {
-  return (
-    <div
-      className="relative flex h-44 w-44 items-center justify-center rounded-full"
-      style={{
-        background: `conic-gradient(var(--green) ${percentage}%, var(--line) 0)`,
-      }}
-    >
-      <div className="flex h-36 w-36 flex-col items-center justify-center rounded-full border border-(--line) bg-(--card)">
-        <span className="text-3xl font-extrabold tracking-tight text-(--foreground)">
-          {percentage}%
-        </span>
-        <span className="mt-1 text-xs font-semibold text-(--ink-muted)">
-          Present
-        </span>
-      </div>
-    </div>
-  );
-}
-
-function OverviewRow({
-  label,
-  value,
-  dotClass,
-}: {
-  label: string;
-  value: number;
-  dotClass: string;
-}) {
-  return (
-    <div className="flex items-center justify-between gap-4">
-      <div className="flex items-center gap-2.5">
-        <span
-          className={`h-2.5 w-2.5 rounded-full ${dotClass}`}
-        />
-        <span className="text-sm text-(--foreground-soft)">
-          {label}
-        </span>
-      </div>
-
-      <span className="text-sm font-extrabold text-(--foreground)">
-        {value}
-      </span>
-    </div>
-  );
-}
-
-function StudentContext({
-  student,
-  trainingDay,
-  loading,
-}: {
-  student: Student;
-  trainingDay: number | null;
-  loading?: boolean;
-}) {
-  return (
-    <div className="rounded-2xl border border-(--line) bg-(--surface) p-4">
-      <div className="flex items-center gap-3">
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-(--accent-soft) text-sm font-extrabold text-(--accent)">
-          {getInitials(student.name)}
-        </div>
-
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-extrabold text-(--foreground)">
-            {student.name}
-          </p>
-
-          <p className="mt-0.5 truncate text-xs text-(--ink-muted)">
-            {student.plan?.name ||
-              "No plan assigned"}
-            {student.currentBelt
-              ? ` • ${student.currentBelt}`
-              : ""}
-          </p>
-        </div>
-
-        {loading ? (
-          <Badge variant="default">
-            Checking...
-          </Badge>
-        ) : (
-          trainingDay && (
-            <Badge variant="default">
-              Day {trainingDay}
-            </Badge>
-          )
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
         )}
+
+        {/* ==================================
+            SUMMARY
+        ================================== */}
+
+        <AttendanceStats {...stats} />
+
+        {/* ==================================
+            ATTENDANCE TABLE
+        ================================== */}
+
+        <AttendanceSheet
+          rows={displayRows}
+          loading={loading}
+          error=""
+          savingStudentId={savingStudentId}
+          onMark={openMarkModal}
+        />
+
+        {/* ==================================
+            ATTENDANCE MODAL
+        ================================== */}
+
+        <AttendanceModal
+          row={selectedRow}
+          status={selectedStatus}
+          open={Boolean(selectedRow && selectedStatus)}
+          saving={Boolean(
+            selectedRow && savingStudentId === selectedRow.student._id,
+          )}
+          error={formError}
+          onClose={closeMarkModal}
+          onConfirm={confirmAttendance}
+        />
       </div>
-    </div>
+    </main>
   );
 }

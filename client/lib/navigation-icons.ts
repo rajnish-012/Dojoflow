@@ -1,4 +1,5 @@
 import type { LucideIcon } from "lucide-react";
+
 import {
   Award,
   BarChart3,
@@ -8,6 +9,7 @@ import {
   Calendar,
   CalendarCheck,
   ClipboardList,
+  Clock3,
   Dumbbell,
   FileText,
   Folder,
@@ -33,7 +35,10 @@ import {
  * The sidebar stores only the icon NAME in the database.
  * Add an icon here to make it available in the Modules page.
  */
-export const NAVIGATION_ICONS: Record<string, LucideIcon> = {
+export const NAVIGATION_ICONS: Record<
+  string,
+  LucideIcon
+> = {
   Award,
   BarChart3,
   Bell,
@@ -42,6 +47,7 @@ export const NAVIGATION_ICONS: Record<string, LucideIcon> = {
   Calendar,
   CalendarCheck,
   ClipboardList,
+  Clock3,
   Dumbbell,
   FileText,
   Folder,
@@ -63,12 +69,18 @@ export const NAVIGATION_ICONS: Record<string, LucideIcon> = {
   Wallet,
 };
 
-export const NAVIGATION_ICON_NAMES = Object.keys(
-  NAVIGATION_ICONS,
-).sort();
+export const NAVIGATION_ICON_NAMES =
+  Object.keys(
+    NAVIGATION_ICONS,
+  ).sort();
 
-export function getNavigationIcon(name?: string): LucideIcon {
-  if (name && NAVIGATION_ICONS[name]) {
+export function getNavigationIcon(
+  name?: string,
+): LucideIcon {
+  if (
+    name &&
+    NAVIGATION_ICONS[name]
+  ) {
     return NAVIGATION_ICONS[name];
   }
 

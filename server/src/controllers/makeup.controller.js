@@ -1,16 +1,41 @@
 const mongoose = require("mongoose");
 
-const { isBranchScoped } = require("../utils/access");
 const Makeup = require("../models/Makeup");
 const Attendance = require("../models/Attendance");
 const Student = require("../models/Student");
-const Branch = require("../models/Branch");
+const CoachStudentAssignment = require("../models/CoachStudentAssignment");
+const {
+  validateMakeupDate: validateCentralMakeupDate,
+} = require("../services/branchSchedule.service");
 
-// ==============================
-// Helper: Branch access validation
-// ==============================
-const checkBranchAccess = (req, branchId) => {
-  if (!isBranchScoped(req.user)) {
+const BRANCH_ROLES = ["BRANCH_ADMIN", "COACH"];
+
+const DAY_NAMES = [
+  "Sunday",
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+];
+
+/* =========================================================
+   BRANCH ACCESS
+   ========================================================= */
+
+function checkBranchAccess(req, branchId) {
+  if (!req.user) {
+    return {
+      status: 401,
+      message: "Authentication required",
+    };
+  }
+
+  /*
+   * SUPER_ADMIN has global access.
+   */
+  if (!BRANCH_ROLES.includes(req.user.role)) {
     return null;
   }
 
@@ -21,7 +46,14 @@ const checkBranchAccess = (req, branchId) => {
     };
   }
 
-  if (!branchId || branchId.toString() !== req.user.branch.toString()) {
+  if (!branchId) {
+    return {
+      status: 403,
+      message: "Branch information is missing",
+    };
+  }
+
+  if (branchId.toString() !== req.user.branch.toString()) {
     return {
       status: 403,
       message: "You do not have access to this branch",
@@ -29,28 +61,234 @@ const checkBranchAccess = (req, branchId) => {
   }
 
   return null;
-};
+}
 
-// ==============================
-// Helper: Validate date format
-// ==============================
-const isValidDateFormat = (date) => {
-  return (
-    typeof date === "string" &&
-    /^\d{4}-\d{2}-\d{2}$/.test(date) &&
-    !Number.isNaN(new Date(`${date}T00:00:00`).getTime())
+async function checkCoachStudentAccess(req, studentId) {
+  if (req.user.role !== "COACH") return null;
+
+  const assignment = await CoachStudentAssignment.findOne({
+    coach: req.user._id,
+    student: studentId,
+    status: "ACTIVE",
+  }).select("_id");
+
+  return assignment
+    ? null
+    : {
+        status: 403,
+        message: "You do not have access to this student",
+      };
+}
+
+/* =========================================================
+   DATE HELPERS
+   ========================================================= */
+
+/*
+ * Treat YYYY-MM-DD as a local calendar date.
+ *
+ * IMPORTANT:
+ *
+ * Do not use:
+ *
+ * new Date("2026-09-16")
+ *
+ * because JavaScript interprets YYYY-MM-DD as UTC.
+ *
+ * That can result in the previous calendar date in India.
+ */
+
+function parseCalendarDate(value) {
+  if (!value) {
+    return null;
+  }
+
+  if (typeof value === "string") {
+    const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+
+    if (match) {
+      const year = Number(match[1]);
+      const month = Number(match[2]);
+      const day = Number(match[3]);
+
+      const date = new Date(year, month - 1, day);
+
+      if (
+        date.getFullYear() === year &&
+        date.getMonth() === month - 1 &&
+        date.getDate() === day
+      ) {
+        return date;
+      }
+
+      return null;
+    }
+  }
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function getStartOfDay(value) {
+  return parseCalendarDate(value);
+}
+
+function getEndOfDay(value) {
+  const start = parseCalendarDate(value);
+
+  if (!start) {
+    return null;
+  }
+
+  const end = new Date(start);
+
+  end.setHours(23, 59, 59, 999);
+
+  return end;
+}
+
+function getDateRange(value) {
+  const start = getStartOfDay(value);
+
+  if (!start) {
+    return {
+      start: null,
+      end: null,
+    };
+  }
+
+  return {
+    start,
+    end: getEndOfDay(value),
+  };
+}
+
+function formatDate(value) {
+  const date = parseCalendarDate(value);
+
+  if (!date) {
+    return null;
+  }
+
+  const year = date.getFullYear();
+
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+
+  const day = String(date.getDate()).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+}
+
+function validateDateFormat(value) {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return false;
+  }
+
+  return Boolean(parseCalendarDate(value));
+}
+
+/* =========================================================
+   CENTRAL MAKEUP DATE VALIDATION
+   ========================================================= */
+
+async function validateMakeupAvailability(
+  branchId,
+  makeupDate,
+  originalDate,
+  options,
+) {
+  const result = await validateCentralMakeupDate(
+    branchId,
+    makeupDate,
+    originalDate,
+    options,
   );
-};
 
-// ==============================
-// GET ALL MAKEUPS
-// ==============================
+  const availability = result.availability || null;
+
+  const holiday = availability?.holiday
+    ? {
+        _id: availability.holiday._id,
+        name: availability.holiday.name,
+        description: availability.holiday.description || "",
+        date: availability.holiday.date
+          ? formatDate(availability.holiday.date)
+          : availability.date,
+      }
+    : null;
+
+  return {
+    allowed: result.allowed,
+    reason: availability?.reason || null,
+    message: result.message || null,
+    holiday,
+    schedule: availability
+      ? {
+          date: availability.date,
+          dayOfWeek: availability.dayOfWeek,
+          dayName: availability.dayName,
+          configured: availability.scheduleConfigured,
+          isOpen: availability.isTrainingDay,
+          isTrainingDay: availability.isTrainingDay,
+          isClosed: availability.isClosed,
+          isHoliday: availability.isHoliday,
+          holiday,
+          slots: Array.isArray(availability.slots) ? availability.slots : [],
+          openingTime: availability.openingTime || null,
+          closingTime: availability.closingTime || null,
+          isDateOverride: availability.isDateOverride,
+          dateOverrideId: availability.dateOverrideId,
+          reason: availability.reason,
+        }
+      : null,
+  };
+}
+
+/* =========================================================
+   POPULATE MAKEUP
+   ========================================================= */
+
+function populateMakeup(query) {
+  return query
+    .populate("student", "name age phone email currentBelt status")
+    .populate("branch", "name address")
+    .populate(
+      "originalAttendance",
+      "date planDay curriculumTitle status makeupRequired makeupCompleted",
+    )
+    .populate("markedBy", "name email")
+    .populate("completedBy", "name email");
+}
+
+/* =========================================================
+   GET ALL MAKEUPS
+   =========================================================
+ *
+ * GET /api/makeups
+ *
+ * Supported:
+ *
+ * ?status=SCHEDULED
+ * ?student=<studentId>
+ * ?fromDate=YYYY-MM-DD
+ * ?toDate=YYYY-MM-DD
+ */
+
 const getMakeups = async (req, res) => {
   try {
+    const { status, student, fromDate, toDate } = req.query;
+
     const filter = {};
 
-    // Branch-level filtering
-    if (isBranchScoped(req.user)) {
+    /*
+     * Branch restriction.
+     */
+    if (BRANCH_ROLES.includes(req.user.role)) {
       if (!req.user.branch) {
         return res.status(403).json({
           success: false,
@@ -61,46 +299,89 @@ const getMakeups = async (req, res) => {
       filter.branch = req.user.branch;
     }
 
-    // Optional status filter
-    if (req.query.status) {
-      const allowedStatuses = [
-        "SCHEDULED",
-        "COMPLETED",
-        "CANCELLED",
-      ];
+    if (req.user.role === "COACH") {
+      const assignments = await CoachStudentAssignment.find({
+        coach: req.user._id,
+        status: "ACTIVE",
+      }).select("student");
 
-      if (!allowedStatuses.includes(req.query.status)) {
-        return res.status(400).json({
+      const assignedIds = assignments.map((item) => item.student);
+      const assignedIdSet = new Set(assignedIds.map((id) => id.toString()));
+
+      if (student && !assignedIdSet.has(String(student))) {
+        return res.status(403).json({
           success: false,
-          message: "Invalid makeup status",
+          message: "You do not have access to this student",
         });
       }
 
-      filter.status = req.query.status;
+      filter.student = student || { $in: assignedIds };
     }
 
-    // Optional student filter
-    if (req.query.studentId) {
-      if (!mongoose.Types.ObjectId.isValid(req.query.studentId)) {
+    /*
+     * Status filter.
+     */
+    if (status) {
+      const allowedStatuses = ["SCHEDULED", "COMPLETED", "CANCELLED"];
+
+      if (!allowedStatuses.includes(String(status))) {
+        return res.status(400).json({
+          success: false,
+          message: "Status must be SCHEDULED, COMPLETED or CANCELLED",
+        });
+      }
+
+      filter.status = String(status);
+    }
+
+    /*
+     * Student filter.
+     */
+    if (student) {
+      if (!mongoose.Types.ObjectId.isValid(student)) {
         return res.status(400).json({
           success: false,
           message: "Invalid student ID",
         });
       }
 
-      filter.student = req.query.studentId;
+      filter.student = student;
     }
 
-    const makeups = await Makeup.find(filter)
-      .populate("student", "name age phone currentBelt status")
-      .populate("branch", "name address")
-      .populate(
-        "originalAttendance",
-        "date planDay status curriculumTitle"
-      )
-      .populate("markedBy", "name email")
-      .populate("completedBy", "name email")
-      .sort({ makeupDate: 1, createdAt: -1 });
+    /*
+     * Makeup date range.
+     */
+    if (fromDate || toDate) {
+      filter.makeupDate = {};
+
+      if (fromDate) {
+        if (!validateDateFormat(String(fromDate))) {
+          return res.status(400).json({
+            success: false,
+            message: "fromDate must be in YYYY-MM-DD format",
+          });
+        }
+
+        filter.makeupDate.$gte = getStartOfDay(String(fromDate));
+      }
+
+      if (toDate) {
+        if (!validateDateFormat(String(toDate))) {
+          return res.status(400).json({
+            success: false,
+            message: "toDate must be in YYYY-MM-DD format",
+          });
+        }
+
+        filter.makeupDate.$lte = getEndOfDay(String(toDate));
+      }
+    }
+
+    const makeups = await populateMakeup(Makeup.find(filter)).sort({
+      status: 1,
+      makeupDate: 1,
+      originalDate: -1,
+    });
 
     return res.status(200).json({
       success: true,
@@ -112,14 +393,19 @@ const getMakeups = async (req, res) => {
 
     return res.status(500).json({
       success: false,
-      message: "Failed to fetch makeups",
+      message: "Failed to fetch makeup classes",
+      makeups: [],
     });
   }
 };
 
-// ==============================
-// GET MAKEUP BY ID
-// ==============================
+/* =========================================================
+   GET MAKEUP BY ID
+   =========================================================
+ *
+ * GET /api/makeups/:id
+ */
+
 const getMakeupById = async (req, res) => {
   try {
     const { id } = req.params;
@@ -131,29 +417,36 @@ const getMakeupById = async (req, res) => {
       });
     }
 
-    const makeup = await Makeup.findById(id)
-      .populate("student", "name age phone currentBelt status")
-      .populate("branch", "name address")
-      .populate(
-        "originalAttendance",
-        "date planDay status curriculumTitle"
-      )
-      .populate("markedBy", "name email")
-      .populate("completedBy", "name email");
+    const makeup = await populateMakeup(Makeup.findById(id));
 
     if (!makeup) {
       return res.status(404).json({
         success: false,
-        message: "Makeup record not found",
+        message: "Makeup class not found",
       });
     }
 
-    const branchAccessError = checkBranchAccess(req, makeup.branch?._id);
+    const branchAccessError = checkBranchAccess(
+      req,
+      makeup.branch?._id || makeup.branch,
+    );
 
     if (branchAccessError) {
       return res.status(branchAccessError.status).json({
         success: false,
         message: branchAccessError.message,
+      });
+    }
+
+    const coachAccessError = await checkCoachStudentAccess(
+      req,
+      makeup.student?._id || makeup.student,
+    );
+
+    if (coachAccessError) {
+      return res.status(coachAccessError.status).json({
+        success: false,
+        message: coachAccessError.message,
       });
     }
 
@@ -166,29 +459,29 @@ const getMakeupById = async (req, res) => {
 
     return res.status(500).json({
       success: false,
-      message: "Failed to fetch makeup record",
+      message: "Failed to fetch makeup class",
     });
   }
 };
 
-// ==============================
-// CREATE / SCHEDULE MAKEUP
-// ==============================
+/* =========================================================
+   CREATE / SCHEDULE MAKEUP
+   =========================================================
+ *
+ * POST /api/makeups
+ *
+ * Used when an existing absent attendance
+ * record is manually scheduled.
+ */
+
 const createMakeup = async (req, res) => {
   try {
-    const {
-      student,
-      originalAttendance,
-      makeupDate,
-      curriculumTitle,
-      notes,
-    } = req.body;
+    const { student, originalAttendance, makeupDate, notes } = req.body;
 
     if (!student || !originalAttendance || !makeupDate) {
       return res.status(400).json({
         success: false,
-        message:
-          "student, originalAttendance and makeupDate are required",
+        message: "student, originalAttendance and makeupDate are required",
       });
     }
 
@@ -202,13 +495,16 @@ const createMakeup = async (req, res) => {
       });
     }
 
-    if (!isValidDateFormat(makeupDate)) {
+    if (!validateDateFormat(String(makeupDate))) {
       return res.status(400).json({
         success: false,
         message: "makeupDate must be in YYYY-MM-DD format",
       });
     }
 
+    /*
+     * Student.
+     */
     const studentRecord = await Student.findById(student);
 
     if (!studentRecord) {
@@ -218,10 +514,10 @@ const createMakeup = async (req, res) => {
       });
     }
 
-    const branchAccessError = checkBranchAccess(
-      req,
-      studentRecord.branch
-    );
+    /*
+     * Branch access.
+     */
+    const branchAccessError = checkBranchAccess(req, studentRecord.branch);
 
     if (branchAccessError) {
       return res.status(branchAccessError.status).json({
@@ -230,15 +526,26 @@ const createMakeup = async (req, res) => {
       });
     }
 
-    const branch = await Branch.findById(studentRecord.branch);
+    const coachAccessError = await checkCoachStudentAccess(
+      req,
+      studentRecord._id,
+    );
 
-    if (!branch) {
-      return res.status(404).json({
+    if (coachAccessError) {
+      return res.status(coachAccessError.status).json({
         success: false,
-        message: "Student branch not found",
+        message: coachAccessError.message,
       });
     }
 
+    if (studentRecord.status !== "ACTIVE") {
+      return res.status(400).json({
+        success: false,
+        message: "Makeups can only be scheduled for active students",
+      });
+    }
+
+    /* Verify the original attendance only after student access is confirmed. */
     const attendance = await Attendance.findById(originalAttendance);
 
     if (!attendance) {
@@ -248,54 +555,43 @@ const createMakeup = async (req, res) => {
       });
     }
 
-    // Ensure the attendance belongs to the selected student
-    if (attendance.student.toString() !== studentRecord._id.toString()) {
+    if (attendance.student.toString() !== student.toString()) {
       return res.status(400).json({
         success: false,
-        message:
-          "Original attendance does not belong to this student",
+        message: "Attendance record does not belong to this student",
       });
     }
 
-    // Ensure attendance belongs to the same branch
-    if (
-      attendance.branch &&
-      attendance.branch.toString() !== studentRecord.branch.toString()
-    ) {
-      return res.status(400).json({
-        success: false,
-        message: "Attendance and student branch do not match",
-      });
-    }
-
-    // Only absences can receive makeup
     if (attendance.status !== "ABSENT") {
       return res.status(400).json({
         success: false,
-        message: "Makeup can only be scheduled for absent attendance",
+        message: "A makeup can only be created for an absent attendance record",
       });
     }
 
-    if (attendance.makeupCompleted) {
-      return res.status(400).json({
+    /*
+     * Central date + holiday + schedule validation.
+     */
+    const availability = await validateMakeupAvailability(
+      studentRecord.branch,
+      String(makeupDate),
+      attendance.date,
+    );
+
+    if (!availability.allowed) {
+      return res.status(409).json({
         success: false,
-        message: "Makeup is already completed for this absence",
+        message: availability.message,
+        reason: availability.reason,
+        holiday: availability.holiday,
+        branchSchedule: availability.schedule,
       });
     }
 
-    const originalDate = new Date(attendance.date);
-    const scheduledMakeupDate = new Date(`${makeupDate}T00:00:00`);
-
-    // Makeup cannot be before the original class
-    if (scheduledMakeupDate < originalDate) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Makeup date cannot be earlier than the original attendance date",
-      });
-    }
-
-    // Prevent multiple active makeups for the same absence
+    /*
+     * Existing makeup for the
+     * original absence.
+     */
     const existingMakeup = await Makeup.findOne({
       originalAttendance,
       status: {
@@ -306,54 +602,269 @@ const createMakeup = async (req, res) => {
     if (existingMakeup) {
       return res.status(409).json({
         success: false,
-        message:
-          "A makeup already exists for this attendance record",
+        message: "A makeup already exists for this attendance record",
+        makeup: await populateMakeup(Makeup.findById(existingMakeup._id)),
       });
     }
 
-    const makeup = await Makeup.create({
-      student: studentRecord._id,
-      branch: studentRecord.branch,
-      originalAttendance: attendance._id,
-      planDay: attendance.planDay,
-      originalDate: attendance.date,
-      makeupDate: scheduledMakeupDate,
+    /*
+     * Prevent the same student from
+     * having another makeup on the
+     * selected date.
+     */
+    const selectedStart = getStartOfDay(String(makeupDate));
+
+    const selectedEnd = getEndOfDay(String(makeupDate));
+
+    const conflictingMakeup = await Makeup.findOne({
+      student,
+      makeupDate: {
+        $gte: selectedStart,
+        $lte: selectedEnd,
+      },
       status: "SCHEDULED",
-      curriculumTitle: curriculumTitle
-        ? String(curriculumTitle).trim()
-        : attendance.curriculumTitle || "",
-      markedBy: req.user._id,
-      notes: notes ? String(notes).trim() : "",
     });
 
-    const populatedMakeup = await Makeup.findById(makeup._id)
-      .populate("student", "name age phone currentBelt status")
-      .populate("branch", "name address")
-      .populate(
-        "originalAttendance",
-        "date planDay status curriculumTitle"
-      )
-      .populate("markedBy", "name email")
-      .populate("completedBy", "name email");
+    if (conflictingMakeup) {
+      return res.status(409).json({
+        success: false,
+        message:
+          "This student already has a scheduled makeup on the selected date",
+        conflictingMakeup: conflictingMakeup._id,
+      });
+    }
+
+    /*
+     * Create makeup.
+     */
+    const makeup = await Makeup.create({
+      student,
+      branch: studentRecord.branch,
+      originalAttendance,
+      originalDate: attendance.date,
+      makeupDate: selectedStart,
+      status: "SCHEDULED",
+      notes: notes || "",
+      markedBy: req.user._id,
+    });
+
+    /*
+     * Synchronize attendance.
+     */
+    await Attendance.findByIdAndUpdate(originalAttendance, {
+      $set: {
+        makeupRequired: true,
+        makeupCompleted: false,
+        makeup: makeup._id,
+      },
+    });
+
+    const populatedMakeup = await populateMakeup(Makeup.findById(makeup._id));
 
     return res.status(201).json({
       success: true,
-      message: "Makeup scheduled successfully",
+      message: "Makeup class scheduled successfully",
       makeup: populatedMakeup,
+      branchSchedule: availability.schedule,
     });
   } catch (error) {
     console.error("Create makeup error:", error);
 
     return res.status(500).json({
       success: false,
-      message: "Failed to schedule makeup",
+      message:
+        process.env.NODE_ENV === "production"
+          ? "Failed to create makeup class"
+          : error.message || "Failed to create makeup class",
     });
   }
 };
 
-// ==============================
-// COMPLETE MAKEUP
-// ==============================
+/* =========================================================
+   SCHEDULE / RESCHEDULE MAKEUP
+   =========================================================
+ *
+ * PATCH /api/makeups/:id/schedule
+ */
+
+const scheduleMakeup = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const { makeupDate, notes } = req.body;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid makeup ID",
+      });
+    }
+
+    if (!makeupDate) {
+      return res.status(400).json({
+        success: false,
+        message: "makeupDate is required",
+      });
+    }
+
+    if (!validateDateFormat(String(makeupDate))) {
+      return res.status(400).json({
+        success: false,
+        message: "makeupDate must be in YYYY-MM-DD format",
+      });
+    }
+
+    const makeup = await Makeup.findById(id);
+
+    if (!makeup) {
+      return res.status(404).json({
+        success: false,
+        message: "Makeup class not found",
+      });
+    }
+
+    const branchAccessError = checkBranchAccess(req, makeup.branch);
+
+    if (branchAccessError) {
+      return res.status(branchAccessError.status).json({
+        success: false,
+        message: branchAccessError.message,
+      });
+    }
+
+    const studentRecord = await Student.findById(makeup.student).select("status");
+
+    if (!studentRecord || studentRecord.status !== "ACTIVE") {
+      return res.status(400).json({
+        success: false,
+        message: "Makeups can only be scheduled for active students",
+      });
+    }
+
+    const coachAccessError = await checkCoachStudentAccess(
+      req,
+      makeup.student,
+    );
+
+    if (coachAccessError) {
+      return res.status(coachAccessError.status).json({
+        success: false,
+        message: coachAccessError.message,
+      });
+    }
+
+    if (makeup.status === "COMPLETED") {
+      return res.status(400).json({
+        success: false,
+        message: "A completed makeup cannot be rescheduled",
+      });
+    }
+
+    if (makeup.status === "CANCELLED") {
+      return res.status(400).json({
+        success: false,
+        message: "A cancelled makeup cannot be scheduled",
+      });
+    }
+
+    /*
+     * Central date + holiday + schedule validation.
+     */
+    const availability = await validateMakeupAvailability(
+      makeup.branch,
+      String(makeupDate),
+      makeup.originalDate,
+    );
+
+    if (!availability.allowed) {
+      return res.status(409).json({
+        success: false,
+        message: availability.message,
+        reason: availability.reason,
+        holiday: availability.holiday,
+        branchSchedule: availability.schedule,
+      });
+    }
+
+    /*
+     * Prevent same student from
+     * having two scheduled makeups
+     * on the same date.
+     */
+    const selectedStart = getStartOfDay(String(makeupDate));
+
+    const selectedEnd = getEndOfDay(String(makeupDate));
+
+    const conflictingMakeup = await Makeup.findOne({
+      _id: {
+        $ne: makeup._id,
+      },
+      student: makeup.student,
+      makeupDate: {
+        $gte: selectedStart,
+        $lte: selectedEnd,
+      },
+      status: "SCHEDULED",
+    });
+
+    if (conflictingMakeup) {
+      return res.status(409).json({
+        success: false,
+        message:
+          "This student already has another scheduled makeup on the selected date",
+        conflictingMakeup: conflictingMakeup._id,
+      });
+    }
+
+    makeup.makeupDate = selectedStart;
+
+    makeup.status = "SCHEDULED";
+
+    if (typeof notes === "string") {
+      makeup.notes = notes;
+    }
+
+    await makeup.save();
+
+    /*
+     * Synchronize original attendance.
+     */
+    await Attendance.findByIdAndUpdate(makeup.originalAttendance, {
+      $set: {
+        makeupRequired: true,
+        makeupCompleted: false,
+        makeup: makeup._id,
+      },
+    });
+
+    const populatedMakeup = await populateMakeup(Makeup.findById(makeup._id));
+
+    return res.status(200).json({
+      success: true,
+      message: "Makeup class scheduled successfully",
+      makeup: populatedMakeup,
+      branchSchedule: availability.schedule,
+    });
+  } catch (error) {
+    console.error("Schedule makeup error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message:
+        process.env.NODE_ENV === "production"
+          ? "Failed to schedule makeup class"
+          : error.message || "Failed to schedule makeup class",
+    });
+  }
+};
+
+/* =========================================================
+   COMPLETE MAKEUP
+   =========================================================
+ *
+ * PATCH /api/makeups/:id/complete
+ */
+
 const completeMakeup = async (req, res) => {
   try {
     const { id } = req.params;
@@ -370,14 +881,11 @@ const completeMakeup = async (req, res) => {
     if (!makeup) {
       return res.status(404).json({
         success: false,
-        message: "Makeup record not found",
+        message: "Makeup class not found",
       });
     }
 
-    const branchAccessError = checkBranchAccess(
-      req,
-      makeup.branch
-    );
+    const branchAccessError = checkBranchAccess(req, makeup.branch);
 
     if (branchAccessError) {
       return res.status(branchAccessError.status).json({
@@ -386,51 +894,87 @@ const completeMakeup = async (req, res) => {
       });
     }
 
+    const coachAccessError = await checkCoachStudentAccess(
+      req,
+      makeup.student,
+    );
+
+    if (coachAccessError) {
+      return res.status(coachAccessError.status).json({
+        success: false,
+        message: coachAccessError.message,
+      });
+    }
+
     if (makeup.status === "COMPLETED") {
       return res.status(400).json({
         success: false,
-        message: "Makeup is already completed",
+        message: "Makeup class is already completed",
       });
     }
 
     if (makeup.status === "CANCELLED") {
       return res.status(400).json({
         success: false,
-        message: "Cancelled makeup cannot be completed",
+        message: "A cancelled makeup cannot be completed",
+      });
+    }
+
+    if (!makeup.makeupDate) {
+      return res.status(400).json({
+        success: false,
+        message: "Schedule a makeup date before completing the class",
+      });
+    }
+
+    /*
+     * Before completing, verify that
+     * the scheduled date was actually
+     * a valid training date.
+     *
+     * This protects against an old record
+     * that was scheduled before the branch
+     * schedule/holiday system existed.
+     */
+    const availability = await validateMakeupAvailability(
+      makeup.branch,
+      makeup.makeupDate,
+      makeup.originalDate,
+      { allowPast: true },
+    );
+
+    if (!availability.allowed) {
+      return res.status(409).json({
+        success: false,
+        message: `This makeup cannot be completed because ${availability.message}`,
+        reason: availability.reason,
+        holiday: availability.holiday,
+        branchSchedule: availability.schedule,
       });
     }
 
     makeup.status = "COMPLETED";
+
     makeup.completedBy = req.user._id;
+
     makeup.completedAt = new Date();
 
     await makeup.save();
 
-    // Update the original absence
-    await Attendance.findByIdAndUpdate(
-      makeup.originalAttendance,
-      {
+    /*
+     * Synchronize original attendance.
+     */
+    await Attendance.findByIdAndUpdate(makeup.originalAttendance, {
+      $set: {
         makeupCompleted: true,
       },
-      {
-        new: true,
-        runValidators: true,
-      }
-    );
+    });
 
-    const populatedMakeup = await Makeup.findById(makeup._id)
-      .populate("student", "name age phone currentBelt status")
-      .populate("branch", "name address")
-      .populate(
-        "originalAttendance",
-        "date planDay status curriculumTitle"
-      )
-      .populate("markedBy", "name email")
-      .populate("completedBy", "name email");
+    const populatedMakeup = await populateMakeup(Makeup.findById(makeup._id));
 
     return res.status(200).json({
       success: true,
-      message: "Makeup completed successfully",
+      message: "Makeup class completed successfully",
       makeup: populatedMakeup,
     });
   } catch (error) {
@@ -438,17 +982,26 @@ const completeMakeup = async (req, res) => {
 
     return res.status(500).json({
       success: false,
-      message: "Failed to complete makeup",
+      message:
+        process.env.NODE_ENV === "production"
+          ? "Failed to complete makeup class"
+          : error.message || "Failed to complete makeup class",
     });
   }
 };
 
-// ==============================
-// CANCEL MAKEUP
-// ==============================
+/* =========================================================
+   CANCEL MAKEUP
+   =========================================================
+ *
+ * PATCH /api/makeups/:id/cancel
+ */
+
 const cancelMakeup = async (req, res) => {
   try {
     const { id } = req.params;
+
+    const { reason } = req.body;
 
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({
@@ -462,14 +1015,11 @@ const cancelMakeup = async (req, res) => {
     if (!makeup) {
       return res.status(404).json({
         success: false,
-        message: "Makeup record not found",
+        message: "Makeup class not found",
       });
     }
 
-    const branchAccessError = checkBranchAccess(
-      req,
-      makeup.branch
-    );
+    const branchAccessError = checkBranchAccess(req, makeup.branch);
 
     if (branchAccessError) {
       return res.status(branchAccessError.status).json({
@@ -478,43 +1028,87 @@ const cancelMakeup = async (req, res) => {
       });
     }
 
+    const coachAccessError = await checkCoachStudentAccess(
+      req,
+      makeup.student,
+    );
+
+    if (coachAccessError) {
+      return res.status(coachAccessError.status).json({
+        success: false,
+        message: coachAccessError.message,
+      });
+    }
+
     if (makeup.status === "COMPLETED") {
       return res.status(400).json({
         success: false,
-        message: "Completed makeup cannot be cancelled",
+        message: "A completed makeup cannot be cancelled",
       });
     }
 
     if (makeup.status === "CANCELLED") {
       return res.status(400).json({
         success: false,
-        message: "Makeup is already cancelled",
+        message: "Makeup class is already cancelled",
       });
     }
 
     makeup.status = "CANCELLED";
 
+    makeup.cancelledBy = req.user._id;
+
+    makeup.cancelledAt = new Date();
+
+    if (typeof reason === "string") {
+      makeup.cancelReason = reason.trim();
+    }
+
     await makeup.save();
+
+    /*
+     * Keep the original attendance
+     * marked as requiring makeup,
+     * because cancellation does not
+     * make the original missed class
+     * completed.
+     */
+    await Attendance.findByIdAndUpdate(makeup.originalAttendance, {
+      $set: {
+        makeupRequired: true,
+        makeupCompleted: false,
+      },
+    });
+
+    const populatedMakeup = await populateMakeup(Makeup.findById(makeup._id));
 
     return res.status(200).json({
       success: true,
-      message: "Makeup cancelled successfully",
-      makeup,
+      message: "Makeup class cancelled successfully",
+      makeup: populatedMakeup,
     });
   } catch (error) {
     console.error("Cancel makeup error:", error);
 
     return res.status(500).json({
       success: false,
-      message: "Failed to cancel makeup",
+      message:
+        process.env.NODE_ENV === "production"
+          ? "Failed to cancel makeup class"
+          : error.message || "Failed to cancel makeup class",
     });
   }
 };
+
+/* =========================================================
+   EXPORTS
+   ========================================================= */
 
 module.exports = {
   getMakeups,
   getMakeupById,
   createMakeup,
+  scheduleMakeup,
   completeMakeup,
   cancelMakeup,
 };

@@ -118,12 +118,7 @@ const updateInquiryStatus = async (req, res) => {
     const { id } = req.params;
     const { status } = req.body;
 
-    const allowedStatuses = [
-      "NEW",
-      "CONTACTED",
-      "ENROLLED",
-      "CLOSED",
-    ];
+    const allowedStatuses = ["NEW", "CONTACTED", "ENROLLED", "CLOSED"];
 
     if (!mongoose.isValidObjectId(id)) {
       return res.status(400).json({

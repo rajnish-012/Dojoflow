@@ -1,9 +1,9 @@
-
 const { isBranchScoped } = require("../utils/access");
 const Student = require("../models/Student");
 const Plan = require("../models/Plan");
 const Attendance = require("../models/Attendance");
 const Performance = require("../models/Performance");
+const CoachStudentAssignment = require("../models/CoachStudentAssignment");
 
 // ==============================
 // GET DASHBOARD SUMMARY
@@ -14,47 +14,56 @@ const getDashboard = async (req, res) => {
     const filter = {};
 
     // Branch-level users only see their branch
-    if (
-      ["BRANCH_ADMIN", "COACH"].includes(
-        req.user.role,
-      )
-    ) {
+    if (["BRANCH_ADMIN", "COACH"].includes(req.user.role)) {
+      if (!req.user.branch) {
+        return res.status(403).json({
+          success: false,
+          message: "No branch is assigned to this account",
+        });
+      }
+
       filter.branch = req.user.branch;
+    }
+
+    let assignedStudentIds = null;
+    if (req.user.role === "COACH") {
+      const assignments = await CoachStudentAssignment.find({
+        coach: req.user._id,
+        status: "ACTIVE",
+      }).select("student");
+
+      assignedStudentIds = assignments.map((assignment) => assignment.student);
+      filter._id = { $in: assignedStudentIds };
     }
 
     // ==============================
     // STUDENT STATISTICS
     // ==============================
 
-    const totalStudents =
-      await Student.countDocuments(filter);
+    const totalStudents = await Student.countDocuments(filter);
 
-    const activeStudents =
-      await Student.countDocuments({
-        ...filter,
-        status: "ACTIVE",
-      });
+    const activeStudents = await Student.countDocuments({
+      ...filter,
+      status: "ACTIVE",
+    });
 
-    const inactiveStudents =
-      await Student.countDocuments({
-        ...filter,
-        status: "INACTIVE",
-      });
+    const inactiveStudents = await Student.countDocuments({
+      ...filter,
+      status: "INACTIVE",
+    });
 
-    const completedStudents =
-      await Student.countDocuments({
-        ...filter,
-        status: "COMPLETED",
-      });
+    const completedStudents = await Student.countDocuments({
+      ...filter,
+      status: "COMPLETED",
+    });
 
     // ==============================
     // PLANS
     // ==============================
 
-    const totalPlans =
-      await Plan.countDocuments({
-        isActive: true,
-      });
+    const totalPlans = await Plan.countDocuments({
+      isActive: true,
+    });
 
     // ==============================
     // TODAY'S ATTENDANCE
@@ -79,9 +88,7 @@ const getDashboard = async (req, res) => {
     };
 
     const activeStudentIds =
-      await Student.find(
-        activeStudentFilter,
-      ).distinct("_id");
+      await Student.find(activeStudentFilter).distinct("_id");
 
     const attendanceFilter = {
       date: {
@@ -93,26 +100,19 @@ const getDashboard = async (req, res) => {
       },
     };
 
-    if (
-      ["BRANCH_ADMIN", "COACH"].includes(
-        req.user.role,
-      )
-    ) {
-      attendanceFilter.branch =
-        req.user.branch;
+    if (["BRANCH_ADMIN", "COACH"].includes(req.user.role)) {
+      attendanceFilter.branch = req.user.branch;
     }
 
-    const todayPresent =
-      await Attendance.countDocuments({
-        ...attendanceFilter,
-        status: "PRESENT",
-      });
+    const todayPresent = await Attendance.countDocuments({
+      ...attendanceFilter,
+      status: "PRESENT",
+    });
 
-    const todayAbsent =
-      await Attendance.countDocuments({
-        ...attendanceFilter,
-        status: "ABSENT",
-      });
+    const todayAbsent = await Attendance.countDocuments({
+      ...attendanceFilter,
+      status: "ABSENT",
+    });
 
     // ==============================
     // PENDING MAKEUPS
@@ -126,19 +126,11 @@ const getDashboard = async (req, res) => {
       makeupCompleted: false,
     };
 
-    if (
-      ["BRANCH_ADMIN", "COACH"].includes(
-        req.user.role,
-      )
-    ) {
-      makeupFilter.branch =
-        req.user.branch;
+    if (["BRANCH_ADMIN", "COACH"].includes(req.user.role)) {
+      makeupFilter.branch = req.user.branch;
     }
 
-    const pendingMakeups =
-      await Attendance.countDocuments(
-        makeupFilter,
-      );
+    const pendingMakeups = await Attendance.countDocuments(makeupFilter);
 
     // ==============================
     // RECENT PERFORMANCE
@@ -146,31 +138,21 @@ const getDashboard = async (req, res) => {
 
     const performanceFilter = {};
 
-    if (
-      ["BRANCH_ADMIN", "COACH"].includes(
-        req.user.role,
-      )
-    ) {
-      performanceFilter.branch =
-        req.user.branch;
+    if (assignedStudentIds) {
+      performanceFilter.student = { $in: assignedStudentIds };
     }
 
-    const recentPerformance =
-      await Performance.find(
-        performanceFilter,
-      )
-        .populate(
-          "student",
-          "name currentBelt",
-        )
-        .populate(
-          "evaluatedBy",
-          "name",
-        )
-        .sort({
-          evaluationDate: -1,
-        })
-        .limit(5);
+    if (["BRANCH_ADMIN", "COACH"].includes(req.user.role)) {
+      performanceFilter.branch = req.user.branch;
+    }
+
+    const recentPerformance = await Performance.find(performanceFilter)
+      .populate("student", "name currentBelt")
+      .populate("evaluatedBy", "name")
+      .sort({
+        evaluationDate: -1,
+      })
+      .limit(5);
 
     // ==============================
     // RESPONSE
@@ -201,15 +183,11 @@ const getDashboard = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error(
-      "Get dashboard error:",
-      error,
-    );
+    console.error("Get dashboard error:", error);
 
     res.status(500).json({
       success: false,
-      message:
-        "Failed to fetch dashboard data",
+      message: "Failed to fetch dashboard data",
     });
   }
 };

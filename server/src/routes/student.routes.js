@@ -9,6 +9,10 @@ const {
   deleteStudent,
 } = require("../controllers/student.controller");
 
+const {
+  getStudentTimeline,
+} = require("../controllers/studentTimeline.controller");
+
 const protect = require("../middleware/auth.middleware");
 const authorize = require("../middleware/role.middleware");
 
@@ -31,8 +35,27 @@ router.get(
 router.get(
   "/",
   protect,
-  authorize("SUPER_ADMIN", "BRANCH_ADMIN", "COACH"),
+  authorize(
+    "SUPER_ADMIN",
+    "BRANCH_ADMIN",
+    "COACH"
+  ),
   getStudents
+);
+
+// ==============================
+// GET STUDENT TIMELINE
+// IMPORTANT: Must come before /:id
+// ==============================
+router.get(
+  "/:id/timeline",
+  protect,
+  authorize(
+    "SUPER_ADMIN",
+    "BRANCH_ADMIN",
+    "COACH"
+  ),
+  getStudentTimeline
 );
 
 // ==============================
@@ -41,7 +64,11 @@ router.get(
 router.get(
   "/:id",
   protect,
-  authorize("SUPER_ADMIN", "BRANCH_ADMIN", "COACH"),
+  authorize(
+    "SUPER_ADMIN",
+    "BRANCH_ADMIN",
+    "COACH"
+  ),
   getStudentById
 );
 
@@ -51,7 +78,10 @@ router.get(
 router.post(
   "/",
   protect,
-  authorize("SUPER_ADMIN", "BRANCH_ADMIN"),
+  authorize(
+    "SUPER_ADMIN",
+    "BRANCH_ADMIN"
+  ),
   createStudent
 );
 
@@ -61,7 +91,10 @@ router.post(
 router.put(
   "/:id",
   protect,
-  authorize("SUPER_ADMIN", "BRANCH_ADMIN"),
+  authorize(
+    "SUPER_ADMIN",
+    "BRANCH_ADMIN"
+  ),
   updateStudent
 );
 

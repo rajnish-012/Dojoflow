@@ -3,8 +3,9 @@ const express = require("express");
 const {
   getAttendance,
   getMyAttendance,
-  getAttendanceById,
   getAttendanceByStudent,
+  getAttendanceById,
+  getDailyAttendanceSheet,
   markAttendance,
 } = require("../controllers/attendance.controller");
 
@@ -13,60 +14,90 @@ const authorize = require("../middleware/role.middleware");
 
 const router = express.Router();
 
-// ======================================================
-// STUDENT'S OWN ATTENDANCE
-// IMPORTANT: /me must come before /:id
-// ======================================================
+/* ==============================
+   DAILY ATTENDANCE SHEET
+============================== */
+
+router.get(
+  "/daily-sheet",
+  protect,
+  authorize(
+    "SUPER_ADMIN",
+    "BRANCH_ADMIN",
+    "COACH",
+  ),
+  getDailyAttendanceSheet,
+);
+
+/* ==============================
+   ALL ATTENDANCE
+============================== */
+
+router.get(
+  "/",
+  protect,
+  authorize(
+    "SUPER_ADMIN",
+    "BRANCH_ADMIN",
+    "COACH",
+  ),
+  getAttendance,
+);
+
+/* ==============================
+   STUDENT'S OWN ATTENDANCE
+============================== */
 
 router.get(
   "/me",
   protect,
   authorize("STUDENT"),
-  getMyAttendance
+  getMyAttendance,
 );
 
-// ======================================================
-// GET ALL ATTENDANCE
-// ======================================================
-
-router.get(
-  "/",
-  protect,
-  authorize("SUPER_ADMIN", "BRANCH_ADMIN", "COACH"),
-  getAttendance
-);
-
-// ======================================================
-// GET ATTENDANCE BY STUDENT ID
-// ======================================================
+/* ==============================
+   ATTENDANCE BY STUDENT
+============================== */
 
 router.get(
   "/student/:studentId",
   protect,
-  authorize("SUPER_ADMIN", "BRANCH_ADMIN", "COACH"),
-  getAttendanceByStudent
+  authorize(
+    "SUPER_ADMIN",
+    "BRANCH_ADMIN",
+    "COACH",
+  ),
+  getAttendanceByStudent,
 );
 
-// ======================================================
-// GET ATTENDANCE BY ID
-// ======================================================
+/* ==============================
+   ATTENDANCE BY ID
+============================== */
 
 router.get(
   "/:id",
   protect,
-  authorize("SUPER_ADMIN", "BRANCH_ADMIN", "COACH"),
-  getAttendanceById
+  authorize(
+    "SUPER_ADMIN",
+    "BRANCH_ADMIN",
+    "COACH",
+  ),
+  getAttendanceById,
 );
 
-// ======================================================
-// MARK ATTENDANCE
-// ======================================================
+/* ==============================
+   MARK ATTENDANCE
+============================== */
 
 router.post(
   "/",
   protect,
-  authorize("SUPER_ADMIN", "BRANCH_ADMIN", "COACH"),
-  markAttendance
+  authorize(
+    "SUPER_ADMIN",
+    "BRANCH_ADMIN",
+    "COACH",
+  ),
+  markAttendance,
 );
 
 module.exports = router;

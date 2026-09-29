@@ -7,14 +7,25 @@ const User = require("../models/User");
 const Plan = require("../models/Plan");
 const Attendance = require("../models/Attendance");
 const Performance = require("../models/Performance");
+const CoachStudentAssignment = require("../models/CoachStudentAssignment");
 
 // =========================================================
 // SHARED BRANCH ACCESS HELPER
 // =========================================================
 
-const canAccessStudent = (user, student) => {
+const canAccessStudent = async (user, student) => {
   if (!user || !student) {
     return false;
+  }
+
+  if (user.role === "COACH") {
+    const assignment = await CoachStudentAssignment.findOne({
+      coach: user._id,
+      student: student._id,
+      status: "ACTIVE",
+    }).select("_id");
+
+    if (!assignment) return false;
   }
 
   // Roles that can see every branch.
@@ -100,7 +111,7 @@ const getStudentById = async (req, res) => {
       });
     }
 
-    if (!canAccessStudent(req.user, student)) {
+    if (!(await canAccessStudent(req.user, student))) {
       return res.status(403).json({
         success: false,
         message: "You do not have access to this student",
@@ -344,7 +355,7 @@ const updateStudent = async (req, res) => {
       });
     }
 
-    if (!canAccessStudent(req.user, student)) {
+    if (!(await canAccessStudent(req.user, student))) {
       return res.status(403).json({
         success: false,
         message: "You do not have access to this student",
@@ -613,7 +624,7 @@ const getStudentProgress = async (req, res) => {
 
     // Branch-level access.
     // This also blocks staff accounts that have no branch.
-    if (!canAccessStudent(req.user, student)) {
+    if (!(await canAccessStudent(req.user, student))) {
       return res.status(403).json({
         success: false,
         message: "You do not have access to this student",

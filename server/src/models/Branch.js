@@ -5,28 +5,28 @@ const branchSchema = new mongoose.Schema(
     name: {
       type: String,
       required: true,
-      trim: true
+      trim: true,
     },
 
     address: {
       type: String,
       required: true,
-      trim: true
+      trim: true,
     },
 
     phone: {
       type: String,
-      trim: true
+      trim: true,
     },
 
     isActive: {
       type: Boolean,
-      default: true
-    }
+      default: true,
+    },
   },
   {
-    timestamps: true
-  }
+    timestamps: true,
+  },
 );
 
 module.exports = mongoose.model("Branch", branchSchema);

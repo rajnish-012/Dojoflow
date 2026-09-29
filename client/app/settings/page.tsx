@@ -1,11 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+
 import {
   Building2,
+  Check,
   GraduationCap,
   Pencil,
   RefreshCw,
+  Settings2,
   ShieldCheck,
   Trash2,
   UserPlus,
@@ -28,10 +31,18 @@ import {
 } from "@/components/ui";
 
 import { getRoles, type RoleRecord } from "@/lib/api";
+import AcademyBranding from "@/components/settings/AcademyBranding";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api";
+const API_URL =
+  process.env.NEXT_PUBLIC_API_URL ||
+  "http://localhost:5000/api";
 
-const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const EMAIL_PATTERN =
+  /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+type SettingsTab =
+  | "branding"
+  | "staff";
 
 type Branch = {
   _id: string;
@@ -66,35 +77,60 @@ const emptyForm: FormData = {
   branch: "",
 };
 
-function getRoleLabel(role: string, roles: RoleRecord[] = []) {
-  const found = roles.find((item) => item.key === role);
+function getRoleLabel(
+  role: string,
+  roles: RoleRecord[] = [],
+) {
+  const found = roles.find(
+    (item) => item.key === role,
+  );
 
-  if (found) return found.name;
+  if (found) {
+    return found.name;
+  }
 
   return role
     .replaceAll("_", " ")
     .toLowerCase()
-    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+    .replace(
+      /\b\w/g,
+      (letter) => letter.toUpperCase(),
+    );
 }
 
 function getRoleVariant(
   role: StaffUser["role"],
-): "success" | "info" | "warning" | "neutral" {
+):
+  | "success"
+  | "info"
+  | "warning"
+  | "neutral" {
   switch (role) {
     case "SUPER_ADMIN":
       return "warning";
+
     case "BRANCH_ADMIN":
       return "info";
+
     case "COACH":
       return "success";
+
     default:
       return "neutral";
   }
 }
 
-function getRoleIcon(role: StaffUser["role"]) {
-  if (role === "SUPER_ADMIN") return ShieldCheck;
-  if (role === "BRANCH_ADMIN") return Building2;
+function getRoleIcon(
+  role: StaffUser["role"],
+) {
+  if (role === "SUPER_ADMIN") {
+    return ShieldCheck;
+  }
+
+  if (role === "BRANCH_ADMIN") {
+    return Building2;
+  }
+
   return GraduationCap;
 }
 
@@ -111,11 +147,15 @@ function getInitials(name: string) {
 }
 
 function formatDate(value?: string) {
-  if (!value) return "—";
+  if (!value) {
+    return "—";
+  }
 
   const date = new Date(value);
 
-  if (Number.isNaN(date.getTime())) return "—";
+  if (Number.isNaN(date.getTime())) {
+    return "—";
+  }
 
   return date.toLocaleDateString("en-IN", {
     day: "2-digit",
@@ -124,60 +164,183 @@ function formatDate(value?: string) {
   });
 }
 
-export default function StaffManagementPage() {
-  const [users, setUsers] = useState<StaffUser[]>([]);
-  const [branches, setBranches] = useState<Branch[]>([]);
-  const [roles, setRoles] = useState<RoleRecord[]>([]);
+function SettingsTabButton({
+  active,
+  icon,
+  title,
+  description,
+  onClick,
+}: {
+  active: boolean;
+  icon: React.ReactNode;
+  title: string;
+  description: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`
+        group flex w-full items-center gap-3
+        rounded-2xl border px-4 py-3
+        text-left transition
+        ${
+          active
+            ? "border-(--accent)/30 bg-(--accent-soft)"
+            : "border-transparent hover:border-(--line) hover:bg-(--hover-bg)"
+        }
+      `}
+    >
+      <div
+        className={`
+          flex h-10 w-10 shrink-0
+          items-center justify-center
+          rounded-xl transition
+          ${
+            active
+              ? "bg-(--accent) text-white"
+              : "bg-(--surface-muted) text-(--ink-muted)"
+          }
+        `}
+      >
+        {icon}
+      </div>
 
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [updating, setUpdating] = useState(false);
+      <div className="min-w-0 flex-1">
+        <p
+          className={`
+            text-sm font-black
+            ${
+              active
+                ? "text-(--accent)"
+                : "text-(--foreground)"
+            }
+          `}
+        >
+          {title}
+        </p>
 
-  const [error, setError] = useState("");
-  const [formError, setFormError] = useState("");
-  const [editError, setEditError] = useState("");
-  const [emailFieldError, setEmailFieldError] = useState("");
+        <p
+          className="
+            mt-0.5 truncate text-xs
+            text-(--ink-muted)
+          "
+        >
+          {description}
+        </p>
+      </div>
 
-  const [showModal, setShowModal] = useState(false);
-  const [showEditModal, setShowEditModal] = useState(false);
+      {active && (
+        <Check
+          size={17}
+          className="shrink-0 text-(--accent)"
+        />
+      )}
+    </button>
+  );
+}
 
-  const [editingUser, setEditingUser] = useState<StaffUser | null>(null);
+export default function SettingsPage() {
+  const [activeTab, setActiveTab] =
+    useState<SettingsTab>("branding");
 
-  const [form, setForm] = useState<FormData>(emptyForm);
+  const [users, setUsers] =
+    useState<StaffUser[]>([]);
+
+  const [branches, setBranches] =
+    useState<Branch[]>([]);
+
+  const [roles, setRoles] =
+    useState<RoleRecord[]>([]);
+
+  const [loading, setLoading] =
+    useState(true);
+
+  const [refreshing, setRefreshing] =
+    useState(false);
+
+  const [saving, setSaving] =
+    useState(false);
+
+  const [updating, setUpdating] =
+    useState(false);
+
+  const [error, setError] =
+    useState("");
+
+  const [formError, setFormError] =
+    useState("");
+
+  const [editError, setEditError] =
+    useState("");
+
+  const [emailFieldError, setEmailFieldError] =
+    useState("");
+
+  const [showModal, setShowModal] =
+    useState(false);
+
+  const [showEditModal, setShowEditModal] =
+    useState(false);
+
+  const [editingUser, setEditingUser] =
+    useState<StaffUser | null>(null);
+
+  const [form, setForm] =
+    useState<FormData>(emptyForm);
 
   const activeBranches = useMemo(
-    () => branches.filter((branch) => branch.isActive !== false),
+    () =>
+      branches.filter(
+        (branch) =>
+          branch.isActive !== false,
+      ),
     [branches],
   );
 
-  // Super Admin and Student are never given from this page.
   const assignableRoles = useMemo(
     () =>
       roles.filter(
-        (role) => role.key !== "SUPER_ADMIN" && role.key !== "STUDENT",
+        (role) =>
+          role.key !== "SUPER_ADMIN" &&
+          role.key !== "STUDENT",
       ),
     [roles],
   );
 
-  // Branch-only roles must be given a branch.
-  function roleNeedsBranch(key: string) {
-    const role = roles.find((item) => item.key === key);
-
-    return role ? role.dataScope === "BRANCH" : true;
-  }
-
   const coaches = useMemo(
-    () => users.filter((user) => user.role === "COACH").length,
+    () =>
+      users.filter(
+        (user) => user.role === "COACH",
+      ).length,
     [users],
   );
 
   const branchAdmins = useMemo(
-    () => users.filter((user) => user.role === "BRANCH_ADMIN").length,
+    () =>
+      users.filter(
+        (user) =>
+          user.role === "BRANCH_ADMIN",
+      ).length,
     [users],
   );
 
-  async function loadData(refresh = false) {
+  function roleNeedsBranch(
+    key: string,
+  ) {
+    const role = roles.find(
+      (item) => item.key === key,
+    );
+
+    return role
+      ? role.dataScope === "BRANCH"
+      : true;
+  }
+
+  async function loadData(
+    refresh = false,
+  ) {
     try {
       if (refresh) {
         setRefreshing(true);
@@ -187,7 +350,8 @@ export default function StaffManagementPage() {
 
       setError("");
 
-      const token = localStorage.getItem("token");
+      const token =
+        localStorage.getItem("token");
 
       if (!token) {
         window.location.href = "/login";
@@ -198,25 +362,48 @@ export default function StaffManagementPage() {
         Authorization: `Bearer ${token}`,
       };
 
-      const [usersResponse, branchesResponse, rolesList] = await Promise.all([
-        fetch(`${API_URL}/users`, { headers }),
-        fetch(`${API_URL}/branches`, { headers }),
+      const [
+        usersResponse,
+        branchesResponse,
+        rolesList,
+      ] = await Promise.all([
+        fetch(`${API_URL}/users`, {
+          headers,
+        }),
+        fetch(`${API_URL}/branches`, {
+          headers,
+        }),
         getRoles(),
       ]);
 
-      const usersData = await usersResponse.json();
-      const branchesData = await branchesResponse.json();
+      const usersData =
+        await usersResponse.json();
+
+      const branchesData =
+        await branchesResponse.json();
 
       if (!usersResponse.ok) {
-        throw new Error(usersData.message || "Failed to load staff users.");
+        throw new Error(
+          usersData.message ||
+            "Failed to load staff users.",
+        );
       }
 
       if (!branchesResponse.ok) {
-        throw new Error(branchesData.message || "Failed to load branches.");
+        throw new Error(
+          branchesData.message ||
+            "Failed to load branches.",
+        );
       }
 
-      setUsers(usersData.users || []);
-      setBranches(branchesData.branches || []);
+      setUsers(
+        usersData.users || [],
+      );
+
+      setBranches(
+        branchesData.branches || [],
+      );
+
       setRoles(rolesList);
     } catch (caughtError) {
       console.error(caughtError);
@@ -237,23 +424,35 @@ export default function StaffManagementPage() {
   }, []);
 
   function openModal() {
-    setForm({ ...emptyForm });
+    setForm({
+      ...emptyForm,
+    });
+
     setFormError("");
     setEmailFieldError("");
     setShowModal(true);
   }
 
   function closeModal() {
-    if (saving) return;
+    if (saving) {
+      return;
+    }
 
     setShowModal(false);
     setFormError("");
     setEmailFieldError("");
-    setForm({ ...emptyForm });
+
+    setForm({
+      ...emptyForm,
+    });
   }
 
-  function openEditModal(user: StaffUser) {
-    if (user.role === "SUPER_ADMIN") return;
+  function openEditModal(
+    user: StaffUser,
+  ) {
+    if (user.role === "SUPER_ADMIN") {
+      return;
+    }
 
     setEditingUser(user);
 
@@ -271,19 +470,29 @@ export default function StaffManagementPage() {
   }
 
   function closeEditModal() {
-    if (updating) return;
+    if (updating) {
+      return;
+    }
 
     setShowEditModal(false);
     setEditingUser(null);
     setEditError("");
     setEmailFieldError("");
-    setForm({ ...emptyForm });
+
+    setForm({
+      ...emptyForm,
+    });
   }
 
   function handleChange(
-    event: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>,
+    event: React.ChangeEvent<
+      HTMLInputElement | HTMLSelectElement
+    >,
   ) {
-    const { name, value } = event.target;
+    const {
+      name,
+      value,
+    } = event.target;
 
     setForm((current) => ({
       ...current,
@@ -291,8 +500,11 @@ export default function StaffManagementPage() {
     }));
   }
 
-  function handleEmailBlur(event: React.FocusEvent<HTMLInputElement>) {
-    const value = event.target.value.trim();
+  function handleEmailBlur(
+    event: React.FocusEvent<HTMLInputElement>,
+  ) {
+    const value =
+      event.target.value.trim();
 
     if (!value) {
       setEmailFieldError("");
@@ -300,12 +512,17 @@ export default function StaffManagementPage() {
     }
 
     setEmailFieldError(
-      EMAIL_PATTERN.test(value) ? "" : "Please enter a valid email address.",
+      EMAIL_PATTERN.test(value)
+        ? ""
+        : "Please enter a valid email address.",
     );
   }
 
-  async function handleCreateUser(event: React.FormEvent<HTMLFormElement>) {
+  async function handleCreateUser(
+    event: React.FormEvent<HTMLFormElement>,
+  ) {
     event.preventDefault();
+
     setFormError("");
 
     const name = form.name.trim();
@@ -314,64 +531,94 @@ export default function StaffManagementPage() {
     const branch = form.branch;
 
     if (!name) {
-      setFormError("Please enter the staff member's name.");
+      setFormError(
+        "Please enter the staff member's name.",
+      );
       return;
     }
 
     if (!email) {
-      setFormError("Please enter an email address.");
+      setFormError(
+        "Please enter an email address.",
+      );
       return;
     }
 
     if (!EMAIL_PATTERN.test(email)) {
-      setFormError("Please enter a valid email address.");
+      setFormError(
+        "Please enter a valid email address.",
+      );
       return;
     }
 
     if (password.length < 6) {
-      setFormError("Password must contain at least 6 characters.");
+      setFormError(
+        "Password must contain at least 6 characters.",
+      );
       return;
     }
 
-    if (!branch && roleNeedsBranch(form.role)) {
-      setFormError("Please select a branch for this staff member.");
+    if (
+      !branch &&
+      roleNeedsBranch(form.role)
+    ) {
+      setFormError(
+        "Please select a branch for this staff member.",
+      );
       return;
     }
 
     try {
       setSaving(true);
 
-      const token = localStorage.getItem("token");
+      const token =
+        localStorage.getItem("token");
 
       if (!token) {
         window.location.href = "/login";
         return;
       }
 
-      const response = await fetch(`${API_URL}/users`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
+      const response = await fetch(
+        `${API_URL}/users`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type":
+              "application/json",
+            Authorization:
+              `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            name,
+            email,
+            password,
+            role: form.role,
+            branch,
+          }),
         },
-        body: JSON.stringify({
-          name,
-          email,
-          password,
-          role: form.role,
-          branch,
-        }),
-      });
+      );
 
-      const data = await response.json();
+      const data =
+        await response.json();
 
       if (!response.ok) {
-        throw new Error(data.message || "Failed to create staff user.");
+        throw new Error(
+          data.message ||
+            "Failed to create staff user.",
+        );
       }
 
-      setUsers((current) => [data.user, ...current]);
+      setUsers((current) => [
+        data.user,
+        ...current,
+      ]);
+
       setShowModal(false);
-      setForm({ ...emptyForm });
+      setForm({
+        ...emptyForm,
+      });
+
       setFormError("");
       setEmailFieldError("");
     } catch (caughtError) {
@@ -387,75 +634,110 @@ export default function StaffManagementPage() {
     }
   }
 
-  async function handleUpdateUser(event: React.FormEvent<HTMLFormElement>) {
+  async function handleUpdateUser(
+    event: React.FormEvent<HTMLFormElement>,
+  ) {
     event.preventDefault();
+
     setEditError("");
 
-    if (!editingUser) return;
+    if (!editingUser) {
+      return;
+    }
 
     const name = form.name.trim();
     const email = form.email.trim();
-    const password = form.password.trim();
+    const password =
+      form.password.trim();
 
     if (!name) {
-      setEditError("Please enter the staff member's name.");
+      setEditError(
+        "Please enter the staff member's name.",
+      );
       return;
     }
 
     if (!email) {
-      setEditError("Please enter an email address.");
+      setEditError(
+        "Please enter an email address.",
+      );
       return;
     }
 
     if (!EMAIL_PATTERN.test(email)) {
-      setEditError("Please enter a valid email address.");
+      setEditError(
+        "Please enter a valid email address.",
+      );
       return;
     }
 
-    if (!form.branch && roleNeedsBranch(form.role)) {
-      setEditError("Please select a branch for this staff member.");
+    if (
+      !form.branch &&
+      roleNeedsBranch(form.role)
+    ) {
+      setEditError(
+        "Please select a branch for this staff member.",
+      );
       return;
     }
 
-    if (password && password.length < 6) {
-      setEditError("New password must contain at least 6 characters.");
+    if (
+      password &&
+      password.length < 6
+    ) {
+      setEditError(
+        "New password must contain at least 6 characters.",
+      );
       return;
     }
 
     try {
       setUpdating(true);
 
-      const token = localStorage.getItem("token");
+      const token =
+        localStorage.getItem("token");
 
       if (!token) {
         window.location.href = "/login";
         return;
       }
 
-      const response = await fetch(`${API_URL}/users/${editingUser._id}`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
+      const response = await fetch(
+        `${API_URL}/users/${editingUser._id}`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type":
+              "application/json",
+            Authorization:
+              `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            name,
+            email,
+            role: form.role,
+            branch: form.branch,
+            password:
+              password || undefined,
+          }),
         },
-        body: JSON.stringify({
-          name,
-          email,
-          role: form.role,
-          branch: form.branch,
-          password: password || undefined,
-        }),
-      });
+      );
 
-      const data = await response.json();
+      const data =
+        await response.json();
 
       if (!response.ok) {
-        throw new Error(data.message || "Failed to update staff user.");
+        throw new Error(
+          data.message ||
+            "Failed to update staff user.",
+        );
       }
 
       setUsers((current) =>
         current.map((user) =>
-          user._id === editingUser._id ? data.user : user,
+          user._id === editingUser._id
+            ? data.user
+            : user,
         ),
       );
 
@@ -463,7 +745,10 @@ export default function StaffManagementPage() {
       setEditingUser(null);
       setEditError("");
       setEmailFieldError("");
-      setForm({ ...emptyForm });
+
+      setForm({
+        ...emptyForm,
+      });
     } catch (caughtError) {
       console.error(caughtError);
 
@@ -477,46 +762,67 @@ export default function StaffManagementPage() {
     }
   }
 
-  async function handleDeleteUser(user: StaffUser) {
-    if (user.role === "SUPER_ADMIN") return;
+  async function handleDeleteUser(
+    user: StaffUser,
+  ) {
+    if (user.role === "SUPER_ADMIN") {
+      return;
+    }
 
-    const confirmed = window.confirm(
-      `Are you sure you want to delete ${user.name}?`,
-    );
+    const confirmed =
+      window.confirm(
+        `Deactivate ${user.name}? They will no longer be able to sign in.`,
+      );
 
-    if (!confirmed) return;
+    if (!confirmed) {
+      return;
+    }
 
     try {
       setError("");
 
-      const token = localStorage.getItem("token");
+      const token =
+        localStorage.getItem("token");
 
       if (!token) {
         window.location.href = "/login";
         return;
       }
 
-      const response = await fetch(`${API_URL}/users/${user._id}`, {
-        method: "DELETE",
-        headers: {
-          Authorization: `Bearer ${token}`,
+      const response = await fetch(
+        `${API_URL}/users/${user._id}`,
+        {
+          method: "DELETE",
+          headers: {
+            Authorization:
+              `Bearer ${token}`,
+          },
         },
-      });
+      );
 
-      const data = await response.json();
+      const data =
+        await response.json();
 
       if (!response.ok) {
-        throw new Error(data.message || "Failed to delete staff user.");
+        throw new Error(
+          data.message ||
+            "Failed to deactivate staff user.",
+        );
       }
 
-      setUsers((current) => current.filter((item) => item._id !== user._id));
+      setUsers((current) =>
+        current.filter(
+          (item) =>
+            item._id !== user._id,
+        ),
+      );
     } catch (caughtError) {
       console.error(caughtError);
 
       setError(
         caughtError instanceof Error
           ? caughtError.message
-          : "Failed to delete staff user.",
+          : "Failed to deactivate staff user.",
       );
     }
   }
@@ -527,292 +833,551 @@ export default function StaffManagementPage() {
         className="
           min-h-screen
           bg-(--background)
-          px-4
-          py-6
+          px-4 py-6
           text-(--foreground)
-          transition-colors
-          duration-300
-          sm:px-6
-          lg:px-8
+          sm:px-6 lg:px-8
         "
       >
-        <div className="mx-auto flex min-h-[480px] max-w-[1440px] items-center justify-center">
-          <LoadingSpinner text="Loading staff management..." />
+        <div
+          className="
+            mx-auto flex min-h-[520px]
+            max-w-[1440px]
+            items-center justify-center
+          "
+        >
+          <LoadingSpinner
+            text="Loading academy settings..."
+          />
         </div>
       </div>
     );
   }
 
   return (
-    <div>
-      <div className="df-page">
-        <PageHeader
-          eyebrow="Academy Management"
-          title="Staff Management"
-          description="Create and manage academy staff accounts, roles, and branch access."
-          actions={
-            <div className="flex flex-wrap items-center gap-2">
+    <div className="df-page">
+      <div
+        className="
+          mb-7 overflow-hidden
+          rounded-3xl border
+          border-(--line)
+          bg-(--card)
+        "
+      >
+        <div
+          className="
+            flex flex-col gap-6
+            p-6 lg:p-7
+          "
+        >
+          <PageHeader
+            eyebrow="Workspace Settings"
+            title="Academy Settings"
+            description="Manage your academy identity, branding, staff accounts, roles, and branch access from one place."
+          />
+
+          <div
+            className="
+              grid gap-2 rounded-2xl
+              border border-(--line)
+              bg-(--surface-muted)
+              p-2
+              md:grid-cols-2
+            "
+          >
+            <SettingsTabButton
+              active={
+                activeTab === "branding"
+              }
+              onClick={() =>
+                setActiveTab("branding")
+              }
+              icon={
+                <Settings2 size={18} />
+              }
+              title="Academy Branding"
+              description="Identity, logo, colors and regional settings"
+            />
+
+            <SettingsTabButton
+              active={
+                activeTab === "staff"
+              }
+              onClick={() =>
+                setActiveTab("staff")
+              }
+              icon={<Users size={18} />}
+              title="Staff Management"
+              description="Users, roles and branch access"
+            />
+          </div>
+        </div>
+      </div>
+
+      {activeTab === "branding" && (
+        <section>
+          <AcademyBranding />
+        </section>
+      )}
+
+      {activeTab === "staff" && (
+        <section>
+          <div
+            className="
+              mb-6 flex flex-col
+              gap-4
+              lg:flex-row
+              lg:items-end
+              lg:justify-between
+            "
+          >
+            <PageHeader
+              eyebrow="Academy Management"
+              title="Staff Management"
+              description="Create and manage academy staff accounts, roles, and branch access."
+            />
+
+            <div className="flex flex-wrap gap-2">
               <Button
                 variant="outline"
-                onClick={() => void loadData(true)}
+                onClick={() =>
+                  void loadData(true)
+                }
                 disabled={refreshing}
               >
                 <RefreshCw
                   size={17}
-                  className={refreshing ? "animate-spin" : ""}
+                  className={
+                    refreshing
+                      ? "animate-spin"
+                      : ""
+                  }
                 />
                 Refresh
               </Button>
 
-              <Button variant="primary" onClick={openModal}>
+              <Button
+                variant="primary"
+                onClick={openModal}
+              >
                 <UserPlus size={18} />
                 Add User
               </Button>
             </div>
-          }
-        />
-
-        {error && (
-          <div className="mb-6">
-            <ErrorState
-              title="Staff management error"
-              message={error}
-              action={
-                <Button
-                  variant="outline"
-                  onClick={() => void loadData(true)}
-                  disabled={refreshing}
-                >
-                  <RefreshCw
-                    size={16}
-                    className={refreshing ? "animate-spin" : ""}
-                  />
-                  Try again
-                </Button>
-              }
-            />
-          </div>
-        )}
-
-        <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          <SummaryCard
-            title="Total Staff"
-            value={users.length}
-            subtitle="All staff accounts"
-            icon={<Users size={20} />}
-          />
-
-          <SummaryCard
-            title="Coaches"
-            value={coaches}
-            subtitle="Academy coaching staff"
-            icon={<GraduationCap size={20} />}
-          />
-
-          <SummaryCard
-            title="Branch Admins"
-            value={branchAdmins}
-            subtitle="Branch management accounts"
-            icon={<Building2 size={20} />}
-          />
-        </div>
-
-        <Card padding="none">
-          <div
-            className="
-              flex
-              flex-col
-              gap-4
-              border-b
-              border-(--line)
-              px-5
-              py-5
-              sm:px-6
-              lg:flex-row
-              lg:items-center
-              lg:justify-between
-            "
-          >
-            <div>
-              <div className="flex items-center gap-2">
-                <h2 className="text-lg font-extrabold tracking-tight text-(--foreground)">
-                  Staff Accounts
-                </h2>
-
-                <Badge variant="neutral">{users.length}</Badge>
-              </div>
-
-              <p className="mt-1 text-sm text-(--ink-muted)">
-                Users who can access the DojoFlow management system.
-              </p>
-            </div>
-
-            <div
-              className="
-                rounded-xl
-                border
-                border-(--line)
-                bg-(--surface)
-                px-3.5
-                py-2
-                text-xs
-                font-semibold
-                text-(--ink-muted)
-              "
-            >
-              {users.length} accounts
-            </div>
           </div>
 
-          {users.length === 0 ? (
-            <div className="p-6">
-              <EmptyState
-                icon={<Users size={26} />}
-                title="No staff accounts found"
-                description="Create your first staff account to give your academy team access."
+          {error && (
+            <div className="mb-6">
+              <ErrorState
+                title="Staff management error"
+                message={error}
                 action={
-                  <Button variant="primary" onClick={openModal}>
-                    <UserPlus size={17} />
-                    Add Staff User
+                  <Button
+                    variant="outline"
+                    onClick={() =>
+                      void loadData(true)
+                    }
+                    disabled={refreshing}
+                  >
+                    <RefreshCw
+                      size={16}
+                      className={
+                        refreshing
+                          ? "animate-spin"
+                          : ""
+                      }
+                    />
+                    Try again
                   </Button>
                 }
               />
             </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[880px]">
-                <thead className="border-b border-(--line) bg-(--surface)">
-                  <tr>
-                    <th className="px-6 py-4 text-left text-[11px] font-bold uppercase tracking-[0.12em] text-(--ink-faint)">
-                      Staff
-                    </th>
-                    <th className="px-6 py-4 text-left text-[11px] font-bold uppercase tracking-[0.12em] text-(--ink-faint)">
-                      Role
-                    </th>
-                    <th className="px-6 py-4 text-left text-[11px] font-bold uppercase tracking-[0.12em] text-(--ink-faint)">
-                      Branch
-                    </th>
-                    <th className="px-6 py-4 text-left text-[11px] font-bold uppercase tracking-[0.12em] text-(--ink-faint)">
-                      Created
-                    </th>
-                    <th className="px-6 py-4 text-right text-[11px] font-bold uppercase tracking-[0.12em] text-(--ink-faint)">
-                      Actions
-                    </th>
-                  </tr>
-                </thead>
+          )}
 
-                <tbody className="divide-y divide-(--line)">
-                  {users.map((user) => {
-                    const RoleIcon = getRoleIcon(user.role);
+          <div
+            className="
+              mb-6 grid gap-4
+              sm:grid-cols-2
+              xl:grid-cols-3
+            "
+          >
+            <SummaryCard
+              title="Total Staff"
+              value={users.length}
+              subtitle="All staff accounts"
+              icon={<Users size={20} />}
+            />
 
-                    return (
-                      <tr
-                        key={user._id}
+            <SummaryCard
+              title="Coaches"
+              value={coaches}
+              subtitle="Academy coaching staff"
+              icon={
+                <GraduationCap size={20} />
+              }
+            />
+
+            <SummaryCard
+              title="Branch Admins"
+              value={branchAdmins}
+              subtitle="Branch management accounts"
+              icon={
+                <Building2 size={20} />
+              }
+            />
+          </div>
+
+          <Card padding="none">
+            <div
+              className="
+                flex flex-col gap-4
+                border-b border-(--line)
+                px-5 py-5
+                sm:px-6
+                lg:flex-row
+                lg:items-center
+                lg:justify-between
+              "
+            >
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2
+                    className="
+                      text-lg font-extrabold
+                      tracking-tight
+                      text-(--foreground)
+                    "
+                  >
+                    Staff Accounts
+                  </h2>
+
+                  <Badge variant="neutral">
+                    {users.length}
+                  </Badge>
+                </div>
+
+                <p
+                  className="
+                    mt-1 text-sm
+                    text-(--ink-muted)
+                  "
+                >
+                  Users who can access
+                  the DojoFlow management
+                  system.
+                </p>
+              </div>
+
+              <div
+                className="
+                  rounded-xl border
+                  border-(--line)
+                  bg-(--surface-muted)
+                  px-3.5 py-2
+                  text-xs font-semibold
+                  text-(--ink-muted)
+                "
+              >
+                {activeBranches.length}{" "}
+                active branch
+                {activeBranches.length === 1
+                  ? ""
+                  : "es"}
+              </div>
+            </div>
+
+            {users.length === 0 ? (
+              <div className="p-6">
+                <EmptyState
+                  icon={
+                    <Users size={26} />
+                  }
+                  title="No staff accounts found"
+                  description="Create your first staff account to give your academy team access."
+                  action={
+                    <Button
+                      variant="primary"
+                      onClick={openModal}
+                    >
+                      <UserPlus size={17} />
+                      Add Staff User
+                    </Button>
+                  }
+                />
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table
+                  className="
+                    w-full min-w-[880px]
+                  "
+                >
+                  <thead
+                    className="
+                      border-b
+                      border-(--line)
+                      bg-(--surface)
+                    "
+                  >
+                    <tr>
+                      <th
                         className="
-                          transition-colors
-                          duration-150
-                          hover:bg-(--hover-bg)
+                          px-6 py-4
+                          text-left
+                          text-[11px]
+                          font-bold
+                          uppercase
+                          tracking-[0.12em]
+                          text-(--ink-faint)
                         "
                       >
-                        <td className="px-6 py-5">
-                          <div className="flex items-center gap-3">
-                            <div
+                        Staff
+                      </th>
+
+                      <th
+                        className="
+                          px-6 py-4
+                          text-left
+                          text-[11px]
+                          font-bold
+                          uppercase
+                          tracking-[0.12em]
+                          text-(--ink-faint)
+                        "
+                      >
+                        Role
+                      </th>
+
+                      <th
+                        className="
+                          px-6 py-4
+                          text-left
+                          text-[11px]
+                          font-bold
+                          uppercase
+                          tracking-[0.12em]
+                          text-(--ink-faint)
+                        "
+                      >
+                        Branch
+                      </th>
+
+                      <th
+                        className="
+                          px-6 py-4
+                          text-left
+                          text-[11px]
+                          font-bold
+                          uppercase
+                          tracking-[0.12em]
+                          text-(--ink-faint)
+                        "
+                      >
+                        Created
+                      </th>
+
+                      <th
+                        className="
+                          px-6 py-4
+                          text-right
+                          text-[11px]
+                          font-bold
+                          uppercase
+                          tracking-[0.12em]
+                          text-(--ink-faint)
+                        "
+                      >
+                        Actions
+                      </th>
+                    </tr>
+                  </thead>
+
+                  <tbody
+                    className="
+                      divide-y divide-(--line)
+                    "
+                  >
+                    {users.map((user) => {
+                      const RoleIcon =
+                        getRoleIcon(
+                          user.role,
+                        );
+
+                      return (
+                        <tr
+                          key={user._id}
+                          className="
+                            transition-colors
+                            duration-150
+                            hover:bg-(--hover-bg)
+                          "
+                        >
+                          <td className="px-6 py-5">
+                            <div className="flex items-center gap-3">
+                              <div
+                                className="
+                                  flex h-11 w-11
+                                  shrink-0
+                                  items-center
+                                  justify-center
+                                  rounded-full
+                                  bg-(--accent-soft)
+                                  text-sm font-extrabold
+                                  text-(--accent)
+                                "
+                              >
+                                {getInitials(
+                                  user.name,
+                                )}
+                              </div>
+
+                              <div className="min-w-0">
+                                <p
+                                  className="
+                                    truncate
+                                    text-sm font-bold
+                                    text-(--foreground)
+                                  "
+                                >
+                                  {user.name}
+                                </p>
+
+                                <p
+                                  className="
+                                    mt-0.5 truncate
+                                    text-xs
+                                    text-(--ink-muted)
+                                  "
+                                >
+                                  {user.email}
+                                </p>
+                              </div>
+                            </div>
+                          </td>
+
+                          <td className="px-6 py-5">
+                            <Badge
+                              variant={getRoleVariant(
+                                user.role,
+                              )}
+                            >
+                              <RoleIcon
+                                size={14}
+                              />
+
+                              {getRoleLabel(
+                                user.role,
+                                roles,
+                              )}
+                            </Badge>
+                          </td>
+
+                          <td className="px-6 py-5">
+                            <div className="flex items-center gap-2">
+                              <Building2
+                                size={16}
+                                className="
+                                  shrink-0
+                                  text-(--ink-faint)
+                                "
+                              />
+
+                              <span
+                                className="
+                                  text-sm font-medium
+                                  text-(--ink-muted)
+                                "
+                              >
+                                {user.branch
+                                  ?.name ||
+                                  "All Branches"}
+                              </span>
+                            </div>
+                          </td>
+
+                          <td className="px-6 py-5">
+                            <span
                               className="
-                                flex
-                                h-11
-                                w-11
-                                shrink-0
-                                items-center
-                                justify-center
-                                rounded-full
-                                bg-(--accent-soft)
                                 text-sm
-                                font-extrabold
-                                text-(--accent)
+                                text-(--ink-muted)
                               "
                             >
-                              {getInitials(user.name)}
-                            </div>
-
-                            <div className="min-w-0">
-                              <p className="truncate text-sm font-bold text-(--foreground)">
-                                {user.name}
-                              </p>
-
-                              <p className="mt-0.5 truncate text-xs text-(--ink-muted)">
-                                {user.email}
-                              </p>
-                            </div>
-                          </div>
-                        </td>
-
-                        <td className="px-6 py-5">
-                          <Badge variant={getRoleVariant(user.role)}>
-                            <RoleIcon size={14} />
-                            {getRoleLabel(user.role, roles)}
-                          </Badge>
-                        </td>
-
-                        <td className="px-6 py-5">
-                          <div className="flex items-center gap-2">
-                            <Building2
-                              size={16}
-                              className="shrink-0 text-(--ink-faint)"
-                            />
-
-                            <span className="text-sm font-medium text-(--ink-muted)">
-                              {user.branch?.name || "All Branches"}
+                              {formatDate(
+                                user.createdAt,
+                              )}
                             </span>
-                          </div>
-                        </td>
+                          </td>
 
-                        <td className="px-6 py-5">
-                          <span className="text-sm text-(--ink-muted)">
-                            {formatDate(user.createdAt)}
-                          </span>
-                        </td>
-
-                        <td className="px-6 py-5 text-right">
-                          {user.role !== "SUPER_ADMIN" && (
-                            <div className="flex items-center justify-end gap-1">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => openEditModal(user)}
-                                title="Edit staff user"
-                                aria-label={`Edit ${user.name}`}
+                          <td className="px-6 py-5 text-right">
+                            {user.role !==
+                              "SUPER_ADMIN" && (
+                              <div
+                                className="
+                                  flex items-center
+                                  justify-end gap-1
+                                "
                               >
-                                <Pencil size={16} />
-                              </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() =>
+                                    openEditModal(
+                                      user,
+                                    )
+                                  }
+                                  title="Edit staff user"
+                                  aria-label={`Edit ${user.name}`}
+                                >
+                                  <Pencil
+                                    size={16}
+                                  />
+                                </Button>
 
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => void handleDeleteUser(user)}
-                                title="Delete staff user"
-                                aria-label={`Delete ${user.name}`}
-                                className="text-(--danger) hover:bg-(--danger-soft)"
-                              >
-                                <Trash2 size={16} />
-                              </Button>
-                            </div>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </Card>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() =>
+                                    void handleDeleteUser(
+                                      user,
+                                    )
+                                  }
+                                  title="Deactivate staff user"
+                                  aria-label={`Deactivate ${user.name}`}
+                                  className="
+                                    text-(--danger)
+                                    hover:bg-(--danger-soft)
+                                  "
+                                >
+                                  <Trash2
+                                    size={16}
+                                  />
+                                </Button>
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Card>
 
-        <p className="mt-4 text-xs text-(--ink-faint)">
-          {activeBranches.length} active branch
-          {activeBranches.length === 1 ? "" : "es"} available for staff
-          assignment.
-        </p>
-      </div>
+          <p
+            className="
+              mt-4 text-xs
+              text-(--ink-faint)
+            "
+          >
+            {activeBranches.length} active
+            branch
+            {activeBranches.length === 1
+              ? ""
+              : "es"}{" "}
+            available for staff assignment.
+          </p>
+        </section>
+      )}
 
       <Modal
         open={showModal}
@@ -849,7 +1414,12 @@ export default function StaffManagementPage() {
           className="space-y-5"
         >
           {formError && (
-            <FormAlert message={formError} onClose={() => setFormError("")} />
+            <FormAlert
+              message={formError}
+              onClose={() =>
+                setFormError("")
+              }
+            />
           )}
 
           <StaffFormFields
@@ -872,7 +1442,14 @@ export default function StaffManagementPage() {
         description="Update staff account information."
         size="md"
         footer={
-          <div className="flex w-full flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <div
+            className="
+              flex w-full
+              flex-col-reverse gap-2
+              sm:flex-row
+              sm:justify-end
+            "
+          >
             <Button
               type="button"
               variant="secondary"
@@ -899,7 +1476,12 @@ export default function StaffManagementPage() {
           className="space-y-5"
         >
           {editError && (
-            <FormAlert message={editError} onClose={() => setEditError("")} />
+            <FormAlert
+              message={editError}
+              onClose={() =>
+                setEditError("")
+              }
+            />
           )}
 
           <StaffFormFields
@@ -928,18 +1510,13 @@ function FormAlert({
   return (
     <div
       className="
-        flex
-        items-start
-        justify-between
-        gap-3
+        flex items-start
+        justify-between gap-3
         rounded-xl
-        border
-        border-(--danger-border)
+        border border-(--danger-border)
         bg-(--danger-soft)
-        px-4
-        py-3
-        text-sm
-        text-(--danger)
+        px-4 py-3
+        text-sm text-(--danger)
       "
     >
       <p>{message}</p>
@@ -947,7 +1524,11 @@ function FormAlert({
       <button
         type="button"
         onClick={onClose}
-        className="shrink-0 rounded-lg p-1 transition hover:bg-(--danger-soft)"
+        className="
+          shrink-0 rounded-lg p-1
+          transition
+          hover:bg-(--danger-soft)
+        "
         aria-label="Close error"
       >
         <X size={16} />
@@ -970,25 +1551,37 @@ function StaffFormFields({
   branches: Branch[];
   roles: RoleRecord[];
   onChange: (
-    event: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>,
+    event: React.ChangeEvent<
+      HTMLInputElement | HTMLSelectElement
+    >,
   ) => void;
-  onEmailBlur: (event: React.FocusEvent<HTMLInputElement>) => void;
+  onEmailBlur: (
+    event: React.FocusEvent<HTMLInputElement>,
+  ) => void;
   emailError: string;
   passwordLabel: string;
   passwordPlaceholder: string;
 }) {
-  const selectedRole = roles.find((role) => role.key === form.role);
+  const selectedRole =
+    roles.find(
+      (role) => role.key === form.role,
+    );
 
-  const branchRequired = selectedRole
-    ? selectedRole.dataScope === "BRANCH"
-    : true;
+  const branchRequired =
+    selectedRole
+      ? selectedRole.dataScope === "BRANCH"
+      : true;
 
   return (
     <>
       <div>
         <label
           htmlFor="staff-name"
-          className="mb-2 block text-sm font-semibold text-(--foreground)"
+          className="
+            mb-2 block text-sm
+            font-semibold
+            text-(--foreground)
+          "
         >
           Full Name
         </label>
@@ -998,7 +1591,7 @@ function StaffFormFields({
           name="name"
           value={form.name}
           onChange={onChange}
-          placeholder="Rahul Kumar"
+          placeholder="Enter staff name"
           required
         />
       </div>
@@ -1006,7 +1599,11 @@ function StaffFormFields({
       <div>
         <label
           htmlFor="staff-email"
-          className="mb-2 block text-sm font-semibold text-(--foreground)"
+          className="
+            mb-2 block text-sm
+            font-semibold
+            text-(--foreground)
+          "
         >
           Email
         </label>
@@ -1018,12 +1615,18 @@ function StaffFormFields({
           value={form.email}
           onChange={onChange}
           onBlur={onEmailBlur}
-          placeholder="rahul@dojoflow.com"
+          placeholder="staff@example.com"
           required
         />
 
         {emailError && (
-          <p className="mt-1.5 text-xs font-medium text-(--danger)">
+          <p
+            className="
+              mt-1.5 text-xs
+              font-medium
+              text-(--danger)
+            "
+          >
             {emailError}
           </p>
         )}
@@ -1032,7 +1635,11 @@ function StaffFormFields({
       <div>
         <label
           htmlFor="staff-password"
-          className="mb-2 block text-sm font-semibold text-(--foreground)"
+          className="
+            mb-2 block text-sm
+            font-semibold
+            text-(--foreground)
+          "
         >
           {passwordLabel}
         </label>
@@ -1044,14 +1651,21 @@ function StaffFormFields({
           value={form.password}
           onChange={onChange}
           placeholder={passwordPlaceholder}
-          required={passwordLabel === "Temporary Password"}
+          required={
+            passwordLabel ===
+            "Temporary Password"
+          }
         />
       </div>
 
       <div>
         <label
           htmlFor="staff-role"
-          className="mb-2 block text-sm font-semibold text-(--foreground)"
+          className="
+            mb-2 block text-sm
+            font-semibold
+            text-(--foreground)
+          "
         >
           Role
         </label>
@@ -1063,7 +1677,10 @@ function StaffFormFields({
           onChange={onChange}
         >
           {roles.map((role) => (
-            <option key={role.key} value={role.key}>
+            <option
+              key={role.key}
+              value={role.key}
+            >
               {role.name}
             </option>
           ))}
@@ -1073,9 +1690,15 @@ function StaffFormFields({
       <div>
         <label
           htmlFor="staff-branch"
-          className="mb-2 block text-sm font-semibold text-(--foreground)"
+          className="
+            mb-2 block text-sm
+            font-semibold
+            text-(--foreground)
+          "
         >
-          {branchRequired ? "Branch" : "Branch (optional)"}
+          {branchRequired
+            ? "Branch"
+            : "Branch (optional)"}
         </label>
 
         <Select
@@ -1085,11 +1708,16 @@ function StaffFormFields({
           onChange={onChange}
         >
           <option value="">
-            {branchRequired ? "Select a branch" : "All branches"}
+            {branchRequired
+              ? "Select a branch"
+              : "All branches"}
           </option>
 
           {branches.map((branch) => (
-            <option key={branch._id} value={branch._id}>
+            <option
+              key={branch._id}
+              value={branch._id}
+            >
               {branch.name}
             </option>
           ))}

@@ -1,16 +1,23 @@
 const express = require("express");
 
-const { login } = require("../controllers/auth.controller");
+const { login, changePassword } = require("../controllers/auth.controller");
 
 const protect = require("../middleware/auth.middleware");
-const authorize = require("../middleware/role.middleware");
 
 const router = express.Router();
 
-// Public login
+/* -------------------------
+   POST /api/auth/login
+   Public — rate-limited at server level
+------------------------- */
+
 router.post("/login", login);
 
-// Logged-in user's profile
+/* -------------------------
+   GET /api/auth/me
+   Returns the authenticated user's profile.
+------------------------- */
+
 router.get("/me", protect, (req, res) => {
   res.status(200).json({
     success: true,
@@ -24,17 +31,11 @@ router.get("/me", protect, (req, res) => {
   });
 });
 
-// Super Admin test route
-router.get(
-  "/admin-test",
-  protect,
-  authorize("SUPER_ADMIN"),
-  (req, res) => {
-    res.status(200).json({
-      success: true,
-      message: "Super Admin access granted",
-    });
-  }
-);
+/* -------------------------
+   PATCH /api/auth/change-password
+   Authenticated users can change their own password.
+------------------------- */
+
+router.patch("/change-password", protect, changePassword);
 
 module.exports = router;

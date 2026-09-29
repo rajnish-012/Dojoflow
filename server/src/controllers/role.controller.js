@@ -66,11 +66,7 @@ const createRole = async (req, res) => {
     }
 
     if (name.length > 40) {
-      return sendError(
-        res,
-        400,
-        "Role name must be 40 characters or less"
-      );
+      return sendError(res, 400, "Role name must be 40 characters or less");
     }
 
     if (!DATA_SCOPES.includes(dataScope)) {
@@ -80,11 +76,7 @@ const createRole = async (req, res) => {
     const key = toRoleKey(name);
 
     if (!KEY_PATTERN.test(key)) {
-      return sendError(
-        res,
-        400,
-        "Role name must start with a letter"
-      );
+      return sendError(res, 400, "Role name must start with a letter");
     }
 
     const created = await Role.create({
@@ -102,11 +94,7 @@ const createRole = async (req, res) => {
     });
   } catch (error) {
     if (error.code === 11000) {
-      return sendError(
-        res,
-        409,
-        "A role with a similar name already exists"
-      );
+      return sendError(res, 409, "A role with a similar name already exists");
     }
 
     if (error.name === "ValidationError") {
@@ -145,7 +133,7 @@ const updateRole = async (req, res) => {
         return sendError(
           res,
           400,
-          "Role name is required (40 characters or less)"
+          "Role name is required (40 characters or less)",
         );
       }
 
@@ -161,7 +149,7 @@ const updateRole = async (req, res) => {
         return sendError(
           res,
           400,
-          "The data scope of a built-in role cannot be changed"
+          "The data scope of a built-in role cannot be changed",
         );
       }
 
@@ -180,7 +168,7 @@ const updateRole = async (req, res) => {
           return sendError(
             res,
             409,
-            `${withoutBranch} user(s) with this role have no branch. Assign a branch to them first.`
+            `${withoutBranch} user(s) with this role have no branch. Assign a branch to them first.`,
           );
         }
       }
@@ -219,11 +207,7 @@ const deleteRole = async (req, res) => {
     }
 
     if (role.isSystem) {
-      return sendError(
-        res,
-        400,
-        "Built-in roles cannot be deleted"
-      );
+      return sendError(res, 400, "Built-in roles cannot be deleted");
     }
 
     const userCount = await User.countDocuments({ role: role.key });
@@ -232,17 +216,14 @@ const deleteRole = async (req, res) => {
       return sendError(
         res,
         409,
-        `${userCount} user(s) still use this role. Change their role first.`
+        `${userCount} user(s) still use this role. Change their role first.`,
       );
     }
 
     await Role.findByIdAndDelete(id);
 
     // Remove the role from every module's "Visible to" list.
-    await Module.updateMany(
-      {},
-      { $pull: { allowedRoles: role.key } }
-    );
+    await Module.updateMany({}, { $pull: { allowedRoles: role.key } });
 
     res.status(200).json({
       success: true,

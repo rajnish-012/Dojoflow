@@ -3,14 +3,14 @@
 import { useEffect, useMemo, useState } from "react";
 
 import {
-  AlertCircle,
   CalendarDays,
+  CalendarOff,
   Check,
   CheckCircle2,
   Clock3,
+  Info,
   RefreshCw,
   Search,
-  Users,
   X,
   XCircle,
 } from "lucide-react";
@@ -23,37 +23,221 @@ import {
   ErrorState,
   Input,
   LoadingSpinner,
+  Modal,
   PageHeader,
   SummaryCard,
 } from "@/components/ui";
 
 import {
-  getMakeups,
-  completeMakeup,
   cancelMakeup,
+  completeMakeup,
+  getMakeups,
+  scheduleMakeup,
+  type BranchScheduleSlot,
   type Makeup,
+  type MakeupDateAvailability,
   type MakeupStatus,
-} from "@/lib/api";
+} from "@/lib/makeupApi";
+import { getBranchMonthCalendar } from "@/lib/branchScheduleApi";
 
 type FilterStatus = "ALL" | MakeupStatus;
 
-function getStudentName(makeup: Makeup) {
+type Holiday = {
+  _id: string;
+
+  date: string;
+
+  name: string;
+
+  description?: string;
+
+  branch?:
+    | string
+    | {
+        _id: string;
+        name: string;
+      }
+    | null;
+
+  isActive?: boolean;
+};
+
+type HolidayMap = Record<string, Holiday>;
+
+/* ======================================================
+   DATE HELPERS
+====================================================== */
+
+function getLocalDate(daysFromToday = 0) {
+  const date = new Date();
+
+  date.setDate(date.getDate() + daysFromToday);
+
+  const year = date.getFullYear();
+
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+
+  const day = String(date.getDate()).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+}
+
+function getMinimumMakeupDate(originalDate: string) {
+  return originalDate > getLocalDate() ? originalDate : getLocalDate();
+}
+
+function getCalendarDate(value?: string | Date | null) {
+  if (!value) {
+    return "";
+  }
+
+  /*
+   * Date-only strings should never
+   * be converted through UTC because
+   * that can move the calendar date.
+   */
   if (
-    typeof makeup.student === "object" &&
-    makeup.student !== null
+    typeof value === "string" &&
+    /^\d{4}-\d{2}-\d{2}$/.test(value)
   ) {
+    return value;
+  }
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Kolkata",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+
+  const year = parts.find((part) => part.type === "year")?.value || "";
+
+  const month = parts.find((part) => part.type === "month")?.value || "";
+
+  const day = parts.find((part) => part.type === "day")?.value || "";
+
+  if (!year || !month || !day) {
+    return "";
+  }
+
+  return `${year}-${month}-${day}`;
+}
+
+function formatDate(value?: string | null) {
+  if (!value) {
+    return "Not scheduled";
+  }
+
+  const calendarDate = getCalendarDate(value);
+
+  if (!calendarDate) {
+    return "—";
+  }
+
+  const parsedDate = new Date(`${calendarDate}T00:00:00`);
+
+  if (Number.isNaN(parsedDate.getTime())) {
+    return "—";
+  }
+
+  return parsedDate.toLocaleDateString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+/* ======================================================
+   TIME HELPERS
+====================================================== */
+
+function formatTime(time?: string | null) {
+  if (!time) {
+    return "—";
+  }
+
+  const match = /^(\d{2}):(\d{2})$/.exec(time);
+
+  if (!match) {
+    return time;
+  }
+
+  const hours = Number(match[1]);
+
+  const minutes = Number(match[2]);
+
+  const suffix = hours >= 12 ? "PM" : "AM";
+
+  const displayHour = hours % 12 || 12;
+
+  return `${displayHour}:${String(minutes).padStart(2, "0")} ${suffix}`;
+}
+
+function formatTimeRange(slot: BranchScheduleSlot) {
+  return `${formatTime(slot.startTime)} – ${formatTime(slot.endTime)}`;
+}
+
+/* ======================================================
+   STUDENT / BRANCH HELPERS
+====================================================== */
+
+function getStudentName(makeup: Makeup) {
+  if (typeof makeup.student === "object" && makeup.student !== null) {
     return makeup.student.name;
   }
 
   return "Unknown Student";
 }
 
-function getStudentPhone(makeup: Makeup) {
+function getStudentAge(makeup: Makeup) {
   if (
     typeof makeup.student === "object" &&
-    makeup.student !== null
+    makeup.student !== null &&
+    makeup.student.age
   ) {
-    return makeup.student.phone || "";
+    return makeup.student.age;
+  }
+
+  return null;
+}
+
+function getStudentPhone(makeup: Makeup) {
+  if (typeof makeup.student === "object" && makeup.student !== null) {
+    return makeup.student.phone || "No phone";
+  }
+
+  return "No phone";
+}
+
+function getStudentEmail(makeup: Makeup) {
+  if (typeof makeup.student === "object" && makeup.student !== null) {
+    return makeup.student.email || "No email";
+  }
+
+  return "No email";
+}
+
+function getBranchName(makeup: Makeup) {
+  if (typeof makeup.branch === "object" && makeup.branch !== null) {
+    return makeup.branch.name;
+  }
+
+  return "No branch";
+}
+
+function getBranchId(makeup: Makeup) {
+  if (typeof makeup.branch === "object" && makeup.branch !== null) {
+    return makeup.branch._id;
+  }
+
+  if (typeof makeup.branch === "string") {
+    return makeup.branch;
   }
 
   return "";
@@ -71,78 +255,203 @@ function getInitials(name: string) {
   );
 }
 
-function formatDate(date?: string) {
-  if (!date) return "—";
+/* ======================================================
+   STATUS
+====================================================== */
 
-  const parsedDate = new Date(date);
+function getStatusConfig(status: MakeupStatus) {
+  const config = {
+    SCHEDULED: {
+      label: "Scheduled",
+      variant: "warning" as const,
+      icon: <Clock3 size={13} />,
+    },
 
-  if (Number.isNaN(parsedDate.getTime())) {
-    return "—";
+    COMPLETED: {
+      label: "Completed",
+      variant: "success" as const,
+      icon: <Check size={13} />,
+    },
+
+    CANCELLED: {
+      label: "Cancelled",
+      variant: "danger" as const,
+      icon: <X size={13} />,
+    },
+  };
+
+  return config[status];
+}
+
+/* ======================================================
+   AUTH
+====================================================== */
+
+function getToken() {
+  if (typeof window === "undefined") {
+    return "";
   }
 
-  return parsedDate.toLocaleDateString("en-IN", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
+  return localStorage.getItem("token") || "";
+}
+
+/* ======================================================
+   HOLIDAYS
+====================================================== */
+
+async function getHolidaysForMakeups(): Promise<Holiday[]> {
+  const token = getToken();
+
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api";
+
+  const response = await fetch(`${apiUrl}/holidays`, {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    cache: "no-store",
   });
-}
 
-function getStatusVariant(status: MakeupStatus) {
-  switch (status) {
-    case "SCHEDULED":
-      return "warning" as const;
+  let data: unknown = null;
 
-    case "COMPLETED":
-      return "success" as const;
-
-    case "CANCELLED":
-      return "danger" as const;
-
-    default:
-      return "neutral" as const;
+  try {
+    data = await response.json();
+  } catch {
+    data = null;
   }
-}
 
-function getStatusIcon(status: MakeupStatus) {
-  switch (status) {
-    case "SCHEDULED":
-      return <Clock3 size={13} />;
+  if (!response.ok) {
+    const message =
+      typeof data === "object" &&
+      data !== null &&
+      "message" in data &&
+      typeof data.message === "string"
+        ? data.message
+        : "Failed to fetch holidays.";
 
-    case "COMPLETED":
-      return <Check size={13} />;
-
-    case "CANCELLED":
-      return <X size={13} />;
-
-    default:
-      return null;
+    throw new Error(message);
   }
+
+  if (
+    typeof data === "object" &&
+    data !== null &&
+    "holidays" in data &&
+    Array.isArray(data.holidays)
+  ) {
+    return data.holidays as Holiday[];
+  }
+
+  return [];
 }
 
-function getStatusLabel(status: MakeupStatus) {
-  return (
-    status.charAt(0) +
-    status.slice(1).toLowerCase()
+function createHolidayMap(holidays: Holiday[]) {
+  return holidays.reduce<HolidayMap>((map, holiday) => {
+    if (holiday.isActive === false) {
+      return map;
+    }
+
+    const date = getCalendarDate(holiday.date);
+
+    if (!date) {
+      return map;
+    }
+
+    if (!map[date]) {
+      map[date] = holiday;
+    }
+
+    return map;
+  }, {});
+}
+
+function getHolidayForDate(
+  date: string,
+  holidayMap: HolidayMap,
+  branchId: string,
+) {
+  const holiday = holidayMap[date];
+
+  if (!holiday) {
+    return null;
+  }
+
+  /*
+   * Global holiday.
+   */
+  if (!holiday.branch) {
+    return holiday;
+  }
+
+  const holidayBranchId =
+    typeof holiday.branch === "string" ? holiday.branch : holiday.branch._id;
+
+  if (holidayBranchId && branchId && holidayBranchId === branchId) {
+    return holiday;
+  }
+
+  return null;
+}
+
+function getHolidayForMakeup(makeup: Makeup, holidayMap: HolidayMap) {
+  if (!makeup.makeupDate) {
+    return null;
+  }
+
+  return getHolidayForDate(
+    getCalendarDate(makeup.makeupDate),
+    holidayMap,
+    getBranchId(makeup),
   );
 }
 
+/* ======================================================
+   PAGE
+====================================================== */
+
 export default function MakeupsPage() {
   const [makeups, setMakeups] = useState<Makeup[]>([]);
+
+  const [holidays, setHolidays] = useState<Holiday[]>([]);
+
+  const [holidayMap, setHolidayMap] = useState<HolidayMap>({});
+
   const [loading, setLoading] = useState(true);
+
   const [refreshing, setRefreshing] = useState(false);
-  const [actionLoading, setActionLoading] = useState("");
 
   const [error, setError] = useState("");
-  const [success, setSuccess] = useState("");
-
-  const [statusFilter, setStatusFilter] =
-    useState<FilterStatus>("ALL");
 
   const [search, setSearch] = useState("");
 
-  async function loadMakeups(
-    showRefreshLoader = false,
-  ) {
+  const [statusFilter, setStatusFilter] = useState<FilterStatus>("ALL");
+
+  const [actionLoading, setActionLoading] = useState("");
+
+  const [success, setSuccess] = useState("");
+
+  const [showScheduleModal, setShowScheduleModal] = useState(false);
+
+  const [scheduleTarget, setScheduleTarget] = useState<Makeup | null>(null);
+
+  const [scheduleDate, setScheduleDate] = useState("");
+
+  const [scheduleNotes, setScheduleNotes] = useState("");
+
+  const [scheduleError, setScheduleError] = useState("");
+
+  const [scheduleHoliday, setScheduleHoliday] = useState<Holiday | null>(null);
+
+  const [dateAvailability, setDateAvailability] =
+    useState<MakeupDateAvailability | null>(null);
+
+  const [scheduleLoading, setScheduleLoading] = useState(false);
+
+  /* ====================================================
+     LOAD MAKEUPS
+  ==================================================== */
+
+  const loadMakeups = async (showRefreshLoader = false) => {
     try {
       if (showRefreshLoader) {
         setRefreshing(true);
@@ -152,693 +461,1835 @@ export default function MakeupsPage() {
 
       setError("");
 
-      const response = await getMakeups();
+      const [makeupResponse, holidayResponse] = await Promise.all([
+        getMakeups(),
+        getHolidaysForMakeups(),
+      ]);
 
-      setMakeups(
-        Array.isArray(response?.makeups)
-          ? response.makeups
-          : [],
-      );
-    } catch (loadError: unknown) {
-      console.error(
-        "Makeups loading error:",
-        loadError,
-      );
+      const loadedMakeups = makeupResponse.makeups || [];
+
+      const loadedHolidays = holidayResponse || [];
+
+      setMakeups(loadedMakeups);
+
+      setHolidays(loadedHolidays);
+
+      setHolidayMap(createHolidayMap(loadedHolidays));
+    } catch (err) {
+      console.error(err);
 
       setError(
-        loadError instanceof Error
-          ? loadError.message
-          : "Failed to load makeup classes.",
+        err instanceof Error ? err.message : "Failed to load makeup classes.",
       );
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }
+  };
 
   useEffect(() => {
-    void loadMakeups();
+    loadMakeups();
   }, []);
 
-  async function handleComplete(id: string) {
-    const confirmed = window.confirm(
-      "Are you sure you want to mark this makeup class as completed?",
-    );
-
-    if (!confirmed) return;
-
-    try {
-      setActionLoading(id);
-      setError("");
-      setSuccess("");
-
-      await completeMakeup(id);
-
-      setSuccess(
-        "Makeup class marked as completed successfully.",
-      );
-
-      await loadMakeups();
-    } catch (completeError: unknown) {
-      console.error(
-        "Complete makeup error:",
-        completeError,
-      );
-
-      setError(
-        completeError instanceof Error
-          ? completeError.message
-          : "Failed to complete makeup class.",
-      );
-    } finally {
-      setActionLoading("");
+  useEffect(() => {
+    if (!success) {
+      return;
     }
-  }
 
-  async function handleCancel(id: string) {
-    const confirmed = window.confirm(
-      "Are you sure you want to cancel this makeup class?",
-    );
-
-    if (!confirmed) return;
-
-    try {
-      setActionLoading(id);
-      setError("");
+    const timer = window.setTimeout(() => {
       setSuccess("");
+    }, 4000);
 
-      await cancelMakeup(id);
+    return () => window.clearTimeout(timer);
+  }, [success]);
 
-      setSuccess(
-        "Makeup class cancelled successfully.",
-      );
-
-      await loadMakeups();
-    } catch (cancelError: unknown) {
-      console.error(
-        "Cancel makeup error:",
-        cancelError,
-      );
-
-      setError(
-        cancelError instanceof Error
-          ? cancelError.message
-          : "Failed to cancel makeup class.",
-      );
-    } finally {
-      setActionLoading("");
-    }
-  }
-
-  const statistics = useMemo(
-    () => ({
-      total: makeups.length,
-      scheduled: makeups.filter(
-        (makeup) => makeup.status === "SCHEDULED",
-      ).length,
-      completed: makeups.filter(
-        (makeup) => makeup.status === "COMPLETED",
-      ).length,
-      cancelled: makeups.filter(
-        (makeup) => makeup.status === "CANCELLED",
-      ).length,
-    }),
-    [makeups],
-  );
+  /* ====================================================
+     FILTER
+  ==================================================== */
 
   const filteredMakeups = useMemo(() => {
-    const searchValue = search
-      .toLowerCase()
-      .trim();
+    const query = search.trim().toLowerCase();
 
     return makeups.filter((makeup) => {
       const matchesStatus =
-        statusFilter === "ALL" ||
-        makeup.status === statusFilter;
+        statusFilter === "ALL" || makeup.status === statusFilter;
 
-      const studentName =
-        getStudentName(makeup).toLowerCase();
+      if (!query) {
+        return matchesStatus;
+      }
 
-      const studentPhone =
-        getStudentPhone(makeup).toLowerCase();
+      const studentName = getStudentName(makeup).toLowerCase();
+
+      const phone = getStudentPhone(makeup).toLowerCase();
+
+      const email = getStudentEmail(makeup).toLowerCase();
+
+      const branch = getBranchName(makeup).toLowerCase();
+
+      const curriculum = makeup.curriculumTitle?.toLowerCase().trim() || "";
+
+      const holiday = getHolidayForMakeup(makeup, holidayMap);
+
+      const holidayName = holiday?.name?.toLowerCase() || "";
 
       const matchesSearch =
-        !searchValue ||
-        studentName.includes(searchValue) ||
-        studentPhone.includes(searchValue);
+        studentName.includes(query) ||
+        phone.includes(query) ||
+        email.includes(query) ||
+        branch.includes(query) ||
+        curriculum.includes(query) ||
+        holidayName.includes(query);
 
       return matchesStatus && matchesSearch;
     });
-  }, [makeups, statusFilter, search]);
+  }, [makeups, search, statusFilter, holidayMap]);
 
-  const scheduledPercentage =
-    statistics.total > 0
-      ? Math.round(
-          (statistics.scheduled /
-            statistics.total) *
-            100,
-        )
-      : 0;
+  /* ====================================================
+     SUMMARY
+  ==================================================== */
+
+  const scheduledCount = makeups.filter(
+    (makeup) => makeup.status === "SCHEDULED",
+  ).length;
+
+  const completedCount = makeups.filter(
+    (makeup) => makeup.status === "COMPLETED",
+  ).length;
+
+  const cancelledCount = makeups.filter(
+    (makeup) => makeup.status === "CANCELLED",
+  ).length;
+
+  const overdueCount = makeups.filter((makeup) => {
+    if (makeup.status !== "SCHEDULED" || !makeup.makeupDate) {
+      return false;
+    }
+
+    const makeupHoliday = getHolidayForMakeup(makeup, holidayMap);
+
+    if (makeupHoliday) {
+      return false;
+    }
+
+    return getCalendarDate(makeup.makeupDate) < getLocalDate();
+  }).length;
+
+  /* ====================================================
+     LOAD DATE AVAILABILITY
+  ==================================================== */
+
+  const loadDateAvailability = async (
+    date: string,
+    target: Makeup,
+  ): Promise<MakeupDateAvailability | null> => {
+    if (!date) {
+      setDateAvailability(null);
+      setScheduleHoliday(null);
+      return null;
+    }
+
+    const branchId = getBranchId(target);
+
+    if (!branchId) {
+      setDateAvailability(null);
+
+      setScheduleError(
+        "This student is not assigned to a branch. A branch training schedule cannot be checked.",
+      );
+
+      return null;
+    }
+
+    setScheduleLoading(true);
+
+    try {
+      const [year, month] = date.split("-").map(Number);
+      const calendar = await getBranchMonthCalendar(branchId, year, month);
+      const calendarDay = calendar.days.find((day) => day.date === date);
+
+      if (!calendarDay) {
+        throw new Error("Could not resolve this date on the branch calendar.");
+      }
+
+      const activeSlots = calendarDay.slots.filter(
+        (slot) => slot && slot.isActive !== false && slot.startTime && slot.endTime,
+      );
+      const holiday =
+        getHolidayForDate(date, holidayMap, branchId) ||
+        (calendarDay.holiday
+          ? {
+              ...calendarDay.holiday,
+              date,
+              isActive: true,
+            }
+          : null);
+      const availability: MakeupDateAvailability = {
+        date,
+        dayOfWeek: calendarDay.dayOfWeek,
+        dayName: calendarDay.dayName,
+        configured: calendarDay.scheduleConfigured,
+        isOpen:
+          calendarDay.isTrainingDay && activeSlots.length > 0 && !holiday,
+        isClosed: calendarDay.isClosed || activeSlots.length === 0,
+        openingTime: calendarDay.openingTime,
+        closingTime: calendarDay.closingTime,
+        slots: activeSlots,
+        holiday: holiday || undefined,
+      };
+
+      setDateAvailability(availability);
+
+      setScheduleHoliday(holiday);
+
+      /*
+       * Holiday takes priority over
+       * weekly availability.
+       */
+      if (holiday) {
+        setScheduleError(
+          `"${holiday.name}" is a holiday on ${formatDate(
+            date,
+          )}. A makeup class cannot be scheduled on a holiday.`,
+        );
+
+        return availability;
+      }
+
+      /*
+       * The backend requires an active session before it
+       * accepts a makeup date.
+       */
+      if (!availability.configured && activeSlots.length === 0) {
+        setScheduleError(
+          "This branch has no training schedule configured. Configure a training session before scheduling a makeup.",
+        );
+        return availability;
+      }
+
+      if (!availability.isOpen) {
+        setScheduleError(
+          `${availability.dayName} is closed for this branch. No training session is scheduled.`,
+        );
+
+        return availability;
+      }
+
+      setScheduleError("");
+      return availability;
+    } catch (err) {
+      console.error(err);
+
+      setDateAvailability(null);
+
+      setScheduleError(
+        err instanceof Error
+          ? err.message
+          : "Failed to check branch training availability.",
+      );
+      return null;
+    } finally {
+      setScheduleLoading(false);
+    }
+  };
+
+  /* ====================================================
+     OPEN SCHEDULE MODAL
+  ==================================================== */
+
+  const openScheduleModal = async (makeup: Makeup) => {
+    const existingDate = getCalendarDate(makeup.makeupDate);
+    const minimumDate = getMinimumMakeupDate(
+      getCalendarDate(makeup.originalDate),
+    );
+    const defaultDate =
+      existingDate && existingDate >= minimumDate
+        ? existingDate
+        : getLocalDate(1) >= minimumDate
+          ? getLocalDate(1)
+          : minimumDate;
+
+    setScheduleTarget(makeup);
+
+    setScheduleDate(defaultDate);
+
+    setScheduleNotes(makeup.notes || "");
+
+    setScheduleError("");
+
+    setScheduleHoliday(null);
+
+    setDateAvailability(null);
+
+    setError("");
+
+    setShowScheduleModal(true);
+
+    await loadDateAvailability(defaultDate, makeup);
+  };
+
+  /* ====================================================
+     CLOSE MODAL
+  ==================================================== */
+
+  const closeScheduleModal = () => {
+    if (actionLoading || scheduleLoading) {
+      return;
+    }
+
+    setShowScheduleModal(false);
+
+    setScheduleTarget(null);
+
+    setScheduleDate("");
+
+    setScheduleNotes("");
+
+    setScheduleError("");
+
+    setScheduleHoliday(null);
+
+    setDateAvailability(null);
+  };
+
+  /* ====================================================
+     DATE CHANGE
+  ==================================================== */
+
+  const handleScheduleDateChange = async (value: string) => {
+    setScheduleDate(value);
+
+    setScheduleError("");
+
+    setScheduleHoliday(null);
+
+    setDateAvailability(null);
+
+    if (!value || !scheduleTarget) {
+      return;
+    }
+
+    const originalDate = getCalendarDate(scheduleTarget.originalDate);
+
+    if (originalDate && value < originalDate) {
+      setScheduleError(
+        "Makeup date cannot be before the original missed date.",
+      );
+
+      return;
+    }
+
+    if (value < getLocalDate()) {
+      setScheduleError("Makeup date cannot be in the past.");
+      return;
+    }
+
+    await loadDateAvailability(value, scheduleTarget);
+  };
+
+  /* ====================================================
+     HANDLE SCHEDULE
+  ==================================================== */
+
+  const handleSchedule = async () => {
+    if (!scheduleTarget) {
+      return;
+    }
+
+    setScheduleError("");
+
+    if (!scheduleDate) {
+      setScheduleError("Please select a makeup date.");
+
+      return;
+    }
+
+    const originalDate = getCalendarDate(scheduleTarget.originalDate);
+
+    if (originalDate && scheduleDate < originalDate) {
+      setScheduleError(
+        "Makeup date cannot be before the original missed date.",
+      );
+
+      return;
+    }
+
+    if (scheduleDate < getLocalDate()) {
+      setScheduleError("Makeup date cannot be in the past.");
+      return;
+    }
+
+    const branchId = getBranchId(scheduleTarget);
+
+    /*
+     * Always perform a final
+     * client-side availability check.
+     */
+    let verifiedAvailability = dateAvailability;
+    if (
+      !verifiedAvailability ||
+      verifiedAvailability.date !== scheduleDate
+    ) {
+      verifiedAvailability = await loadDateAvailability(
+        scheduleDate,
+        scheduleTarget,
+      );
+      if (!verifiedAvailability) return;
+    }
+
+    const selectedHoliday = getHolidayForDate(
+      scheduleDate,
+      holidayMap,
+      branchId,
+    );
+
+    if (selectedHoliday) {
+      setScheduleHoliday(selectedHoliday);
+
+      setScheduleError(
+        `"${selectedHoliday.name}" is a holiday on ${formatDate(
+          scheduleDate,
+        )}. A makeup class cannot be scheduled on a holiday.`,
+      );
+
+      return;
+    }
+
+    if (!verifiedAvailability.isOpen) {
+      setScheduleError(
+        `${verifiedAvailability.dayName} has no active training session. Select another date.`,
+      );
+
+      return;
+    }
+
+    try {
+      setActionLoading(scheduleTarget._id);
+
+      setError("");
+
+      setSuccess("");
+
+      await scheduleMakeup(scheduleTarget._id, {
+        makeupDate: scheduleDate,
+        notes: scheduleNotes.trim() || undefined,
+      });
+
+      closeScheduleModal();
+
+      setSuccess("Makeup class scheduled successfully.");
+
+      await loadMakeups();
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Failed to schedule makeup class.";
+
+      /*
+       * Keep backend validation
+       * visible inside the modal.
+       */
+      setScheduleError(message);
+    } finally {
+      setActionLoading("");
+    }
+  };
+
+  /* ====================================================
+     COMPLETE
+  ==================================================== */
+
+  const handleComplete = async (makeup: Makeup) => {
+    const holiday = getHolidayForMakeup(makeup, holidayMap);
+
+    if (makeup.status === "SCHEDULED" && holiday) {
+      setError(
+        `"${holiday.name}" is a holiday on ${formatDate(
+          makeup.makeupDate,
+        )}. Reschedule this makeup before completing it.`,
+      );
+
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Mark ${getStudentName(makeup)}'s makeup class as completed?`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      setActionLoading(makeup._id);
+
+      setError("");
+
+      setSuccess("");
+
+      await completeMakeup(makeup._id);
+
+      setSuccess("Makeup class marked as completed successfully.");
+
+      await loadMakeups();
+    } catch (err) {
+      console.error(err);
+
+      const message =
+        err instanceof Error ? err.message : "Failed to complete makeup class.";
+
+      if (message.toLowerCase().includes("holiday")) {
+        setError(`${message} Please reschedule the makeup.`);
+      } else {
+        setError(message);
+      }
+    } finally {
+      setActionLoading("");
+    }
+  };
+
+  /* ====================================================
+     CANCEL
+  ==================================================== */
+
+  const handleCancel = async (makeup: Makeup) => {
+    const confirmed = window.confirm(
+      `Cancel ${getStudentName(makeup)}'s makeup class?`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      setActionLoading(makeup._id);
+
+      setError("");
+
+      setSuccess("");
+
+      await cancelMakeup(makeup._id);
+
+      setSuccess("Makeup class cancelled successfully.");
+
+      await loadMakeups();
+    } catch (err) {
+      console.error(err);
+
+      setError(
+        err instanceof Error ? err.message : "Failed to cancel makeup class.",
+      );
+    } finally {
+      setActionLoading("");
+    }
+  };
+
+  /* ====================================================
+     LOADING
+  ==================================================== */
 
   if (loading) {
     return (
-      <div className="flex min-h-[70vh] items-center justify-center px-6">
-        <LoadingSpinner
-          text="Loading makeup classes..."
-        />
-      </div>
+      <main>
+        <div className="df-page">
+          <LoadingSpinner fullPage size="lg" text="Loading makeup classes..." />
+        </div>
+      </main>
     );
   }
 
+  /* ====================================================
+     UI
+  ==================================================== */
+
   return (
-    
+    <main>
       <div className="df-page">
         <PageHeader
-          eyebrow="Academy Management"
+          eyebrow="Attendance management"
           title="Makeup Classes"
-          description="Manage scheduled, completed, and cancelled makeup classes."
+          description="
+            Track missed classes, schedule makeup sessions
+            and manage training recovery.
+          "
           actions={
             <Button
               variant="outline"
-              onClick={() => void loadMakeups(true)}
+              size="lg"
+              onClick={() => loadMakeups(true)}
               disabled={refreshing}
-              leftIcon={
-                <RefreshCw
-                  size={17}
-                  className={
-                    refreshing
-                      ? "animate-spin"
-                      : ""
-                  }
-                />
-              }
             >
+              <RefreshCw
+                size={18}
+                className={refreshing ? "animate-spin" : ""}
+              />
               Refresh
             </Button>
           }
         />
 
         {error && (
-          <div
-            className="
-              mb-6
-              flex
-              items-start
-              justify-between
-              gap-4
-              rounded-2xl
-              border
-              border-(--danger-border)
-              bg-(--danger-soft)
-              p-4
-              text-(--danger)
-            "
-          >
-            <div className="flex items-start gap-3">
-              <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
-              <p className="text-sm font-medium">
-                {error}
-              </p>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => setError("")}
-              className="rounded-lg p-1 transition hover:bg-(--danger-soft)"
-              aria-label="Dismiss error"
-            >
-              <X className="h-4 w-4" />
-            </button>
+          <div className="mt-5">
+            <ErrorState
+              title="Unable to complete the request"
+              message={error}
+            />
           </div>
         )}
 
         {success && (
           <div
             className="
-              mb-6
-              flex
-              items-start
-              justify-between
-              gap-4
-              rounded-2xl
-              border
-              border-(--success-border)
-              bg-(--success-soft)
-              p-4
-              text-(--success)
+              mt-5 flex items-center gap-3
+              rounded-xl border border-(--success)/20
+              bg-(--success-soft) px-4 py-3
             "
           >
-            <div className="flex items-start gap-3">
-              <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0" />
-              <p className="text-sm font-medium">
-                {success}
-              </p>
-            </div>
+            <CheckCircle2 size={18} className="text-(--success)" />
 
-            <button
-              type="button"
-              onClick={() => setSuccess("")}
-              className="rounded-lg p-1 transition hover:bg-(--success-soft)"
-              aria-label="Dismiss success message"
-            >
-              <X className="h-4 w-4" />
-            </button>
+            <p className="text-sm font-semibold text-(--success)">{success}</p>
           </div>
         )}
 
-        <div className="mb-6 grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
-          <SummaryCard
-            title="Total Makeups"
-            value={statistics.total}
-            subtitle="All makeup class records"
-            icon={<Users size={20} />}
-          />
+        <MakeupSummary
+          total={makeups.length}
+          scheduled={scheduledCount}
+          completed={completedCount}
+          cancelled={cancelledCount}
+          overdue={overdueCount}
+        />
 
-          <SummaryCard
-            title="Scheduled"
-            value={statistics.scheduled}
-            subtitle="Upcoming makeup classes"
-            icon={<Clock3 size={20} />}
-          />
+        <Card padding="none" className="mt-6 overflow-hidden">
+          <div
+            className="
+              flex flex-col justify-between gap-5
+              border-b border-(--line)
+              px-5 py-5
+              sm:px-6
+              lg:flex-row lg:items-center
+            "
+          >
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <div
+                  className="
+                    flex h-9 w-9
+                    items-center justify-center
+                    rounded-xl
+                    bg-(--accent-soft)
+                    text-(--accent)
+                  "
+                >
+                  <CalendarDays size={18} />
+                </div>
 
-          <SummaryCard
-            title="Completed"
-            value={statistics.completed}
-            subtitle="Successfully completed classes"
-            icon={<CheckCircle2 size={20} />}
-          />
-
-          <SummaryCard
-            title="Cancelled"
-            value={statistics.cancelled}
-            subtitle="Cancelled makeup classes"
-            icon={<XCircle size={20} />}
-          />
-        </div>
-
-        <Card className="mb-6 p-5">
-          <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
-            <div className="flex flex-wrap gap-2">
-              {(
-                [
-                  "ALL",
-                  "SCHEDULED",
-                  "COMPLETED",
-                  "CANCELLED",
-                ] as FilterStatus[]
-              ).map((status) => {
-                const active =
-                  statusFilter === status;
-
-                return (
-                  <button
-                    key={status}
-                    type="button"
-                    onClick={() =>
-                      setStatusFilter(status)
-                    }
-                    className={`
-                      rounded-xl
-                      border
-                      px-4
-                      py-2.5
-                      text-sm
-                      font-semibold
-                      transition
-                      ${
-                        active
-                          ? "border-(--foreground) bg-(--foreground) text-(--background)"
-                          : "border-(--line) bg-(--surface) text-(--ink-muted) hover:border-(--accent) hover:text-(--foreground)"
-                      }
-                    `}
+                <div>
+                  <h2
+                    className="
+                      text-xl font-extrabold
+                      tracking-tight
+                      text-(--foreground)
+                    "
                   >
-                    {status === "ALL"
-                      ? "All"
-                      : getStatusLabel(status)}
-                  </button>
-                );
-              })}
+                    Missed classes
+                  </h2>
+
+                  <p
+                    className="
+                      mt-0.5 text-xs
+                      text-(--ink-muted)
+                      sm:text-sm
+                    "
+                  >
+                    View and manage every makeup class in your academy.
+                  </p>
+                </div>
+              </div>
             </div>
 
-            <div className="w-full lg:w-80">
+            <div className="flex w-full flex-col gap-3 lg:w-auto lg:flex-row lg:items-center">
+              <div className="relative w-full lg:w-[340px]">
+                <Search
+                  size={17}
+                  aria-hidden="true"
+                  className="
+                    pointer-events-none
+                    absolute left-3.5
+                    top-1/2
+                    -translate-y-1/2
+                    text-(--ink-faint)
+                  "
+                />
+
+                <Input
+                  type="search"
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder="Search students..."
+                  aria-label="Search makeup classes"
+                  className="h-11 pl-10"
+                />
+
+                {search && (
+                  <button
+                    type="button"
+                    aria-label="Clear search"
+                    title="Clear search"
+                    onClick={() => setSearch("")}
+                    className="
+                      absolute right-2.5 top-1/2
+                      flex h-7 w-7
+                      -translate-y-1/2
+                      items-center justify-center
+                      rounded-lg
+                      text-(--ink-faint)
+                      transition
+                      hover:bg-(--hover-bg)
+                      hover:text-(--foreground)
+                    "
+                  >
+                    <X size={15} />
+                  </button>
+                )}
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <FilterButton
+                  active={statusFilter === "ALL"}
+                  onClick={() => setStatusFilter("ALL")}
+                >
+                  All
+                </FilterButton>
+
+                <FilterButton
+                  active={statusFilter === "SCHEDULED"}
+                  onClick={() => setStatusFilter("SCHEDULED")}
+                >
+                  Scheduled
+                </FilterButton>
+
+                <FilterButton
+                  active={statusFilter === "COMPLETED"}
+                  onClick={() => setStatusFilter("COMPLETED")}
+                >
+                  Completed
+                </FilterButton>
+
+                <FilterButton
+                  active={statusFilter === "CANCELLED"}
+                  onClick={() => setStatusFilter("CANCELLED")}
+                >
+                  Cancelled
+                </FilterButton>
+              </div>
+            </div>
+          </div>
+
+          {!loading && !error && (
+            <>
+              <div className="hidden overflow-x-auto md:block">
+                <MakeupTable
+                  makeups={filteredMakeups}
+                  holidayMap={holidayMap}
+                  actionLoading={actionLoading}
+                  onSchedule={openScheduleModal}
+                  onComplete={handleComplete}
+                  onCancel={handleCancel}
+                />
+              </div>
+
+              <div className="space-y-3 p-4 md:hidden">
+                <MakeupMobileList
+                  makeups={filteredMakeups}
+                  totalMakeups={makeups.length}
+                  holidayMap={holidayMap}
+                  actionLoading={actionLoading}
+                  onSchedule={openScheduleModal}
+                  onComplete={handleComplete}
+                  onCancel={handleCancel}
+                />
+              </div>
+            </>
+          )}
+
+          {!loading && !error && filteredMakeups.length > 0 && (
+            <div
+              className="
+                  border-t border-(--line)
+                  px-5 py-4
+                  sm:px-6
+                "
+            >
+              <p
+                className="
+                    text-xs font-medium
+                    text-(--ink-faint)
+                  "
+              >
+                Showing {filteredMakeups.length} of {makeups.length} makeup
+                classes
+              </p>
+            </div>
+          )}
+        </Card>
+      </div>
+
+      {/* ==================================================
+          SCHEDULE MODAL
+      ================================================== */}
+
+      <Modal
+        open={showScheduleModal}
+        onClose={closeScheduleModal}
+        title="Schedule makeup class"
+        description={
+          scheduleTarget
+            ? `Schedule a recovery class for ${getStudentName(scheduleTarget)}.`
+            : undefined
+        }
+        size="md"
+        footer={
+          <>
+            <Button
+              variant="ghost"
+              onClick={closeScheduleModal}
+              disabled={Boolean(actionLoading) || scheduleLoading}
+            >
+              Cancel
+            </Button>
+
+            <Button
+              variant="primary"
+              loading={Boolean(actionLoading)}
+              onClick={handleSchedule}
+              disabled={
+                Boolean(scheduleHoliday) ||
+                !dateAvailability ||
+                dateAvailability.date !== scheduleDate ||
+                !dateAvailability.isOpen ||
+                scheduleLoading
+              }
+            >
+              <CalendarDays size={17} />
+              Schedule makeup
+            </Button>
+          </>
+        }
+      >
+        {scheduleTarget && (
+          <div className="space-y-6">
+            {/* STUDENT */}
+            <div
+              className="
+                rounded-xl
+                border border-(--line)
+                bg-(--surface)
+                p-4
+              "
+            >
+              <div className="flex items-center gap-3">
+                <MakeupAvatar name={getStudentName(scheduleTarget)} />
+
+                <div className="min-w-0">
+                  <p className="text-sm font-bold text-(--foreground-soft)">
+                    {getStudentName(scheduleTarget)}
+                  </p>
+
+                  <p className="mt-1 text-xs text-(--ink-muted)">
+                    Missed {formatDate(scheduleTarget.originalDate)} · Day{" "}
+                    {scheduleTarget.planDay}
+                  </p>
+
+                  <p className="mt-1 text-xs text-(--ink-faint)">
+                    {getBranchName(scheduleTarget)}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* DATE */}
+            <div>
+              <label
+                htmlFor="makeup-date"
+                className="
+                  mb-2 block text-xs
+                  font-bold
+                  text-(--foreground-soft)
+                "
+              >
+                Makeup date
+              </label>
+
               <Input
-                value={search}
+                id="makeup-date"
+                type="date"
+                value={scheduleDate}
+                min={getMinimumMakeupDate(
+                  getCalendarDate(scheduleTarget.originalDate),
+                )}
                 onChange={(event) =>
-                  setSearch(event.target.value)
+                  handleScheduleDateChange(event.target.value)
                 }
-                placeholder="Search student..."
-                leftIcon={
-                  <Search size={17} />
-                }
+              />
+
+              <p className="mt-2 text-xs text-(--ink-faint)">
+                Select a date on which this branch has a training session.
+              </p>
+            </div>
+
+            {/* AVAILABILITY */}
+            {scheduleDate && (
+              <ScheduleAvailabilityCard
+                loading={scheduleLoading}
+                availability={dateAvailability}
+                holiday={scheduleHoliday}
+                error={scheduleError}
+              />
+            )}
+
+            {/* NOTES */}
+            <div>
+              <label
+                htmlFor="makeup-notes"
+                className="
+                  mb-2 block text-xs
+                  font-bold
+                  text-(--foreground-soft)
+                "
+              >
+                Notes
+              </label>
+
+              <textarea
+                id="makeup-notes"
+                value={scheduleNotes}
+                onChange={(event) => setScheduleNotes(event.target.value)}
+                rows={4}
+                placeholder="Optional notes..."
+                className="
+                  df-input
+                  min-h-[110px]
+                  resize-none
+                "
               />
             </div>
           </div>
-        </Card>
-
-        <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
-          <Card className="overflow-hidden p-0">
-            <div className="flex flex-col justify-between gap-3 border-b border-(--line) px-6 py-5 sm:flex-row sm:items-center">
-              <div>
-                <p className="text-sm font-semibold text-(--accent)">
-                  Recent Records
-                </p>
-
-                <h2 className="mt-1 text-lg font-bold text-(--foreground)">
-                  Makeup Records
-                </h2>
-
-                <p className="mt-1 text-sm text-(--ink-muted)">
-                  Manage all scheduled and completed makeup classes.
-                </p>
-              </div>
-
-              <Badge variant="accent">
-                {filteredMakeups.length} Records
-              </Badge>
-            </div>
-
-            {filteredMakeups.length === 0 ? (
-              <EmptyState
-                icon={<CalendarDays size={26} />}
-                title="No makeup classes found"
-                description="Try changing the filter or search term."
-              />
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="min-w-[900px] w-full">
-                  <thead>
-                    <tr className="border-b border-(--line) bg-(--surface)">
-                      {[
-                        "Student",
-                        "Original Date",
-                        "Makeup Date",
-                        "Plan Day",
-                        "Status",
-                        "Actions",
-                      ].map((heading) => (
-                        <th
-                          key={heading}
-                          className="
-                            px-6
-                            py-4
-                            text-left
-                            text-xs
-                            font-bold
-                            uppercase
-                            tracking-[0.08em]
-                            text-(--ink-muted)
-                          "
-                        >
-                          {heading}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-
-                  <tbody>
-                    {filteredMakeups.map(
-                      (makeup) => {
-                        const studentName =
-                          getStudentName(makeup);
-
-                        const phone =
-                          getStudentPhone(makeup);
-
-                        const isActionLoading =
-                          actionLoading ===
-                          makeup._id;
-
-                        return (
-                          <tr
-                            key={makeup._id}
-                            className="
-                              border-b
-                              border-(--line)
-                              transition
-                              last:border-b-0
-                              hover:bg-(--hover-bg)
-                            "
-                          >
-                            <td className="px-6 py-5">
-                              <div className="flex items-center gap-3">
-                                <div
-                                  className="
-                                    flex
-                                    h-10
-                                    w-10
-                                    shrink-0
-                                    items-center
-                                    justify-center
-                                    rounded-full
-                                    border
-                                    border-(--line)
-                                    bg-(--accent-soft)
-                                    text-xs
-                                    font-bold
-                                    text-(--accent)
-                                  "
-                                >
-                                  {getInitials(
-                                    studentName,
-                                  )}
-                                </div>
-
-                                <div>
-                                  <p className="text-sm font-bold text-(--foreground)">
-                                    {studentName}
-                                  </p>
-
-                                  {phone && (
-                                    <p className="mt-1 text-xs text-(--ink-muted)">
-                                      {phone}
-                                    </p>
-                                  )}
-                                </div>
-                              </div>
-                            </td>
-
-                            <td className="whitespace-nowrap px-6 py-5 text-sm text-(--ink-muted)">
-                              {formatDate(
-                                makeup.originalDate,
-                              )}
-                            </td>
-
-                            <td className="whitespace-nowrap px-6 py-5 text-sm text-(--ink-muted)">
-                              {formatDate(
-                                makeup.makeupDate,
-                              )}
-                            </td>
-
-                            <td className="whitespace-nowrap px-6 py-5 text-sm font-semibold text-(--foreground)">
-                              Day {makeup.planDay}
-                            </td>
-
-                            <td className="px-6 py-5">
-                              <Badge
-                                variant={getStatusVariant(
-                                  makeup.status,
-                                )}
-                                className="gap-1.5"
-                              >
-                                {getStatusIcon(
-                                  makeup.status,
-                                )}
-                                {getStatusLabel(
-                                  makeup.status,
-                                )}
-                              </Badge>
-                            </td>
-
-                            <td className="px-6 py-5">
-                              {makeup.status ===
-                              "SCHEDULED" ? (
-                                <div className="flex flex-wrap gap-2">
-                                  <Button
-                                    size="sm"
-                                    variant="success"
-                                    disabled={
-                                      isActionLoading
-                                    }
-                                    onClick={() =>
-                                      void handleComplete(
-                                        makeup._id,
-                                      )
-                                    }
-                                    leftIcon={
-                                      isActionLoading ? (
-                                        <RefreshCw
-                                          size={14}
-                                          className="animate-spin"
-                                        />
-                                      ) : (
-                                        <Check
-                                          size={14}
-                                        />
-                                      )
-                                    }
-                                  >
-                                    Complete
-                                  </Button>
-
-                                  <Button
-                                    size="sm"
-                                    variant="danger"
-                                    disabled={
-                                      isActionLoading
-                                    }
-                                    onClick={() =>
-                                      void handleCancel(
-                                        makeup._id,
-                                      )
-                                    }
-                                    leftIcon={
-                                      <X size={14} />
-                                    }
-                                  >
-                                    Cancel
-                                  </Button>
-                                </div>
-                              ) : (
-                                <span className="text-xs font-medium text-(--ink-faint)">
-                                  No actions
-                                </span>
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      },
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            )}
-
-            <div className="border-t border-(--line) px-6 py-4">
-              <p className="text-sm text-(--ink-muted)">
-                Showing{" "}
-                <span className="font-bold text-(--foreground)">
-                  {filteredMakeups.length}
-                </span>{" "}
-                of{" "}
-                <span className="font-bold text-(--foreground)">
-                  {makeups.length}
-                </span>{" "}
-                makeup classes
-              </p>
-            </div>
-          </Card>
-
-          <Card className="p-6">
-            <div>
-              <p className="text-sm font-semibold text-(--accent)">
-                Overview
-              </p>
-
-              <h2 className="mt-1 text-lg font-bold text-(--foreground)">
-                Makeup Overview
-              </h2>
-
-              <p className="mt-1 text-sm text-(--ink-muted)">
-                Summary of your makeup class records
-              </p>
-            </div>
-
-            <div className="mt-8 flex justify-center">
-              <div
-                className="
-                  relative
-                  flex
-                  h-44
-                  w-44
-                  items-center
-                  justify-center
-                  rounded-full
-                "
-                style={{
-                  background:
-                    statistics.total > 0
-                      ? `conic-gradient(var(--gold) ${scheduledPercentage}%, var(--line) 0)`
-                      : "var(--line)",
-                }}
-              >
-                <div
-                  className="
-                    flex
-                    h-36
-                    w-36
-                    flex-col
-                    items-center
-                    justify-center
-                    rounded-full
-                    border
-                    border-(--line)
-                    bg-(--card)
-                  "
-                >
-                  <span className="text-3xl font-bold text-(--foreground)">
-                    {scheduledPercentage}%
-                  </span>
-
-                  <span className="mt-1 text-sm text-(--ink-muted)">
-                    Scheduled
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            <div className="mt-8 space-y-4">
-              <div className="flex items-center justify-between rounded-xl bg-(--surface) px-4 py-3">
-                <div className="flex items-center gap-2">
-                  <span className="h-2.5 w-2.5 rounded-full bg-(--gold)" />
-                  <span className="text-sm text-(--ink-muted)">
-                    Scheduled
-                  </span>
-                </div>
-
-                <span className="text-sm font-bold text-(--foreground)">
-                  {statistics.scheduled}
-                </span>
-              </div>
-
-              <div className="flex items-center justify-between rounded-xl bg-(--surface) px-4 py-3">
-                <div className="flex items-center gap-2">
-                  <span className="h-2.5 w-2.5 rounded-full bg-(--green)" />
-                  <span className="text-sm text-(--ink-muted)">
-                    Completed
-                  </span>
-                </div>
-
-                <span className="text-sm font-bold text-(--foreground)">
-                  {statistics.completed}
-                </span>
-              </div>
-
-              <div className="flex items-center justify-between rounded-xl bg-(--surface) px-4 py-3">
-                <div className="flex items-center gap-2">
-                  <span className="h-2.5 w-2.5 rounded-full bg-(--danger)" />
-                  <span className="text-sm text-(--ink-muted)">
-                    Cancelled
-                  </span>
-                </div>
-
-                <span className="text-sm font-bold text-(--foreground)">
-                  {statistics.cancelled}
-                </span>
-              </div>
-
-              <div className="flex items-center justify-between border-t border-(--line) pt-5">
-                <span className="text-sm text-(--ink-muted)">
-                  Total Records
-                </span>
-
-                <span className="text-sm font-bold text-(--foreground)">
-                  {statistics.total}
-                </span>
-              </div>
-            </div>
-          </Card>
-        </div>
-      </div>
-   
+        )}
+      </Modal>
+    </main>
   );
 }
+
+/* ======================================================
+   SCHEDULE AVAILABILITY CARD
+====================================================== */
+
+function ScheduleAvailabilityCard({
+  loading,
+  availability,
+  holiday,
+  error,
+}: {
+  loading: boolean;
+
+  availability: MakeupDateAvailability | null;
+
+  holiday: Holiday | null;
+
+  error: string;
+}) {
+  if (loading) {
+    return (
+      <div
+        className="
+          rounded-xl
+          border border-(--line)
+          bg-(--surface)
+          px-4 py-4
+        "
+      >
+        <div className="flex items-center gap-3">
+          <RefreshCw size={17} className="animate-spin text-(--accent)" />
+
+          <div>
+            <p className="text-sm font-bold text-(--foreground-soft)">
+              Checking training availability
+            </p>
+
+            <p className="mt-1 text-xs text-(--ink-muted)">
+              Checking this branch's schedule and holidays...
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (holiday) {
+    return (
+      <div
+        className="
+          rounded-xl
+          border border-(--danger)/20
+          bg-(--danger-soft)
+          px-4 py-4
+        "
+      >
+        <div className="flex items-start gap-3">
+          <CalendarOff size={18} className="mt-0.5 shrink-0 text-(--danger)" />
+
+          <div>
+            <p className="text-sm font-bold text-(--danger)">Holiday</p>
+
+            <p className="mt-1 text-xs leading-5 text-(--danger)">
+              {holiday.name}
+            </p>
+
+            {holiday.description && (
+              <p className="mt-1 text-xs leading-5 text-(--ink-muted)">
+                {holiday.description}
+              </p>
+            )}
+
+            <p className="mt-2 text-xs font-semibold text-(--danger)">
+              Select another date.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  /* A date override can be open even if no weekly schedule exists. */
+  if (availability && !availability.configured && !availability.isOpen) {
+    return (
+      <div
+        className="
+          rounded-xl
+          border border-(--line)
+          bg-(--surface)
+          px-4 py-4
+        "
+      >
+        <div className="flex items-start gap-3">
+          <Info size={18} className="mt-0.5 shrink-0 text-(--accent)" />
+
+          <div>
+            <p className="text-sm font-bold text-(--foreground-soft)">
+              Training schedule not configured
+            </p>
+
+            <p className="mt-1 text-xs leading-5 text-(--ink-muted)">
+              This branch does not have a weekly training schedule configured
+              yet, and no active session is available on this date.
+            </p>
+
+            <p className="mt-2 text-xs font-semibold text-(--accent)">
+              Configure a session or choose another date.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (availability && !availability.isOpen) {
+    return (
+      <div
+        className="
+          rounded-xl
+          border border-(--danger)/20
+          bg-(--danger-soft)
+          px-4 py-4
+        "
+      >
+        <div className="flex items-start gap-3">
+          <CalendarOff size={18} className="mt-0.5 shrink-0 text-(--danger)" />
+
+          <div>
+            <p className="text-sm font-bold text-(--danger)">Branch closed</p>
+
+            <p className="mt-1 text-xs leading-5 text-(--danger)">
+              {availability.dayName} is closed for this branch.
+            </p>
+
+            <p className="mt-1 text-xs text-(--ink-muted)">
+              No training session is scheduled for this date.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (availability && availability.isOpen) {
+    return (
+      <div
+        className="
+          rounded-xl
+          border border-(--success)/20
+          bg-(--success-soft)
+          px-4 py-4
+        "
+      >
+        <div className="flex items-start gap-3">
+          <CheckCircle2
+            size={18}
+            className="mt-0.5 shrink-0 text-(--success)"
+          />
+
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <p className="text-sm font-bold text-(--success)">
+                  Training available
+                </p>
+
+                <p className="mt-1 text-xs text-(--ink-muted)">
+                  {availability.dayName} · Branch operating hours{" "}
+                  {formatTime(availability.openingTime)} –{" "}
+                  {formatTime(availability.closingTime)}
+                </p>
+              </div>
+
+              <Badge variant="success">Available</Badge>
+            </div>
+
+            <div className="mt-4 space-y-2">
+              {availability.slots.map((slot) => (
+                <div
+                  key={
+                    slot._id ||
+                    `${slot.sessionName}-${slot.startTime}-${slot.endTime}`
+                  }
+                  className="
+                      flex items-center
+                      justify-between gap-3
+                      rounded-lg
+                      border border-(--success)/15
+                      bg-(--card)
+                      px-3 py-2.5
+                    "
+                >
+                  <div className="flex min-w-0 items-center gap-2">
+                    <Clock3 size={15} className="shrink-0 text-(--success)" />
+
+                    <span className="truncate text-xs font-bold text-(--foreground-soft)">
+                      {slot.sessionName}
+                    </span>
+                  </div>
+
+                  <span className="shrink-0 text-xs font-semibold text-(--ink-muted)">
+                    {formatTimeRange(slot)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div
+        className="
+          rounded-xl
+          border border-(--danger)/20
+          bg-(--danger-soft)
+          px-4 py-4
+        "
+      >
+        <p className="text-xs font-semibold leading-5 text-(--danger)">
+          {error}
+        </p>
+      </div>
+    );
+  }
+
+  return null;
+}
+
+/* ======================================================
+   SUMMARY
+====================================================== */
+
+function MakeupSummary({
+  total,
+  scheduled,
+  completed,
+  cancelled,
+  overdue,
+}: {
+  total: number;
+  scheduled: number;
+  completed: number;
+  cancelled: number;
+  overdue: number;
+}) {
+  return (
+    <div
+      className="
+        grid gap-4
+        sm:grid-cols-2
+        xl:grid-cols-5
+      "
+    >
+      <SummaryCard
+        title="Total Makeups"
+        value={total}
+        subtitle="Missed classes"
+        icon={<CalendarDays size={20} />}
+      />
+
+      <SummaryCard
+        title="Scheduled"
+        value={scheduled}
+        subtitle="Awaiting recovery"
+        icon={<Clock3 size={20} />}
+      />
+
+      <SummaryCard
+        title="Completed"
+        value={completed}
+        subtitle="Training recovered"
+        icon={<CheckCircle2 size={20} />}
+      />
+
+      <SummaryCard
+        title="Overdue"
+        value={overdue}
+        subtitle="Scheduled date passed"
+        icon={<Clock3 size={20} />}
+      />
+
+      <SummaryCard
+        title="Cancelled"
+        value={cancelled}
+        subtitle="Cancelled sessions"
+        icon={<XCircle size={20} />}
+      />
+    </div>
+  );
+}
+
+/* ======================================================
+   FILTER BUTTON
+====================================================== */
+
+function FilterButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <Button
+      type="button"
+      size="sm"
+      variant={active ? "primary" : "outline"}
+      onClick={onClick}
+    >
+      {children}
+    </Button>
+  );
+}
+
+/* ======================================================
+   TABLE
+====================================================== */
+
+function MakeupTable({
+  makeups,
+  holidayMap,
+  actionLoading,
+  onSchedule,
+  onComplete,
+  onCancel,
+}: {
+  makeups: Makeup[];
+  holidayMap: HolidayMap;
+  actionLoading: string;
+  onSchedule: (makeup: Makeup) => void;
+  onComplete: (makeup: Makeup) => void;
+  onCancel: (makeup: Makeup) => void;
+}) {
+  return (
+    <table className="w-full min-w-[1150px]">
+      <thead
+        className="
+          border-b border-(--line)
+          bg-(--surface)
+        "
+      >
+        <tr>
+          <TableHeading>Student</TableHeading>
+
+          <TableHeading>Missed Class</TableHeading>
+
+          <TableHeading>Makeup Date</TableHeading>
+
+          <TableHeading>Plan / Branch</TableHeading>
+
+          <TableHeading>Status</TableHeading>
+
+          <TableHeading align="right">Action</TableHeading>
+        </tr>
+      </thead>
+
+      <tbody className="divide-y divide-(--line)">
+        {makeups.length === 0 ? (
+          <tr>
+            <td colSpan={6} className="px-6 py-8">
+              <EmptyState
+                title="No makeup classes found"
+                description="
+                  Try changing your search or status filter.
+                "
+                icon={<CalendarDays size={22} />}
+              />
+            </td>
+          </tr>
+        ) : (
+          makeups.map((makeup) => (
+            <MakeupTableRow
+              key={makeup._id}
+              makeup={makeup}
+              holidayMap={holidayMap}
+              actionLoading={actionLoading}
+              onSchedule={onSchedule}
+              onComplete={onComplete}
+              onCancel={onCancel}
+            />
+          ))
+        )}
+      </tbody>
+    </table>
+  );
+}
+
+/* ======================================================
+   TABLE ROW
+====================================================== */
+
+function MakeupTableRow({
+  makeup,
+  holidayMap,
+  actionLoading,
+  onSchedule,
+  onComplete,
+  onCancel,
+}: {
+  makeup: Makeup;
+  holidayMap: HolidayMap;
+  actionLoading: string;
+  onSchedule: (makeup: Makeup) => void;
+  onComplete: (makeup: Makeup) => void;
+  onCancel: (makeup: Makeup) => void;
+}) {
+  const name = getStudentName(makeup);
+
+  const status = getStatusConfig(makeup.status);
+
+  const isLoading = actionLoading === makeup._id;
+
+  const holiday = getHolidayForMakeup(makeup, holidayMap);
+
+  const isHoliday = Boolean(holiday);
+
+  const isOverdue =
+    makeup.status === "SCHEDULED" &&
+    Boolean(makeup.makeupDate) &&
+    !isHoliday &&
+    getCalendarDate(makeup.makeupDate) < getLocalDate();
+
+  return (
+    <tr
+      className={`
+        group
+        transition-colors
+        duration-200
+        hover:bg-(--surface)
+        ${isHoliday ? "bg-(--danger-soft)/40" : ""}
+      `}
+    >
+      <td className="px-6 py-5">
+        <div className="flex items-center gap-3">
+          <MakeupAvatar name={name} />
+
+          <div className="min-w-0">
+            <p
+              className="
+                truncate text-sm
+                font-bold
+                text-(--foreground-soft)
+                transition-colors
+                group-hover:text-(--accent)
+              "
+            >
+              {name}
+            </p>
+
+            <p
+              className="
+                mt-1 text-xs
+                text-(--ink-muted)
+              "
+            >
+              {getStudentAge(makeup)
+                ? `Age ${getStudentAge(makeup)}`
+                : getStudentPhone(makeup)}
+            </p>
+          </div>
+        </div>
+      </td>
+
+      <td className="px-6 py-5">
+        <p className="text-sm font-medium text-(--foreground-soft)">
+          {formatDate(makeup.originalDate)}
+        </p>
+
+        <p className="mt-1 max-w-[230px] truncate text-xs text-(--ink-muted)">
+          {makeup.curriculumTitle || "Curriculum step"}
+        </p>
+      </td>
+
+      <td className="px-6 py-5">
+        {isHoliday ? (
+          <div>
+            <div className="flex items-center gap-2">
+              <CalendarOff size={15} className="text-(--danger)" />
+
+              <p className="text-sm font-bold text-(--danger)">
+                {formatDate(makeup.makeupDate)}
+              </p>
+            </div>
+
+            <p className="mt-1 text-xs font-semibold text-(--danger)">
+              {holiday?.name}
+            </p>
+
+            <p className="mt-1 text-xs text-(--ink-muted)">
+              Reschedule required
+            </p>
+          </div>
+        ) : (
+          <>
+            <p
+              className={`
+                text-sm font-medium
+                ${isOverdue ? "text-(--danger)" : "text-(--foreground-soft)"}
+              `}
+            >
+              {formatDate(makeup.makeupDate)}
+            </p>
+
+            {isOverdue && (
+              <p className="mt-1 text-xs font-semibold text-(--danger)">
+                Overdue
+              </p>
+            )}
+          </>
+        )}
+      </td>
+
+      <td className="px-6 py-5">
+        <p className="text-sm font-medium text-(--foreground-soft)">
+          Day {makeup.planDay}
+        </p>
+
+        <p className="mt-1 text-xs text-(--ink-muted)">
+          {getBranchName(makeup)}
+        </p>
+      </td>
+
+      <td className="px-6 py-5">
+        {isHoliday && makeup.status === "SCHEDULED" ? (
+          <div className="space-y-2">
+            <Badge variant="danger">
+              <span className="mr-1 inline-flex">
+                <CalendarOff size={13} />
+              </span>
+              Holiday
+            </Badge>
+
+            <div>
+              <Badge variant="warning">Scheduled</Badge>
+            </div>
+          </div>
+        ) : (
+          <Badge variant={status.variant}>
+            <span className="mr-1 inline-flex">{status.icon}</span>
+
+            {status.label}
+          </Badge>
+        )}
+      </td>
+
+      <td className="px-6 py-5 text-right">
+        {makeup.status === "SCHEDULED" ? (
+          <div className="flex items-center justify-end gap-2">
+            <Button
+              size="sm"
+              variant={isHoliday ? "primary" : "outline"}
+              disabled={isLoading}
+              onClick={() => onSchedule(makeup)}
+            >
+              <CalendarDays size={15} />
+
+              {isHoliday
+                ? "Reschedule"
+                : makeup.makeupDate
+                  ? "Reschedule"
+                  : "Schedule"}
+            </Button>
+
+            {makeup.makeupDate && !isHoliday && (
+              <Button
+                size="sm"
+                variant="primary"
+                loading={isLoading}
+                onClick={() => onComplete(makeup)}
+              >
+                <Check size={15} />
+                Complete
+              </Button>
+            )}
+
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={isLoading}
+              onClick={() => onCancel(makeup)}
+              aria-label={`Cancel makeup for ${name}`}
+            >
+              <X size={16} />
+            </Button>
+          </div>
+        ) : (
+          <span className="text-xs text-(--ink-faint)">—</span>
+        )}
+      </td>
+    </tr>
+  );
+}
+
+/* ======================================================
+   MOBILE
+====================================================== */
+
+function MakeupMobileList({
+  makeups,
+  totalMakeups,
+  holidayMap,
+  actionLoading,
+  onSchedule,
+  onComplete,
+  onCancel,
+}: {
+  makeups: Makeup[];
+  totalMakeups: number;
+  holidayMap: HolidayMap;
+  actionLoading: string;
+  onSchedule: (makeup: Makeup) => void;
+  onComplete: (makeup: Makeup) => void;
+  onCancel: (makeup: Makeup) => void;
+}) {
+  if (makeups.length === 0) {
+    return (
+      <EmptyState
+        title="No makeup classes found"
+        description={
+          totalMakeups === 0
+            ? "No missed classes have been marked for makeup yet."
+            : "Try changing your search or status filter."
+        }
+        icon={<CalendarDays size={22} />}
+      />
+    );
+  }
+
+  return (
+    <>
+      {makeups.map((makeup) => (
+        <MakeupMobileCard
+          key={makeup._id}
+          makeup={makeup}
+          holidayMap={holidayMap}
+          actionLoading={actionLoading}
+          onSchedule={onSchedule}
+          onComplete={onComplete}
+          onCancel={onCancel}
+        />
+      ))}
+    </>
+  );
+}
+
+function MakeupMobileCard({
+  makeup,
+  holidayMap,
+  actionLoading,
+  onSchedule,
+  onComplete,
+  onCancel,
+}: {
+  makeup: Makeup;
+  holidayMap: HolidayMap;
+  actionLoading: string;
+  onSchedule: (makeup: Makeup) => void;
+  onComplete: (makeup: Makeup) => void;
+  onCancel: (makeup: Makeup) => void;
+}) {
+  const name = getStudentName(makeup);
+
+  const status = getStatusConfig(makeup.status);
+
+  const isLoading = actionLoading === makeup._id;
+
+  const holiday = getHolidayForMakeup(makeup, holidayMap);
+
+  const isHoliday = Boolean(holiday);
+
+  return (
+    <div
+      className={`
+        group
+        block
+        rounded-2xl
+        border
+        ${
+          isHoliday
+            ? "border-(--danger)/30 bg-(--danger-soft)/30"
+            : "border-(--line) bg-(--surface)"
+        }
+        p-4
+        transition-all
+        duration-200
+        hover:-translate-y-0.5
+        hover:border-(--line-strong)
+        hover:bg-(--card)
+        hover:shadow-[0_8px_25px_var(--shadow-color)]
+      `}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <MakeupAvatar name={name} />
+
+          <div className="min-w-0">
+            <p className="truncate text-sm font-bold text-(--foreground-soft) group-hover:text-(--accent)">
+              {name}
+            </p>
+
+            <p className="mt-1 text-xs text-(--ink-muted)">
+              {getStudentPhone(makeup)}
+            </p>
+          </div>
+        </div>
+
+        {isHoliday && makeup.status === "SCHEDULED" ? (
+          <div className="flex flex-col items-end gap-1">
+            <Badge variant="danger">
+              <CalendarOff size={12} />
+
+              <span className="ml-1">Holiday</span>
+            </Badge>
+
+            <Badge variant="warning">Scheduled</Badge>
+          </div>
+        ) : (
+          <Badge variant={status.variant}>{status.label}</Badge>
+        )}
+      </div>
+
+      {isHoliday && (
+        <div
+          className="
+            mt-4 flex items-start gap-3
+            rounded-xl
+            border border-(--danger)/20
+            bg-(--danger-soft)
+            px-3 py-3
+          "
+        >
+          <CalendarOff size={16} className="mt-0.5 shrink-0 text-(--danger)" />
+
+          <div>
+            <p className="text-xs font-bold text-(--danger)">{holiday?.name}</p>
+
+            <p className="mt-1 text-xs text-(--ink-muted)">
+              This makeup date is now a holiday. Reschedule it before completing
+              the class.
+            </p>
+          </div>
+        </div>
+      )}
+
+      <div
+        className="
+          mt-4 grid
+          grid-cols-2
+          gap-x-4 gap-y-4
+          border-t border-(--line)
+          pt-4
+        "
+      >
+        <MobileDetail label="Missed" value={formatDate(makeup.originalDate)} />
+
+        <MobileDetail label="Plan" value={`Day ${makeup.planDay}`} />
+
+        <MobileDetail label="Makeup" value={formatDate(makeup.makeupDate)} />
+
+        <MobileDetail label="Branch" value={getBranchName(makeup)} />
+      </div>
+
+      <div
+        className="
+          mt-4
+          border-t border-(--line)
+          pt-4
+        "
+      >
+        <MobileDetail
+          label="Training step"
+          value={makeup.curriculumTitle || "Curriculum step"}
+        />
+      </div>
+
+      {makeup.status === "SCHEDULED" && (
+        <div
+          className="
+            mt-4 flex flex-wrap
+            items-center gap-2
+            border-t border-(--line)
+            pt-4
+          "
+        >
+          <Button
+            size="sm"
+            variant={isHoliday ? "primary" : "outline"}
+            disabled={isLoading}
+            onClick={() => onSchedule(makeup)}
+          >
+            <CalendarDays size={15} />
+
+            {isHoliday
+              ? "Reschedule"
+              : makeup.makeupDate
+                ? "Reschedule"
+                : "Schedule"}
+          </Button>
+
+          {makeup.makeupDate && !isHoliday && (
+            <Button
+              size="sm"
+              variant="primary"
+              loading={isLoading}
+              onClick={() => onComplete(makeup)}
+            >
+              <Check size={15} />
+              Complete
+            </Button>
+          )}
+
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={isLoading}
+            onClick={() => onCancel(makeup)}
+          >
+            <X size={15} />
+            Cancel
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ======================================================
+   AVATAR
+====================================================== */
+
+function MakeupAvatar({ name }: { name: string }) {
+  return (
+    <div
+      className="
+        flex h-10 w-10
+        shrink-0
+        items-center justify-center
+        rounded-full
+        border border-(--line)
+        bg-(--sidebar-logo-bg)
+        text-xs font-black
+        text-(--gold)
+      "
+    >
+      {getInitials(name)}
+    </div>
+  );
+}
+
+/* ======================================================
+   TABLE HEADING
+====================================================== */
+
+function TableHeading({
+  children,
+  align = "left",
+}: {
+  children: React.ReactNode;
+  align?: "left" | "right";
+}) {
+  return (
+    <th
+      scope="col"
+      className={`
+        px-6 py-4
+        text-[10px]
+        font-black
+        uppercase
+        tracking-[0.16em]
+        text-(--ink-faint)
+        ${align === "right" ? "text-right" : "text-left"}
+      `}
+    >
+      {children}
+    </th>
+  );
+}
+
+/* ======================================================
+   MOBILE DETAIL
+====================================================== */
+
+function MobileDetail({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0">
+      <p
+        className="
+          text-[9px]
+          font-black
+          uppercase
+          tracking-[0.12em]
+          text-(--ink-faint)
+        "
+      >
+        {label}
+      </p>
+
+      <p
+        className="
+          mt-1 truncate
+          text-sm font-medium
+          text-(--foreground-soft)
+        "
+      >
+        {value}
+      </p>
+    </div>
+  );
+}
+

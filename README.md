@@ -156,19 +156,19 @@ Administrators can admit new students by providing:
 
 When a student is admitted, DojoFlow creates:
 
-```text
+ text
 User Account
      │
      │ linked through User ID
      ▼
 Student Profile
-```
+ 
 
 The user account receives:
 
-```text
+ text
 role = STUDENT
-```
+ 
 
 The student profile stores the corresponding user reference.
 
@@ -180,7 +180,7 @@ This allows the application to securely identify the logged-in student's own pro
 
 The student login flow works as follows:
 
-```text
+ text
 Student Login
       │
       ▼
@@ -197,7 +197,7 @@ GET /api/students/me
       │
       ▼
 Student Profile
-```
+ 
 
 The backend determines the student using the authenticated user's ID instead of accepting an arbitrary student ID.
 
@@ -221,7 +221,7 @@ A plan can contain:
 
 Example:
 
-```text
+ text
 Training Plan
 │
 ├── Duration
@@ -239,7 +239,7 @@ Training Plan
     ├── Milestone 1
     ├── Milestone 2
     └── ...
-```
+ 
 
 ---
 
@@ -251,7 +251,7 @@ Each training day can contain the techniques and activities students are expecte
 
 Example:
 
-```text
+ text
 Day 1
  ├── Basic Stance
  ├── Basic Punch
@@ -261,7 +261,7 @@ Day 2
  ├── Footwork
  ├── Kicks
  └── Combinations
-```
+ 
 
 This structure allows coaches to follow a defined training program.
 
@@ -289,13 +289,13 @@ Branch-level users only access attendance relevant to their branch.
 
 Coaches can evaluate student performance using a 1–5 star rating system.
 
-```text
+ text
 ⭐     1 - Needs Improvement
 ⭐⭐    2
 ⭐⭐⭐   3
 ⭐⭐⭐⭐  4
 ⭐⭐⭐⭐⭐ 5 - Excellent
-```
+ 
 
 Performance evaluations can include:
 
@@ -334,9 +334,9 @@ DojoFlow uses multiple layers of security.
 
 Protected APIs require a valid JWT:
 
-```http
+ http
 Authorization: Bearer <token>
-```
+ 
 
 ### Role-based authorization
 
@@ -344,30 +344,30 @@ Backend routes verify the user's role before allowing access.
 
 For example:
 
-```text
+ text
 SUPER_ADMIN
 BRANCH_ADMIN
 COACH
 STUDENT
-```
+ 
 
 ### Student data isolation
 
 Students use:
 
-```http
+ http
 GET /api/students/me
-```
+ 
 
 rather than requesting an arbitrary student ID.
 
 The backend uses the authenticated JWT identity:
 
-```js
+ js
 Student.findOne({
   user: req.user._id
 });
-```
+ 
 
 Therefore, students cannot access another student's profile simply by changing a URL parameter.
 
@@ -403,7 +403,7 @@ Therefore, students cannot access another student's profile simply by changing a
 
 DojoFlow follows a frontend/backend architecture:
 
-```text
+ text
 ┌───────────────────────────────┐
 │          Next.js              │
 │          Frontend             │
@@ -445,13 +445,13 @@ DojoFlow follows a frontend/backend architecture:
 │  Attendance                   │
 │  Performance                  │
 └───────────────────────────────┘
-```
+ 
 
 ---
 
 # 📁 Project Structure
 
-```text
+ text
 DojoFlow/
 │
 ├── client/
@@ -492,7 +492,7 @@ DojoFlow/
 │
 ├── README.md
 └── .gitignore
-```
+ 
 
 ---
 
@@ -510,15 +510,15 @@ Make sure the following are installed:
 
 Clone the repository:
 
-```bash
+ bash
 git clone <YOUR_GITHUB_REPOSITORY_URL>
-```
+ 
 
 Move into the project:
 
-```bash
+ bash
 cd DojoFlow
-```
+ 
 
 ---
 
@@ -526,42 +526,42 @@ cd DojoFlow
 
 Navigate to the server:
 
-```bash
+ bash
 cd server
-```
+ 
 
 Install dependencies:
 
-```bash
+ bash
 npm install
-```
+ 
 
 Create a `.env` file:
 
-```env
+ env
 PORT=5000
 MONGO_URI=mongodb://127.0.0.1:27017/dojoflow
 JWT_SECRET=your_secret_key
-```
+ 
 
 Start the backend:
 
-```bash
+ bash
 npm run dev
-```
+ 
 
 The backend will run on:
 
-```text
+ text
 http://localhost:5000
-```
+ 
 
 Expected output:
 
-```text
+ text
 DojoFlow server running on port 5000
 MongoDB connected: 127.0.0.1
-```
+ 
 
 ---
 
@@ -571,33 +571,33 @@ Open another terminal.
 
 Navigate to:
 
-```bash
+ bash
 cd client
-```
+ 
 
 Install dependencies:
 
-```bash
+ bash
 npm install
-```
+ 
 
 Start the development server:
 
-```bash
+ bash
 npm run dev
-```
+ 
 
 The frontend will run on:
 
-```text
+ text
 http://localhost:3000
-```
+ 
 
 Open the application in your browser:
 
-```text
+ text
 http://localhost:3000
-```
+ 
 
 ---
 
@@ -607,25 +607,25 @@ Do not commit real secrets to GitHub.
 
 Create:
 
-```text
+ text
 server/.env
-```
+ 
 
 with your local configuration.
 
 For GitHub, provide:
 
-```text
+ text
 server/.env.example
-```
+ 
 
 Example:
 
-```env
+ env
 PORT=5000
 MONGO_URI=mongodb://127.0.0.1:27017/dojoflow
 JWT_SECRET=your_secret_here
-```
+ 
 
 The real `.env` file should be included in `.gitignore`.
 
@@ -635,66 +635,66 @@ The real `.env` file should be included in `.gitignore`.
 
 ## Authentication
 
-```http
+ http
 POST /api/auth/register
 POST /api/auth/login
 GET  /api/auth/me
-```
+ 
 
 ## Students
 
-```http
+ http
 GET    /api/students
 GET    /api/students/me
 GET    /api/students/:id
 POST   /api/students
 PUT    /api/students/:id
 DELETE /api/students/:id
-```
+ 
 
 ## Plans
 
-```http
+ http
 GET    /api/plans
 GET    /api/plans/:id
 POST   /api/plans
 PUT    /api/plans/:id
 DELETE /api/plans/:id
-```
+ 
 
 ## Attendance
 
-```http
+ http
 GET  /api/attendance
 POST /api/attendance
-```
+ 
 
 ## Performance
 
-```http
+ http
 GET  /api/performance
 POST /api/performance
-```
+ 
 
 ## Progress
 
-```http
+ http
 GET /api/progress/student/:studentId
-```
+ 
 
 ## Staff / Users
 
-```http
+ http
 GET    /api/users
 POST   /api/users
 DELETE /api/users/:id
-```
+ 
 
 ## Dashboard
 
-```http
+ http
 GET /api/dashboard
-```
+ 
 
 ---
 
@@ -702,13 +702,13 @@ GET /api/dashboard
 
 ### Authentication
 
-```text
+ text
 /login
-```
+ 
 
 ### Management
 
-```text
+ text
 /dashboard
 /students
 /plans
@@ -716,13 +716,13 @@ GET /api/dashboard
 /attendance
 /performance
 /settings/staff
-```
+ 
 
 ### Student
 
-```text
+ text
 /student-dashboard
-```
+ 
 
 ---
 
@@ -732,7 +732,7 @@ GET /api/dashboard
 
 Login using a Super Admin account and verify:
 
-```text
+ text
 Dashboard
 Students
 Plans
@@ -740,7 +740,7 @@ Curriculum
 Attendance
 Performance
 Settings
-```
+ 
 
 ---
 
@@ -750,10 +750,10 @@ Create a student from the Students module.
 
 Provide:
 
-```text
+ text
 Student Login Email
 Student Login Password
-```
+ 
 
 Logout from the admin account.
 
@@ -761,9 +761,9 @@ Login using the student's credentials.
 
 The student should automatically be redirected to:
 
-```text
+ text
 /student-dashboard
-```
+ 
 
 The student portal should display the student's own:
 
@@ -780,13 +780,13 @@ The student portal should display the student's own:
 
 While logged in as a student, attempting to access management routes should redirect the student back to:
 
-```text
+ text
 /student-dashboard
-```
+ 
 
 Examples:
 
-```text
+ text
 /dashboard
 /students
 /plans
@@ -794,7 +794,7 @@ Examples:
 /attendance
 /performance
 /settings
-```
+ 
 
 This frontend protection is backed by backend role-based authorization.
 
@@ -852,16 +852,16 @@ Potential future enhancements include:
 
 The following directories should not be committed to GitHub:
 
-```text
+ text
 node_modules/
 .next/
-```
+ 
 
 Sensitive environment files should also not be committed:
 
-```text
+ text
 .env
-```
+ 
 
 Use `.env.example` to document required environment variables.
 
@@ -874,22 +874,22 @@ Contributions are welcome.
 1. Fork the repository.
 2. Create a feature branch:
 
-```bash
+ bash
 git checkout -b feature/your-feature
-```
+ 
 
 3. Make your changes.
 4. Commit your changes:
 
-```bash
+ bash
 git commit -m "Add your feature"
-```
+ 
 
 5. Push the branch:
 
-```bash
+ bash
 git push origin feature/your-feature
-```
+ 
 
 6. Open a Pull Request.
 
@@ -909,9 +909,9 @@ Full-Stack / MERN Developer
 
 Built with:
 
-```text
+ text
 Next.js + TypeScript + Express + MongoDB
-```
+ 
 
 ---
 
@@ -919,10 +919,10 @@ Next.js + TypeScript + Express + MongoDB
 
 A complete management platform for modern Karate Academies.
 
-```text
+ text
 🥋 Train
 📚 Learn
 📅 Track
 ⭐ Improve
 🏆 Progress
-```
+ 

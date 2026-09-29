@@ -377,7 +377,7 @@ export default function PlansPage() {
 
   async function handleDelete(plan: Plan) {
     const confirmed = window.confirm(
-      `Are you sure you want to delete "${plan.name}"?`,
+      `Deactivate "${plan.name}"? Existing students will keep their plan history.`,
     );
 
     if (!confirmed) return;
@@ -918,7 +918,7 @@ function PlanCard({
               onClick={onDelete}
             >
               <Trash2 size={14} />
-              Delete
+              Deactivate
             </Button>
           </div>
         )}

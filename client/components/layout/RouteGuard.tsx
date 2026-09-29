@@ -1,156 +1,563 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import {
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 
-import { getMyNavigation } from "@/lib/api";
+import {
+  usePathname,
+  useRouter,
+} from "next/navigation";
+
+import {
+  getMyNavigation,
+  type NavigationModule,
+} from "@/lib/api";
+
+import { useAuth } from "@/hooks/userAuth";
+
+import {
+  hasPermission,
+  NAVIGATION_PERMISSIONS,
+} from "@/lib/permissions";
+
+/* =========================================================
+   TYPES
+========================================================= */
 
 type GuardState = {
   status: "loading" | "ready" | "error";
-  hrefs: string[];
+  modules: NavigationModule[];
+  key: string;
 };
 
-const CACHE_KEY = "dojoflow.allowed-pages";
+/* =========================================================
+   CONSTANTS
+========================================================= */
 
-/*
- * The pages this user may open are remembered for the browser tab, so
- * the next page load knows the answer straight away instead of waiting
- * for the server.
- */
-function readCache(): string[] | null {
-  try {
-    const raw = sessionStorage.getItem(CACHE_KEY);
+/* System routes intentionally omitted from navigation authorization. */
+const SYSTEM_ROUTES = [
+  "/unauthorized",
+];
 
-    if (!raw) return null;
+/* =========================================================
+   SYSTEM ROUTE CHECK
+========================================================= */
 
-    const saved = JSON.parse(raw);
-
-    if (
-      saved?.token === localStorage.getItem("token") &&
-      Array.isArray(saved.hrefs)
-    ) {
-      return saved.hrefs;
-    }
-  } catch {
-    // Ignore a broken cache.
-  }
-
-  return null;
+function isSystemRoute(
+  pathname: string,
+) {
+  return SYSTEM_ROUTES.some(
+    (route) =>
+      pathname === route ||
+      pathname.startsWith(
+        `${route}/`,
+      ),
+  );
 }
 
-function writeCache(hrefs: string[]) {
-  try {
-    sessionStorage.setItem(
-      CACHE_KEY,
-      JSON.stringify({
-        token: localStorage.getItem("token"),
-        hrefs,
-      }),
-    );
-  } catch {
-    // Storage can be full or blocked. Nothing to do.
+/* =========================================================
+   PERMISSION FILTER
+========================================================= */
+
+function filterModulesByPermission(
+  modules: NavigationModule[],
+  user: {
+    role?: string | null;
+    permissions?: string[];
+  } | null,
+): NavigationModule[] {
+  if (!user) {
+    return [];
   }
+
+  const role = String(
+    user.role || "",
+  ).toUpperCase();
+
+  return modules.filter(
+    (module) => {
+      /*
+       * Student dashboard is restricted to students.
+       */
+      if (
+        module.key ===
+        "student-dashboard"
+      ) {
+        return role === "STUDENT";
+      }
+
+      const requiredPermission =
+        NAVIGATION_PERMISSIONS[
+          module.key
+        ];
+
+      /*
+       * Unknown/custom modules are allowed
+       * when the backend has already returned them.
+       */
+      if (!requiredPermission) {
+        return true;
+      }
+
+      return hasPermission(
+        user,
+        requiredPermission,
+      );
+    },
+  );
 }
 
-/*
- * Stops a user from opening a page that is not in their menu by
- * typing the address. The pages a user may open are exactly the
- * modules the server returns for their role.
- *
- * While the answer is not known yet the page is shown at once, so
- * the page can start loading its own data in parallel. The API
- * still refuses anything the user may not do.
- */
+/* =========================================================
+   LOADING SCREEN
+========================================================= */
+
+function GuardLoading() {
+  return (
+    <div
+      className="
+        flex
+        min-h-[calc(100vh-72px)]
+        items-center
+        justify-center
+        px-6
+      "
+    >
+      <div
+        className="
+          flex
+          flex-col
+          items-center
+          gap-4
+          text-center
+        "
+      >
+        <div
+          className="
+            h-8
+            w-8
+            animate-spin
+            rounded-full
+            border-2
+            border-(--line)
+            border-t-(--gold)
+          "
+          aria-hidden="true"
+        />
+
+        <div>
+          <p
+            className="
+              text-sm
+              font-bold
+              text-(--foreground)
+            "
+          >
+            Checking access...
+          </p>
+
+          <p
+            className="
+              mt-1
+              text-xs
+              text-(--ink-muted)
+            "
+          >
+            Verifying your permissions.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* =========================================================
+   ROUTE GUARD
+========================================================= */
+
 export default function RouteGuard({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const pathname = usePathname();
-  const router = useRouter();
+  const pathname =
+    usePathname();
 
-  const [state, setState] = useState<GuardState>(() => {
-    const cached = readCache();
+  const router =
+    useRouter();
 
-    return cached
-      ? { status: "ready", hrefs: cached }
-      : { status: "loading", hrefs: [] };
-  });
+  const {
+    user,
+    isLoading: authLoading,
+    isAuthenticated,
+  } = useAuth();
 
-  // Bump this number to load the allowed pages again.
-  const [reload, setReload] = useState(0);
+  /*
+   * /unauthorized is a system page.
+   *
+   * It must not itself be protected by the navigation
+   * permission check, otherwise an unauthorized user
+   * would be redirected back to /unauthorized forever.
+   */
+  const systemRoute =
+    isSystemRoute(pathname);
+
+  const [state, setState] =
+    useState<GuardState>({
+      status: "loading",
+      modules: [],
+      key: "",
+    });
+
+  const [reload, setReload] =
+    useState(0);
+
+  const navigationKey = `${user?.id || ""}:${user?.role || ""}:${reload}`;
+
+  /* =======================================================
+     LOAD SERVER NAVIGATION
+  ======================================================= */
 
   useEffect(() => {
+    /*
+     * System routes do not need navigation authorization.
+     */
+    if (systemRoute) {
+      return;
+    }
+
+    /*
+     * Do not call the navigation API before authentication
+     * has been established.
+     */
+    if (
+      authLoading ||
+      !isAuthenticated ||
+      !user
+    ) {
+      return;
+    }
+
     let cancelled = false;
 
     getMyNavigation()
       .then((modules) => {
-        if (cancelled) return;
+        if (cancelled) {
+          return;
+        }
 
-        const hrefs = modules.map((item) => item.href);
-
-        writeCache(hrefs);
-
-        setState({ status: "ready", hrefs });
+        setState({
+          status: "ready",
+          modules,
+          key: navigationKey,
+        });
       })
       .catch(() => {
-        // If the menu cannot be loaded, do not block the page.
-        if (cancelled) return;
+        if (cancelled) {
+          return;
+        }
 
-        setState((previous) =>
-          previous.status === "ready"
-            ? previous
-            : { status: "error", hrefs: [] },
-        );
+        setState({ status: "error", modules: [], key: navigationKey });
       });
 
     return () => {
       cancelled = true;
     };
-  }, [reload]);
+  }, [
+    authLoading,
+    isAuthenticated,
+    user,
+    reload,
+    systemRoute,
+    navigationKey,
+  ]);
+
+  /* =======================================================
+     NAVIGATION UPDATE EVENT
+  ======================================================= */
 
   useEffect(() => {
-    const refresh = () => setReload((count) => count + 1);
+    const refresh = () =>
+      setReload(
+        (count) => count + 1,
+      );
 
-    window.addEventListener("dojoflow:navigation-updated", refresh);
+    window.addEventListener(
+      "dojoflow:navigation-updated",
+      refresh,
+    );
 
     return () => {
-      window.removeEventListener("dojoflow:navigation-updated", refresh);
+      window.removeEventListener(
+        "dojoflow:navigation-updated",
+        refresh,
+      );
     };
   }, []);
 
-  const allowed =
-    state.status !== "ready" ||
-    state.hrefs.some(
-      (href) => pathname === href || pathname.startsWith(`${href}/`),
-    );
+  /* =======================================================
+     FILTERED MODULES
+  ======================================================= */
 
-  const target = state.hrefs[0];
+  const allowedModules =
+    useMemo(() => {
+      return filterModulesByPermission(
+        state.modules,
+        user,
+      );
+    }, [
+      state.modules,
+      user,
+    ]);
+
+  /* =======================================================
+     ALLOWED ROUTES
+  ======================================================= */
+
+  const allowedHrefs =
+    useMemo(() => {
+      return allowedModules.map(
+        (module) => module.href,
+      );
+    }, [allowedModules]);
+
+  /*
+   * A route is allowed if:
+   *
+   * /students
+   *
+   * matches:
+   *
+   * /students
+   * /students/123
+   * /students/123/progress
+   * /students/123/timeline
+   */
+  const allowed =
+    systemRoute ||
+    (state.status === "ready" &&
+      state.key === navigationKey &&
+      allowedHrefs.some(
+        (href) =>
+          pathname === href ||
+          pathname.startsWith(
+            `${href}/`,
+          ),
+      ));
+
+  /* =======================================================
+     UNAUTHORIZED REDIRECTION
+  ======================================================= */
 
   useEffect(() => {
-    if (state.status === "ready" && !allowed && target) {
-      router.replace(target);
+    /*
+     * System pages must never redirect through
+     * the normal navigation authorization flow.
+     */
+    if (systemRoute) {
+      return;
     }
-  }, [state.status, allowed, target, router]);
 
-  if (state.status === "ready" && state.hrefs.length === 0) {
+    /*
+     * Don't redirect while authentication is still loading.
+     */
+    if (authLoading) {
+      return;
+    }
+
+    /*
+     * AppShell handles unauthenticated users.
+     */
+    if (
+      !isAuthenticated ||
+      !user
+    ) {
+      return;
+    }
+
+    /*
+     * Don't make a routing decision until the backend
+     * navigation response has been resolved.
+     */
+    if (state.status !== "ready" || state.key !== navigationKey) {
+      return;
+    }
+
+    /*
+     * No allowed pages at all.
+     */
+    if (
+      allowedHrefs.length === 0
+    ) {
+      router.replace(
+        "/unauthorized",
+      );
+
+      return;
+    }
+
+    /*
+     * Current page is not authorized.
+     */
+    if (!allowed) {
+      router.replace(
+        "/unauthorized",
+      );
+    }
+  }, [
+    authLoading,
+    isAuthenticated,
+    user,
+    state.status,
+    state.key,
+    navigationKey,
+    allowed,
+    allowedHrefs.length,
+    systemRoute,
+    router,
+  ]);
+
+  /* =======================================================
+     AUTH LOADING
+  ======================================================= */
+
+  if (authLoading) {
+    return <GuardLoading />;
+  }
+
+  /* =======================================================
+     AUTHENTICATION FAILED
+  ======================================================= */
+
+  if (
+    !isAuthenticated ||
+    !user
+  ) {
+    return null;
+  }
+
+  /* =======================================================
+     SYSTEM PAGE
+  ======================================================= */
+
+  /*
+   * IMPORTANT:
+   *
+   * Render /unauthorized normally once the user has
+   * been authenticated. Do not require it to exist
+   * inside the navigation modules.
+   */
+  if (systemRoute) {
+    return <>{children}</>;
+  }
+
+  /* =======================================================
+     NAVIGATION LOADING
+  ======================================================= */
+
+  if (state.status === "loading" || state.key !== navigationKey) {
+    return <GuardLoading />;
+  }
+
+  /* =======================================================
+     NAVIGATION ERROR
+  ======================================================= */
+
+  if (
+    state.status === "error"
+  ) {
     return (
-      <div className="mx-auto max-w-xl px-6 py-24 text-center">
-        <h1 className="text-xl font-extrabold text-(--foreground)">
-          No pages available
-        </h1>
+      <div
+        className="
+          flex
+          min-h-[calc(100vh-72px)]
+          items-center
+          justify-center
+          px-6
+        "
+      >
+        <div
+          className="
+            max-w-md
+            text-center
+          "
+        >
+          <h1
+            className="
+              text-xl
+              font-extrabold
+              text-(--foreground)
+            "
+          >
+            Unable to verify access
+          </h1>
 
-        <p className="mt-2 text-sm text-(--ink-muted)">
-          Your account does not have access to any pages yet. Please contact
-          your administrator.
-        </p>
+          <p
+            className="
+              mt-2
+              text-sm
+              leading-6
+              text-(--ink-muted)
+            "
+          >
+            We could not load your
+            navigation permissions.
+            Please refresh the page
+            or contact your
+            administrator.
+          </p>
+
+          <button
+            type="button"
+            onClick={() =>
+              setReload(
+                (count) =>
+                  count + 1,
+              )
+            }
+            className="
+              mt-5
+              rounded-xl
+              bg-(--gold)
+              px-4
+              py-2.5
+              text-sm
+              font-bold
+              text-(--sidebar-active-text)
+              transition-opacity
+              hover:opacity-90
+            "
+          >
+            Try Again
+          </button>
+        </div>
       </div>
     );
   }
 
+  /* =======================================================
+     NO ACCESS
+  ======================================================= */
+
+  if (
+    allowedModules.length === 0
+  ) {
+    return null;
+  }
+
+  /* =======================================================
+     UNAUTHORIZED CURRENT ROUTE
+  ======================================================= */
+
   if (!allowed) {
     return null;
   }
+
+  /* =======================================================
+     AUTHORIZED
+  ======================================================= */
 
   return <>{children}</>;
 }

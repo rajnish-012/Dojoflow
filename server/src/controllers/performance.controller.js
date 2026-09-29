@@ -1,21 +1,66 @@
 const mongoose = require("mongoose");
 
 const { isBranchScoped } = require("../utils/access");
+
 const Performance = require("../models/Performance");
 const Student = require("../models/Student");
 const Branch = require("../models/Branch");
 const Attendance = require("../models/Attendance");
+const CoachStudentAssignment = require("../models/CoachStudentAssignment");
 
-// ==============================
-// GET ALL PERFORMANCE RECORDS
-// ==============================
+/* ==========================================
+   COACH ASSIGNMENT HELPERS
+========================================== */
+
+const getCoachStudentIds = async (req) => {
+  if (req.user.role !== "COACH") {
+    return null;
+  }
+
+  const assignments = await CoachStudentAssignment.find({
+    coach: req.user._id,
+    status: "ACTIVE",
+  }).select("student");
+
+  return assignments.map((item) => item.student);
+};
+
+const checkCoachStudentAccess = async (req, studentId) => {
+  if (req.user.role !== "COACH") {
+    return null;
+  }
+
+  const assignment = await CoachStudentAssignment.findOne({
+    coach: req.user._id,
+    student: studentId,
+    status: "ACTIVE",
+  }).select("_id");
+
+  if (!assignment) {
+    return {
+      status: 403,
+      message: "You do not have access to this student",
+    };
+  }
+
+  return null;
+};
+
+/* ==========================================
+   GET ALL PERFORMANCE
+========================================== */
+
 const getPerformance = async (req, res) => {
   try {
     const filter = {};
 
-    // Branch admins and coaches can only see
-    // performance records from their assigned branch
-    if (isBranchScoped(req.user)) {
+    if (req.user.role === "COACH") {
+      const studentIds = await getCoachStudentIds(req);
+
+      filter.student = {
+        $in: studentIds,
+      };
+    } else if (req.user.role === "BRANCH_ADMIN") {
       if (!req.user.branch) {
         return res.status(403).json({
           success: false,
@@ -30,7 +75,10 @@ const getPerformance = async (req, res) => {
       .populate("student", "name age phone currentBelt status")
       .populate("branch", "name address")
       .populate("evaluatedBy", "name email")
-      .sort({ evaluationDate: -1, createdAt: -1 });
+      .sort({
+        evaluationDate: -1,
+        createdAt: -1,
+      });
 
     return res.status(200).json({
       success: true,
@@ -48,13 +96,12 @@ const getPerformance = async (req, res) => {
   }
 };
 
-// ==============================
-// GET LOGGED-IN STUDENT'S PERFORMANCE
-// ==============================
+/* ==========================================
+   GET LOGGED-IN STUDENT PERFORMANCE
+========================================== */
+
 const getMyPerformance = async (req, res) => {
   try {
-    // Find the Student document connected
-    // to the logged-in User
     const student = await Student.findOne({
       user: req.user._id,
     });
@@ -73,7 +120,10 @@ const getMyPerformance = async (req, res) => {
       .populate("student", "name age phone currentBelt status")
       .populate("branch", "name address")
       .populate("evaluatedBy", "name email")
-      .sort({ evaluationDate: -1, createdAt: -1 });
+      .sort({
+        evaluationDate: -1,
+        createdAt: -1,
+      });
 
     return res.status(200).json({
       success: true,
@@ -91,9 +141,10 @@ const getMyPerformance = async (req, res) => {
   }
 };
 
-// ==============================
-// GET PERFORMANCE BY STUDENT ID
-// ==============================
+/* ==========================================
+   GET PERFORMANCE BY STUDENT ID
+========================================== */
+
 const getPerformanceByStudent = async (req, res) => {
   try {
     const { studentId } = req.params;
@@ -114,8 +165,15 @@ const getPerformanceByStudent = async (req, res) => {
       });
     }
 
-    // Branch admins and coaches can only access
-    // students from their assigned branch
+    const coachAccessError = await checkCoachStudentAccess(req, student._id);
+
+    if (coachAccessError) {
+      return res.status(coachAccessError.status).json({
+        success: false,
+        message: coachAccessError.message,
+      });
+    }
+
     if (isBranchScoped(req.user)) {
       if (!req.user.branch) {
         return res.status(403).json({
@@ -141,7 +199,10 @@ const getPerformanceByStudent = async (req, res) => {
       .populate("student", "name age phone currentBelt status")
       .populate("branch", "name address")
       .populate("evaluatedBy", "name email")
-      .sort({ evaluationDate: -1, createdAt: -1 });
+      .sort({
+        evaluationDate: -1,
+        createdAt: -1,
+      });
 
     return res.status(200).json({
       success: true,
@@ -159,9 +220,10 @@ const getPerformanceByStudent = async (req, res) => {
   }
 };
 
-// ==============================
-// GET PERFORMANCE BY ID
-// ==============================
+/* ==========================================
+   GET PERFORMANCE BY ID
+========================================== */
+
 const getPerformanceById = async (req, res) => {
   try {
     const { id } = req.params;
@@ -185,9 +247,19 @@ const getPerformanceById = async (req, res) => {
       });
     }
 
-    // Branch admins and coaches can only access
-    // performance records from their assigned branch
-    if (isBranchScoped(req.user)) {
+    if (req.user.role === "COACH") {
+      const coachAccessError = await checkCoachStudentAccess(
+        req,
+        performance.student?._id,
+      );
+
+      if (coachAccessError) {
+        return res.status(coachAccessError.status).json({
+          success: false,
+          message: "You do not have access to this performance record",
+        });
+      }
+    } else if (isBranchScoped(req.user)) {
       if (!req.user.branch) {
         return res.status(403).json({
           success: false,
@@ -197,8 +269,7 @@ const getPerformanceById = async (req, res) => {
 
       if (
         !performance.branch ||
-        performance.branch._id.toString() !==
-          req.user.branch.toString()
+        performance.branch._id.toString() !== req.user.branch.toString()
       ) {
         return res.status(403).json({
           success: false,
@@ -221,9 +292,10 @@ const getPerformanceById = async (req, res) => {
   }
 };
 
-// ==============================
-// CREATE PERFORMANCE RECORD
-// ==============================
+/* ==========================================
+   CREATE PERFORMANCE RECORD
+========================================== */
+
 const createPerformance = async (req, res) => {
   try {
     const {
@@ -258,32 +330,22 @@ const createPerformance = async (req, res) => {
       });
     }
 
-    // Validate plan day
-    if (
-      !Number.isInteger(Number(planDay)) ||
-      Number(planDay) < 1
-    ) {
+    if (!Number.isInteger(Number(planDay)) || Number(planDay) < 1) {
       return res.status(400).json({
         success: false,
         message: "planDay must be a positive integer",
       });
     }
 
-    // Validate rating
     const numericRating = Number(rating);
 
-    if (
-      Number.isNaN(numericRating) ||
-      numericRating < 1 ||
-      numericRating > 5
-    ) {
+    if (Number.isNaN(numericRating) || numericRating < 1 || numericRating > 5) {
       return res.status(400).json({
         success: false,
         message: "Rating must be between 1 and 5",
       });
     }
 
-    // Validate evaluation date format
     if (
       typeof evaluationDate !== "string" ||
       !/^\d{4}-\d{2}-\d{2}$/.test(evaluationDate)
@@ -303,8 +365,22 @@ const createPerformance = async (req, res) => {
       });
     }
 
-    // Branch admins and coaches can only create
-    // performance records for their own branch
+    // Coach can create performance
+    // only for assigned students.
+    const coachAccessError = await checkCoachStudentAccess(
+      req,
+      studentRecord._id,
+    );
+
+    if (coachAccessError) {
+      return res.status(coachAccessError.status).json({
+        success: false,
+        message: coachAccessError.message,
+      });
+    }
+
+    // Branch Admin can only create
+    // performance for their branch.
     if (isBranchScoped(req.user)) {
       if (!req.user.branch) {
         return res.status(403).json({
@@ -315,8 +391,7 @@ const createPerformance = async (req, res) => {
 
       if (
         !studentRecord.branch ||
-        studentRecord.branch.toString() !==
-          req.user.branch.toString()
+        studentRecord.branch.toString() !== req.user.branch.toString()
       ) {
         return res.status(403).json({
           success: false,
@@ -325,7 +400,6 @@ const createPerformance = async (req, res) => {
       }
     }
 
-    // Verify that the student's branch exists
     const branch = await Branch.findById(studentRecord.branch);
 
     if (!branch) {
@@ -335,9 +409,7 @@ const createPerformance = async (req, res) => {
       });
     }
 
-    const parsedEvaluationDate = new Date(
-      `${evaluationDate}T00:00:00`
-    );
+    const parsedEvaluationDate = new Date(`${evaluationDate}T00:00:00`);
 
     if (Number.isNaN(parsedEvaluationDate.getTime())) {
       return res.status(400).json({
@@ -346,10 +418,12 @@ const createPerformance = async (req, res) => {
       });
     }
 
-    // ==============================
-    // A student can only be evaluated for a
-    // training day they were actually present for
-    // ==============================
+    /*
+     * A student can only be evaluated
+     * for a training day for which
+     * attendance was marked as PRESENT.
+     */
+
     const attendanceForDay = await Attendance.findOne({
       student: studentRecord._id,
       planDay: Number(planDay),
@@ -381,9 +455,7 @@ const createPerformance = async (req, res) => {
       evaluationDate: parsedEvaluationDate,
     });
 
-    const populatedPerformance = await Performance.findById(
-      performance._id
-    )
+    const populatedPerformance = await Performance.findById(performance._id)
       .populate("student", "name age phone currentBelt status")
       .populate("branch", "name address")
       .populate("evaluatedBy", "name email");

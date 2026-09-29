@@ -3,21 +3,30 @@ const User = require("../models/User");
 const Role = require("../models/Role");
 
 /**
- * Finds out whether the user's role can see every branch
+ * Resolves whether the user's role can see every branch
  * ("ALL") or only their own branch ("BRANCH").
+ *
+ * SUPER_ADMIN always gets global scope without a DB lookup.
  */
 const resolveDataScope = async (user) => {
   if (user.role === "SUPER_ADMIN") {
     return "ALL";
   }
 
-  const role = await Role.findOne({ key: user.role }).select(
-    "dataScope"
-  );
+  const role = await Role.findOne({ key: user.role }).select("dataScope");
 
   return role?.dataScope === "ALL" ? "ALL" : "BRANCH";
 };
 
+/**
+ * protect — JWT authentication middleware.
+ *
+ * Verifies the Bearer token, fetches the User from the DB,
+ * and attaches req.user for downstream handlers.
+ *
+ * Also checks req.user.isActive so that deactivated accounts
+ * are rejected even while their token is still technically valid.
+ */
 const protect = async (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
@@ -31,10 +40,7 @@ const protect = async (req, res, next) => {
 
     const token = authHeader.split(" ")[1];
 
-    const decoded = jwt.verify(
-      token,
-      process.env.JWT_SECRET
-    );
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
     const user = await User.findById(decoded.id);
 
@@ -42,6 +48,30 @@ const protect = async (req, res, next) => {
       return res.status(401).json({
         success: false,
         message: "User no longer exists",
+      });
+    }
+
+    if (
+      user.passwordChangedAt &&
+      Number.isInteger(decoded.iat) &&
+      decoded.iat < Math.floor(user.passwordChangedAt.getTime() / 1000)
+    ) {
+      return res.status(401).json({
+        success: false,
+        message: "Session expired. Please log in again.",
+      });
+    }
+
+    /*
+     * Reject deactivated accounts even if the JWT is still valid.
+     * This allows administrators to immediately block access
+     * without waiting for token expiry.
+     */
+    if (user.isActive === false) {
+      return res.status(401).json({
+        success: false,
+        message:
+          "This account has been deactivated. Please contact your administrator.",
       });
     }
 

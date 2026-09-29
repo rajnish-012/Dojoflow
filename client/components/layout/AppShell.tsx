@@ -1,23 +1,27 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import {
+  useEffect,
+  useState,
+} from "react";
+
+import {
+  usePathname,
+  useRouter,
+} from "next/navigation";
 
 import Sidebar from "./Sidebar";
 import Header from "./Header";
 import RouteGuard from "./RouteGuard";
 
-/* =========================================================
-   TYPES
-   ========================================================= */
+import { useAuth } from "@/hooks/userAuth";
+import { getRoleDashboardPath } from "@/lib/current-user";
+
+import AcademyBrandProvider from "@/components/settings/AcademyBrandProvider";
 
 type AppShellProps = {
   children: React.ReactNode;
 };
-
-/* =========================================================
-   PUBLIC ROUTES
-   ========================================================= */
 
 const publicRoutes = [
   "/",
@@ -25,22 +29,24 @@ const publicRoutes = [
   "/inquiry",
 ];
 
-function isPublicPath(pathname: string) {
-  return publicRoutes.some((route) => {
-    if (route === "/") {
-      return pathname === "/";
-    }
+function isPublicPath(
+  pathname: string,
+) {
+  return publicRoutes.some(
+    (route) => {
+      if (route === "/") {
+        return pathname === "/";
+      }
 
-    return (
-      pathname === route ||
-      pathname.startsWith(`${route}/`)
-    );
-  });
+      return (
+        pathname === route ||
+        pathname.startsWith(
+          `${route}/`,
+        )
+      );
+    },
+  );
 }
-
-/* =========================================================
-   APPLICATION LOADING SCREEN
-   ========================================================= */
 
 function AppLoadingScreen() {
   return (
@@ -62,8 +68,6 @@ function AppLoadingScreen() {
           gap-5
         "
       >
-        {/* Logo */}
-
         <div
           className="
             flex
@@ -71,6 +75,7 @@ function AppLoadingScreen() {
             w-14
             items-center
             justify-center
+            overflow-hidden
             rounded-2xl
             border
             border-(--line)
@@ -80,24 +85,23 @@ function AppLoadingScreen() {
             animate-pulse
           "
         >
-          <span
+          <img
+            src="/logo.png"
+            alt="DojoFlow"
             className="
-              text-xl
-              font-extrabold
-              tracking-tight
+              h-11
+              w-11
+              object-contain
             "
-          >
-            D
-          </span>
+          />
         </div>
-
-        {/* Loading text */}
 
         <div className="text-center">
           <p
             className="
               text-sm
-              font-bold
+              font-black
+              tracking-wide
               text-(--foreground)
             "
           >
@@ -108,15 +112,12 @@ function AppLoadingScreen() {
             className="
               mt-1
               text-xs
-              font-medium
               text-(--ink-muted)
             "
           >
             Preparing your workspace...
           </p>
         </div>
-
-        {/* Loading indicator */}
 
         <div
           className="
@@ -142,183 +143,160 @@ function AppLoadingScreen() {
   );
 }
 
-/* =========================================================
-   APP SHELL
-   ========================================================= */
-
 export default function AppShell({
   children,
 }: AppShellProps) {
-  const pathname = usePathname();
-  const router = useRouter();
+  const pathname =
+    usePathname();
 
-  const [sidebarOpen, setSidebarOpen] =
-    useState(false);
+  const router =
+    useRouter();
 
-  const [sidebarCollapsed, setSidebarCollapsed] =
-    useState(false);
+  const {
+    isLoading,
+    isAuthenticated,
+    user,
+  } = useAuth();
 
-  const [isCheckingAuth, setIsCheckingAuth] =
-    useState(true);
+  const [
+    sidebarOpen,
+    setSidebarOpen,
+  ] = useState(false);
 
-  const [isAuthenticated, setIsAuthenticated] =
-    useState(false);
+  const [
+    sidebarCollapsed,
+    setSidebarCollapsed,
+  ] = useState(false);
 
   const isPublicRoute =
     isPublicPath(pathname);
 
-  /* =======================================================
-     AUTHENTICATION CHECK
-     ======================================================= */
+  useEffect(() => {
+    if (
+      !isPublicRoute &&
+      isLoading
+    ) {
+      return;
+    }
+
+    if (
+      isPublicRoute &&
+      pathname === "/login" &&
+      isAuthenticated
+    ) {
+      router.replace(getRoleDashboardPath(user?.role));
+    }
+  }, [
+    isPublicRoute,
+    pathname,
+    isAuthenticated,
+    user?.role,
+    isLoading,
+    router,
+  ]);
 
   useEffect(() => {
-    /*
-     * Public pages do not require authentication.
-     */
-
     if (isPublicRoute) {
-      setIsAuthenticated(false);
-      setIsCheckingAuth(false);
-
       return;
     }
 
-    /*
-     * Protected routes require both:
-     * - token
-     * - stored user
-     */
-
-    const token =
-      localStorage.getItem("token");
-
-    const storedUser =
-      localStorage.getItem("user") ||
-      localStorage.getItem("dojoUser") ||
-      localStorage.getItem("currentUser");
-
-    /*
-     * Authentication failed.
-     */
-
-    if (!token || !storedUser) {
-      setIsAuthenticated(false);
-      setIsCheckingAuth(false);
-
-      router.replace("/login");
-
+    if (isLoading) {
       return;
     }
 
-    /*
-     * Authentication successful.
-     */
+    if (!isAuthenticated) {
+      const redirect =
+        pathname &&
+        pathname !== "/login"
+          ? `?redirect=${encodeURIComponent(
+              pathname,
+            )}`
+          : "";
 
-    setIsAuthenticated(true);
-    setIsCheckingAuth(false);
-  }, [isPublicRoute, router]);
-
-  /* =======================================================
-     CLOSE MOBILE SIDEBAR AFTER NAVIGATION
-     ======================================================= */
+      router.replace(
+        `/login${redirect}`,
+      );
+    }
+  }, [
+    isPublicRoute,
+    isLoading,
+    isAuthenticated,
+    pathname,
+    router,
+  ]);
 
   useEffect(() => {
     setSidebarOpen(false);
   }, [pathname]);
 
-  /* =======================================================
-     PUBLIC PAGE
-     ======================================================= */
-
   if (isPublicRoute) {
     return <>{children}</>;
   }
 
-  /* =======================================================
-     AUTHENTICATION LOADING
-     ======================================================= */
-
-  if (isCheckingAuth) {
+  if (isLoading) {
     return <AppLoadingScreen />;
   }
-
-  /* =======================================================
-     UNAUTHENTICATED
-     ======================================================= */
 
   if (!isAuthenticated) {
     return null;
   }
 
-  /* =======================================================
-     PRIVATE APPLICATION
-     ======================================================= */
-
   return (
-    <div
-      className="
-        min-h-screen
-        bg-(--background)
-        text-(--foreground)
-        transition-colors
-        duration-300
-      "
-    >
-      {/* ===================================================
-          SIDEBAR
-          =================================================== */}
-
-      <Sidebar
-        isOpen={sidebarOpen}
-        onClose={() =>
-          setSidebarOpen(false)
-        }
-        collapsed={sidebarCollapsed}
-        onToggleCollapse={() =>
-          setSidebarCollapsed(
-            (previous) => !previous
-          )
-        }
-      />
-
-      {/* ===================================================
-          MAIN APPLICATION AREA
-          =================================================== */}
-
+    <AcademyBrandProvider>
       <div
-        className={[
-          "df-app-shell",
-          sidebarCollapsed
-            ? "df-shell-collapsed"
-            : "df-shell-expanded",
-        ].join(" ")}
+        className="
+          min-h-screen
+          bg-(--background)
+          text-(--foreground)
+          transition-colors
+          duration-300
+        "
       >
-        {/* =================================================
-            HEADER
-            ================================================= */}
-
-        <Header
-          onMenuClick={() =>
-            setSidebarOpen(true)
+        <Sidebar
+          isOpen={sidebarOpen}
+          onClose={() =>
+            setSidebarOpen(false)
+          }
+          collapsed={
+            sidebarCollapsed
+          }
+          onToggleCollapse={() =>
+            setSidebarCollapsed(
+              (previous) =>
+                !previous,
+            )
           }
         />
 
-        {/* =================================================
-            PAGE CONTENT
-            ================================================= */}
-
-        <main
-          className="
-            min-h-[calc(100vh-72px)]
-            bg-(--background)
-            text-(--foreground)
-            transition-colors
-            duration-300
-          "
+        <div
+          className={[
+            "df-app-shell",
+            sidebarCollapsed
+              ? "df-shell-collapsed"
+              : "df-shell-expanded",
+          ].join(" ")}
         >
-          <RouteGuard>{children}</RouteGuard>
-        </main>
+          <Header
+            onMenuClick={() =>
+              setSidebarOpen(true)
+            }
+          />
+
+          <main
+            className="
+              min-h-[calc(100vh-72px)]
+              bg-(--background)
+              text-(--foreground)
+              transition-colors
+              duration-300
+            "
+          >
+            <RouteGuard>
+              {children}
+            </RouteGuard>
+          </main>
+        </div>
       </div>
-    </div>
+    </AcademyBrandProvider>
   );
 }

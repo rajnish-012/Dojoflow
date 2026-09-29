@@ -131,7 +131,7 @@ Students can only access their own information.
 
 # 📁 Project Structure
 
-```text
+ text
 DojoFlow/
 │
 ├── client/

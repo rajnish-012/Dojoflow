@@ -42,7 +42,7 @@ const ensureDefaultRoles = async () => {
       await Role.updateOne(
         { key: role.key },
         { $setOnInsert: role },
-        { upsert: true }
+        { upsert: true },
       );
     }
 

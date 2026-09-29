@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   ArrowUpRight,
+  CalendarDays,
   CheckCircle2,
   Clock3,
   GraduationCap,
@@ -46,7 +47,7 @@ type Student = {
     _id: string;
     name: string;
   } | null;
-  currentBelt: string;
+  currentBelt?: string;
   status: "ACTIVE" | "INACTIVE" | "COMPLETED";
   joinDate: string;
 };
@@ -54,14 +55,34 @@ type Student = {
 type Branch = {
   _id: string;
   name: string;
+  isActive?: boolean;
+};
+
+type CurriculumItem = {
+  day: number;
+  title: string;
+  description: string;
+  skill: string;
+};
+
+type MilestoneItem = {
+  day: number;
+  belt: string;
+  skill: string;
+  description: string;
 };
 
 type Plan = {
   _id: string;
   name: string;
+  isActive?: boolean;
   price: number;
   duration: number;
   durationUnit: "MONTHS" | "DAYS";
+  classesPerWeek?: number;
+  startingBelt?: string;
+  curriculum?: CurriculumItem[];
+  milestones?: MilestoneItem[];
 };
 
 type FormData = {
@@ -73,6 +94,7 @@ type FormData = {
   loginPassword: string;
   branch: string;
   plan: string;
+  joinDate: string;
 };
 
 type FieldErrors = {
@@ -81,6 +103,31 @@ type FieldErrors = {
   email?: string;
   loginEmail?: string;
 };
+
+const OBJECT_ID_PATTERN = /^[a-f\d]{24}$/i;
+
+function isValidDateKey(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+
+  const [year, month, day] = value.split("-").map(Number);
+  const date = new Date(year, month - 1, day);
+
+  return (
+    date.getFullYear() === year &&
+    date.getMonth() === month - 1 &&
+    date.getDate() === day
+  );
+}
+
+function getTodayDate() {
+  const date = new Date();
+
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+}
 
 const initialForm: FormData = {
   name: "",
@@ -91,6 +138,7 @@ const initialForm: FormData = {
   loginPassword: "",
   branch: "",
   plan: "",
+  joinDate: getTodayDate(),
 };
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -111,6 +159,11 @@ export default function StudentsPage() {
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState("");
+
+  const selectedPlan = useMemo(
+    () => plans.find((plan) => plan._id === form.plan) || null,
+    [plans, form.plan],
+  );
 
   const loadStudents = async () => {
     try {
@@ -134,8 +187,16 @@ export default function StudentsPage() {
         getPlans(),
       ]);
 
-      setBranches(branchData.branches || []);
-      setPlans(planData.plans || []);
+      setBranches(
+        (branchData.branches || []).filter(
+          (branch) => branch.isActive !== false,
+        ),
+      );
+      setPlans(
+        (planData.plans || []).filter(
+          (plan: Plan) => plan.isActive !== false,
+        ),
+      );
     } catch (error) {
       console.error(error);
       setFormError("Failed to load branches or plans.");
@@ -196,11 +257,11 @@ export default function StudentsPage() {
 
     const numericAge = Number(value);
     const isValid =
-      Number.isInteger(numericAge) && numericAge >= 1 && numericAge <= 100;
+      Number.isInteger(numericAge) && numericAge >= 1 && numericAge <= 120;
 
     setFieldErrors((current) => ({
       ...current,
-      age: isValid ? undefined : "Age must be between 1 and 100.",
+      age: isValid ? undefined : "Age must be between 1 and 120.",
     }));
   };
 
@@ -259,21 +320,23 @@ export default function StudentsPage() {
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (saving) return;
     setFormError("");
 
     const trimmedName = form.name.trim();
     const trimmedPhone = form.phone.trim();
     const trimmedEmail = form.email.trim();
-    const trimmedLoginEmail = form.loginEmail.trim();
+    const trimmedLoginEmail = form.loginEmail.trim().toLowerCase();
 
     if (
       !trimmedName ||
       !form.age ||
       !trimmedPhone ||
       !trimmedLoginEmail ||
-      !form.loginPassword.trim() ||
+      !form.loginPassword ||
       !form.branch ||
-      !form.plan
+      !form.plan ||
+      !form.joinDate
     ) {
       setFormError("Please fill all required fields.");
       return;
@@ -281,8 +344,13 @@ export default function StudentsPage() {
 
     const numericAge = Number(form.age);
 
-    if (!Number.isInteger(numericAge) || numericAge < 1 || numericAge > 100) {
-      setFormError("Please enter a valid age between 1 and 100.");
+    if (!Number.isInteger(numericAge) || numericAge < 1 || numericAge > 120) {
+      setFormError("Please enter a valid age between 1 and 120.");
+      return;
+    }
+
+    if (trimmedName.length < 2 || trimmedName.length > 100) {
+      setFormError("Student name must contain between 2 and 100 characters.");
       return;
     }
 
@@ -308,6 +376,32 @@ export default function StudentsPage() {
       return;
     }
 
+    if (
+      !OBJECT_ID_PATTERN.test(form.branch) ||
+      !branches.some((branch) => branch._id === form.branch)
+    ) {
+      setFormError("Please select a valid branch.");
+      return;
+    }
+
+    if (
+      !OBJECT_ID_PATTERN.test(form.plan) ||
+      !plans.some((plan) => plan._id === form.plan)
+    ) {
+      setFormError("Please select a valid training plan.");
+      return;
+    }
+
+    const joinDate = form.joinDate.trim();
+    if (!isValidDateKey(joinDate)) {
+      setFormError("Please enter a valid join date.");
+      return;
+    }
+    if (joinDate > getTodayDate()) {
+      setFormError("Join date cannot be in the future.");
+      return;
+    }
+
     try {
       setSaving(true);
 
@@ -320,6 +414,7 @@ export default function StudentsPage() {
         loginPassword: form.loginPassword,
         branch: form.branch,
         plan: form.plan,
+        joinDate,
       });
 
       setShowModal(false);
@@ -679,11 +774,13 @@ export default function StudentsPage() {
               >
                 <option value="">Select branch</option>
 
-                {branches.map((branch) => (
-                  <option key={branch._id} value={branch._id}>
-                    {branch.name}
-                  </option>
-                ))}
+                {branches
+                  .filter((branch) => branch?._id && branch.name)
+                  .map((branch) => (
+                    <option key={branch._id} value={branch._id}>
+                      {branch.name}
+                    </option>
+                  ))}
               </Select>
             </FormField>
 
@@ -704,10 +801,316 @@ export default function StudentsPage() {
                 ))}
               </Select>
             </FormField>
+
+            <FormField label="Join date" htmlFor="joinDate" required>
+              <Input
+                id="joinDate"
+                name="joinDate"
+                type="date"
+                value={form.joinDate}
+                max={getTodayDate()}
+                onChange={handleChange}
+                required
+              />
+            </FormField>
           </StudentFormSection>
+
+          {selectedPlan && form.joinDate && (
+            <AdmissionTimelinePreview
+              plan={selectedPlan}
+              joinDate={form.joinDate}
+            />
+          )}
         </form>
       </Modal>
     </main>
+  );
+}
+
+function AdmissionTimelinePreview({
+  plan,
+  joinDate,
+}: {
+  plan: Plan;
+  joinDate: string;
+}) {
+  const curriculum = [...(plan.curriculum || [])].sort(
+    (a, b) => Number(a.day) - Number(b.day),
+  );
+
+  const milestones = [...(plan.milestones || [])].sort(
+    (a, b) => Number(a.day) - Number(b.day),
+  );
+
+  const milestoneMap = new Map(
+    milestones.map((item) => [Number(item.day), item]),
+  );
+
+  const previewDays = new Set<number>();
+
+  curriculum.slice(0, 8).forEach((item) => {
+    previewDays.add(Number(item.day));
+  });
+
+  milestones.forEach((item) => {
+    previewDays.add(Number(item.day));
+  });
+
+  const timeline = Array.from(previewDays)
+    .sort((a, b) => a - b)
+    .map((day) => ({
+      day,
+      curriculum: curriculum.find(
+        (item) => Number(item.day) === day,
+      ),
+      milestone: milestoneMap.get(day),
+    }));
+
+  const formatTimelineDate = (day: number) => {
+    const baseDate = new Date(`${joinDate}T00:00:00`);
+
+    if (Number.isNaN(baseDate.getTime())) {
+      return "—";
+    }
+
+    baseDate.setDate(baseDate.getDate() + day - 1);
+
+    return baseDate.toLocaleDateString("en-IN", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    });
+  };
+
+  const firstMilestone = milestones[0] || null;
+
+  return (
+    <Card
+      padding="none"
+      className="
+        overflow-hidden
+        border-(--accent)/25
+        bg-(--accent-soft)/30
+      "
+    >
+      <div
+        className="
+          flex flex-col gap-4
+          border-b border-(--line)
+          p-5 sm:p-6
+          lg:flex-row lg:items-center
+          lg:justify-between
+        "
+      >
+        <div className="flex min-w-0 items-start gap-3">
+          <div
+            className="
+              flex h-10 w-10 shrink-0
+              items-center justify-center
+              rounded-xl
+              bg-(--accent-soft)
+              text-(--accent)
+            "
+          >
+            <CalendarDays size={19} />
+          </div>
+
+          <div className="min-w-0">
+            <p
+              className="
+                text-[10px] font-black
+                uppercase tracking-[0.16em]
+                text-(--accent)
+              "
+            >
+              Admission preview
+            </p>
+
+            <h3
+              className="
+                mt-1 text-base font-extrabold
+                text-(--foreground)
+              "
+            >
+              Training timeline
+            </h3>
+
+            <p
+              className="
+                mt-1 text-xs leading-5
+                text-(--ink-muted)
+              "
+            >
+              Dates are calculated from the selected join date
+              using the plan&apos;s curriculum and belt milestones.
+            </p>
+          </div>
+        </div>
+
+        <div
+          className="
+            shrink-0 rounded-xl
+            border border-(--line)
+            bg-(--surface)
+            px-4 py-3
+          "
+        >
+          <p
+            className="
+              text-[10px] font-black uppercase
+              tracking-[0.14em]
+              text-(--ink-faint)
+            "
+          >
+            Starting belt
+          </p>
+
+          <p
+            className="
+              mt-1 text-sm font-bold
+              text-(--foreground)
+            "
+          >
+            {plan.startingBelt || "White"}
+          </p>
+        </div>
+      </div>
+
+      {timeline.length === 0 ? (
+        <div className="p-6">
+          <p className="text-sm font-medium text-(--ink-muted)">
+            This plan has no curriculum or milestones configured yet.
+          </p>
+        </div>
+      ) : (
+        <div className="p-5 sm:p-6">
+          <div className="space-y-3">
+            {timeline.map((item) => {
+              const isMilestone = Boolean(item.milestone);
+
+              return (
+                <div
+                  key={item.day}
+                  className="
+                    flex items-start gap-3
+                    rounded-xl
+                    border border-(--line)
+                    bg-(--surface)
+                    p-4
+                  "
+                >
+                  <div
+                    className={`
+                      mt-0.5 flex h-9 w-9 shrink-0
+                      items-center justify-center
+                      rounded-full text-xs font-black
+                      ${
+                        isMilestone
+                          ? "bg-(--accent-soft) text-(--accent)"
+                          : "bg-(--surface-muted) text-(--ink-muted)"
+                      }
+                    `}
+                  >
+                    {item.day}
+                  </div>
+
+                  <div className="min-w-0 flex-1">
+                    <div
+                      className="
+                        flex flex-col gap-1
+                        sm:flex-row sm:items-center
+                        sm:justify-between
+                      "
+                    >
+                      <div>
+                        <p className="text-sm font-bold text-(--foreground)">
+                          {item.curriculum?.title ||
+                            item.milestone?.belt ||
+                            `Training Day ${item.day}`}
+                        </p>
+
+                        {item.curriculum?.skill && (
+                          <p className="mt-0.5 text-xs text-(--ink-muted)">
+                            {item.curriculum.skill}
+                          </p>
+                        )}
+                      </div>
+
+                      <span
+                        className="
+                          inline-flex shrink-0
+                          items-center gap-1.5
+                          text-xs font-semibold
+                          text-(--ink-muted)
+                        "
+                      >
+                        <CalendarDays size={13} />
+                        {formatTimelineDate(item.day)}
+                      </span>
+                    </div>
+
+                    {item.curriculum?.description && (
+                      <p className="mt-2 text-xs leading-5 text-(--ink-muted)">
+                        {item.curriculum.description}
+                      </p>
+                    )}
+
+                    {isMilestone && item.milestone && (
+                      <div
+                        className="
+                          mt-3 inline-flex
+                          flex-wrap items-center gap-2
+                          rounded-lg
+                          bg-(--accent-soft)
+                          px-3 py-2
+                        "
+                      >
+                        <GraduationCap
+                          size={14}
+                          className="text-(--accent)"
+                        />
+
+                        <span className="text-xs font-bold text-(--accent)">
+                          {item.milestone.belt} Belt milestone
+                        </span>
+
+                        {item.milestone.skill && (
+                          <span className="text-xs text-(--ink-muted)">
+                            • {item.milestone.skill}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div
+            className="
+              mt-4 flex flex-col gap-2
+              rounded-xl
+              border border-(--line)
+              bg-(--surface-muted)
+              px-4 py-3
+              sm:flex-row sm:items-center
+              sm:justify-between
+            "
+          >
+            <p className="text-xs font-medium text-(--ink-muted)">
+              Showing the first curriculum days and all configured belt milestones.
+            </p>
+
+            {firstMilestone && (
+              <p className="shrink-0 text-xs font-bold text-(--accent)">
+                First belt milestone: Day {firstMilestone.day}
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+    </Card>
   );
 }
 

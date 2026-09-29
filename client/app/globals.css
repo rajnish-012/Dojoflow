@@ -607,6 +607,84 @@ a {
   animation: df-modal-in 0.3s var(--ease-premium) both;
 }
 
+
+/* =========================================================
+   HERO 3D ANIMATIONS
+   ========================================================= */
+
+@keyframes heroFloat {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 110px);
+  }
+
+  50% {
+    transform: translate3d(0, -14px, 110px);
+  }
+}
+
+@keyframes heroFloatReverse {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 135px);
+  }
+
+  50% {
+    transform: translate3d(0, 12px, 135px);
+  }
+}
+
+@keyframes heroOrbit {
+  from {
+    transform:
+      translate(-50%, -50%)
+      rotateX(68deg)
+      rotateZ(0deg);
+  }
+
+  to {
+    transform:
+      translate(-50%, -50%)
+      rotateX(68deg)
+      rotateZ(360deg);
+  }
+}
+
+@keyframes heroOrbitReverse {
+  from {
+    transform:
+      translate(-50%, -50%)
+      rotateX(70deg)
+      rotateY(25deg)
+      rotateZ(360deg);
+  }
+
+  to {
+    transform:
+      translate(-50%, -50%)
+      rotateX(70deg)
+      rotateY(25deg)
+      rotateZ(0deg);
+  }
+}
+
+@keyframes heroParticle {
+  0%,
+  100% {
+    opacity: 0.25;
+    transform:
+      translate3d(0, 0, 0)
+      scale(0.8);
+  }
+
+  50% {
+    opacity: 1;
+    transform:
+      translate3d(0, -16px, 0)
+      scale(1.35);
+  }
+}
+
 /* =========================================================
    COMMON APPLICATION STYLES
    ========================================================= */

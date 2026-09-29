@@ -3,11 +3,7 @@ const bcrypt = require("bcryptjs");
 const User = require("../models/User");
 const Branch = require("../models/Branch");
 
-const STAFF_ROLES = [
-  "SUPER_ADMIN",
-  "BRANCH_ADMIN",
-  "COACH",
-];
+const STAFF_ROLES = ["SUPER_ADMIN", "BRANCH_ADMIN", "COACH"];
 
 /**
  * Get all staff users
@@ -45,19 +41,12 @@ const getStaffUsers = async (req, res) => {
  */
 const createStaffUser = async (req, res) => {
   try {
-    const {
-      name,
-      email,
-      password,
-      role,
-      branch,
-    } = req.body;
+    const { name, email, password, role, branch } = req.body;
 
     if (!name || !email || !password || !role) {
       return res.status(400).json({
         success: false,
-        message:
-          "Name, email, password and role are required",
+        message: "Name, email, password and role are required",
       });
     }
 
@@ -71,19 +60,14 @@ const createStaffUser = async (req, res) => {
     if (role === "SUPER_ADMIN") {
       return res.status(400).json({
         success: false,
-        message:
-          "A Super Admin cannot be created from Staff Management",
+        message: "A Super Admin cannot be created from Staff Management",
       });
     }
 
-    if (
-      (role === "BRANCH_ADMIN" || role === "COACH") &&
-      !branch
-    ) {
+    if ((role === "BRANCH_ADMIN" || role === "COACH") && !branch) {
       return res.status(400).json({
         success: false,
-        message:
-          "Branch is required for Branch Admin and Coach",
+        message: "Branch is required for Branch Admin and Coach",
       });
     }
 
@@ -122,10 +106,7 @@ const createStaffUser = async (req, res) => {
       branchId = branchExists._id;
     }
 
-    const hashedPassword = await bcrypt.hash(
-      password,
-      10,
-    );
+    const hashedPassword = await bcrypt.hash(password, 10);
 
     const user = await User.create({
       name: name.trim(),
@@ -165,13 +146,7 @@ const updateStaffUser = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const {
-      name,
-      email,
-      password,
-      role,
-      branch,
-    } = req.body;
+    const { name, email, password, role, branch } = req.body;
 
     const user = await User.findById(id);
 
@@ -192,8 +167,7 @@ const updateStaffUser = async (req, res) => {
     if (user.role === "SUPER_ADMIN") {
       return res.status(400).json({
         success: false,
-        message:
-          "Super Admin account cannot be edited here",
+        message: "Super Admin account cannot be edited here",
       });
     }
 
@@ -207,19 +181,14 @@ const updateStaffUser = async (req, res) => {
     if (!["BRANCH_ADMIN", "COACH"].includes(role)) {
       return res.status(400).json({
         success: false,
-        message:
-          "Only Branch Admin and Coach roles are allowed",
+        message: "Only Branch Admin and Coach roles are allowed",
       });
     }
 
-    if (
-      (role === "BRANCH_ADMIN" || role === "COACH") &&
-      !branch
-    ) {
+    if ((role === "BRANCH_ADMIN" || role === "COACH") && !branch) {
       return res.status(400).json({
         success: false,
-        message:
-          "Branch is required for Branch Admin and Coach",
+        message: "Branch is required for Branch Admin and Coach",
       });
     }
 
@@ -263,15 +232,11 @@ const updateStaffUser = async (req, res) => {
       if (password.trim().length < 6) {
         return res.status(400).json({
           success: false,
-          message:
-            "Password must contain at least 6 characters",
+          message: "Password must contain at least 6 characters",
         });
       }
 
-      user.password = await bcrypt.hash(
-        password.trim(),
-        10,
-      );
+      user.password = await bcrypt.hash(password.trim(), 10);
     }
 
     await user.save();
@@ -326,11 +291,18 @@ const deleteStaffUser = async (req, res) => {
       });
     }
 
-    await User.findByIdAndDelete(id);
+    // Preserve historical references (attendance, promotions, and audit
+    // records) while immediately revoking this user's ability to sign in.
+    user.isActive = false;
+    await user.save();
 
     res.status(200).json({
       success: true,
-      message: "Staff user deleted successfully",
+      message: "Staff user deactivated successfully",
+      user: {
+        _id: user._id,
+        isActive: user.isActive,
+      },
     });
   } catch (error) {
     console.error("Delete staff user error:", error);

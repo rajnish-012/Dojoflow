@@ -33,9 +33,9 @@ import { useCan } from "@/lib/permissions";
 type Branch = {
   _id: string;
   name: string;
-  address: string;
+  address?: string;
   phone?: string;
-  isActive: boolean;
+  isActive?: boolean;
 };
 
 type BranchForm = {
@@ -156,7 +156,7 @@ export default function BranchesPage() {
     return branches.filter((branch) => {
       return (
         branch.name.toLowerCase().includes(query) ||
-        branch.address.toLowerCase().includes(query) ||
+        branch.address?.toLowerCase().includes(query) ||
         Boolean(branch.phone?.toLowerCase().includes(query))
       );
     });
