@@ -2,7 +2,12 @@ const mongoose = require("mongoose");
 
 const roleSchema = new mongoose.Schema(
   {
-    // Stored on every user, e.g. "FRONT_DESK". Never changes.
+    /*
+     * Stable role identity.
+     *
+     * User documents continue storing this value in User.role.
+     * We are intentionally NOT introducing a second roleId system.
+     */
     key: {
       type: String,
       required: true,
@@ -13,7 +18,6 @@ const roleSchema = new mongoose.Schema(
       match: /^[A-Z][A-Z0-9_]*$/,
     },
 
-    // Display name, e.g. "Front Desk"
     name: {
       type: String,
       required: true,
@@ -28,15 +32,47 @@ const roleSchema = new mongoose.Schema(
       maxlength: 200,
     },
 
-    // BRANCH = only the data of the user's own branch
-    // ALL    = data of every branch
+    /*
+     * ALL    = role may access data across branches
+     * BRANCH = role is restricted to its assigned branch
+     */
     dataScope: {
       type: String,
       enum: ["ALL", "BRANCH"],
       default: "BRANCH",
     },
 
-    // The four built-in roles. They cannot be deleted.
+    /*
+     * Database-backed authorization.
+     *
+     * The Role document is the source of truth for permissions.
+     */
+    permissions: {
+      type: [String],
+      default: [],
+      validate: {
+        validator: (permissions) =>
+          Array.isArray(permissions) &&
+          permissions.every(
+            (permission) =>
+              typeof permission === "string" && permission.trim().length > 0,
+          ),
+        message: "Role permissions must contain non-empty strings",
+      },
+    },
+
+    // Tracks one-time migrations when permissions are split into finer scopes.
+    permissionsVersion: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+
+    /*
+     * Built-in/system roles cannot be deleted.
+     *
+     * Custom roles have isSystem=false.
+     */
     isSystem: {
       type: Boolean,
       default: false,
@@ -44,7 +80,26 @@ const roleSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
-  }
+  },
 );
+
+/*
+ * Normalize and deduplicate permissions before saving.
+ */
+roleSchema.pre("save", function normalizePermissions() {
+  if (Array.isArray(this.permissions)) {
+    this.permissions = Array.from(
+      new Set(
+        this.permissions
+          .filter(
+            (permission) =>
+              typeof permission === "string" && permission.trim().length > 0,
+          )
+          .map((permission) => permission.trim()),
+      ),
+    );
+  }
+
+});
 
 module.exports = mongoose.model("Role", roleSchema);

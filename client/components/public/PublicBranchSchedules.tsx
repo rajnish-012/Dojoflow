@@ -12,13 +12,16 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
-import { Button, Card } from "@/components/ui";
+import { Badge, Button, Card } from "@/components/ui";
+import { getPublicTrainingSessionTypes, type TrainingSessionTypeRecord } from "@/lib/trainingSessionTypeApi";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api";
 
 type TrainingSlot = {
   _id?: string;
   sessionName?: string;
+  sessionType?: string;
+  sessionTypeId?: string;
   startTime: string;
   endTime: string;
   isActive?: boolean;
@@ -200,6 +203,8 @@ export default function PublicBranchSchedules({
   onSelectBranch?: (branchId: string) => void;
 }) {
   const [branches, setBranches] = useState<BranchScheduleRecord[]>([]);
+  const [sessionTypes, setSessionTypes] = useState<TrainingSessionTypeRecord[]>([]);
+  const [selectedTypeId, setSelectedTypeId] = useState("");
 
   const [isLoading, setIsLoading] = useState(true);
 
@@ -242,6 +247,12 @@ export default function PublicBranchSchedules({
 
         if (!cancelled) {
           setBranches(Array.isArray(data.branches) ? data.branches : []);
+        }
+        try {
+          const types = await getPublicTrainingSessionTypes();
+          if (!cancelled) setSessionTypes(types);
+        } catch {
+          if (!cancelled) setSessionTypes([]);
         }
       } catch (fetchError: unknown) {
         if (!cancelled) {
@@ -439,7 +450,12 @@ export default function PublicBranchSchedules({
             </p>
           </Card>
         ) : (
-          <div className="mt-12 grid gap-6 lg:grid-cols-2">
+          <>
+          {sessionTypes.some((type) => type.isActive) && <div className="mx-auto mt-8 flex max-w-4xl flex-wrap justify-center gap-2" aria-label="Filter by training type">
+            <Button variant={selectedTypeId === "" ? "secondary" : "outline"} onClick={() => setSelectedTypeId("")}>All</Button>
+            {sessionTypes.filter((type) => type.isActive).map((type) => <Button key={type._id} variant={selectedTypeId === type._id ? "secondary" : "outline"} onClick={() => setSelectedTypeId(type._id)}>{type.name}</Button>)}
+          </div>}
+          <div className="mt-8 grid gap-6 lg:grid-cols-2">
             {branches.map((record) => {
               const { branch, schedule, hasSchedule } = record;
 
@@ -447,7 +463,7 @@ export default function PublicBranchSchedules({
                 schedule?.weeklySchedule?.filter(
                   (day) =>
                     !day.isClosed &&
-                    day.slots.some((slot) => slot.isActive !== false),
+                    day.slots.some((slot) => slot.isActive !== false && (!selectedTypeId || slot.sessionTypeId === selectedTypeId)),
                 ) || [];
 
               return (
@@ -515,9 +531,9 @@ export default function PublicBranchSchedules({
                       </h4>
 
                       <div className="mt-4 space-y-3">
-                        {schedule.weeklySchedule.map((day) => {
+                        {schedule.weeklySchedule.filter((day) => !selectedTypeId || (!day.isClosed && day.slots.some((slot) => slot.isActive !== false && slot.sessionTypeId === selectedTypeId))).map((day) => {
                           const activeSlots = day.slots.filter(
-                            (slot) => slot.isActive !== false,
+                            (slot) => slot.isActive !== false && (!selectedTypeId || slot.sessionTypeId === selectedTypeId),
                           );
 
                           if (day.isClosed || activeSlots.length === 0) {
@@ -556,7 +572,7 @@ export default function PublicBranchSchedules({
                               </div>
 
                               <div className="mt-3 flex flex-wrap gap-2">
-                                {activeSlots.map((slot, index) => (
+                {activeSlots.map((slot, index) => (
                                   <span
                                     key={
                                       slot._id || `${day.dayOfWeek}-${index}`
@@ -566,6 +582,10 @@ export default function PublicBranchSchedules({
                                     <span className="font-semibold text-(--foreground)">
                                       {slot.sessionName || "Training Session"}
                                     </span>
+
+                                    <Badge variant={slot.sessionTypeId || slot.sessionType ? "accent" : "neutral"} className="mx-1.5 align-middle">
+                                      {sessionTypes.find((type) => type._id === slot.sessionTypeId)?.name || slot.sessionType?.replaceAll("_", " ") || "General (legacy)"}
+                                    </Badge>
 
                                     <span className="mx-1">·</span>
 
@@ -614,7 +634,7 @@ export default function PublicBranchSchedules({
                 </Card>
               );
             })}
-          </div>
+          </div></>
         )}
 
         {selectedBranchId && (
@@ -871,9 +891,9 @@ export default function PublicBranchSchedules({
                           </p>
                         </div>
                       ) : selectedDate.isTrainingDay &&
-                        selectedDate.slots.length > 0 ? (
+                        selectedDate.slots.filter((slot) => !selectedTypeId || slot.sessionTypeId === selectedTypeId).length > 0 ? (
                         <div className="mt-5 grid gap-3 sm:grid-cols-2">
-                          {selectedDate.slots.map((slot, index) => (
+                          {selectedDate.slots.filter((slot) => !selectedTypeId || slot.sessionTypeId === selectedTypeId).map((slot, index) => (
                             <div
                               key={slot._id || index}
                               className="rounded-xl border border-(--line) bg-(--card) p-4"
@@ -881,6 +901,10 @@ export default function PublicBranchSchedules({
                               <p className="text-sm font-bold text-(--foreground)">
                                 {slot.sessionName || "Training Session"}
                               </p>
+
+                              <Badge variant={slot.sessionTypeId || slot.sessionType ? "accent" : "neutral"} className="mt-2">
+                                {sessionTypes.find((type) => type._id === slot.sessionTypeId)?.name || slot.sessionType?.replaceAll("_", " ") || "General (legacy)"}
+                              </Badge>
 
                               <p className="mt-2 text-sm text-(--ink-muted)">
                                 <Clock3 className="mr-1 inline h-4 w-4" />

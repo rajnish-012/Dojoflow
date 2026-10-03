@@ -1,4 +1,5 @@
 "use client";
+import { toast } from "@/lib/toast";
 
 import {
   useEffect,
@@ -10,7 +11,6 @@ import {
   Plus,
   RefreshCw,
   Trash2,
-  X,
 } from "lucide-react";
 
 import {
@@ -20,6 +20,19 @@ import {
   updateWebsiteStatistic,
   type WebsiteStatistic,
 } from "@/lib/websiteApi";
+import { PERMISSIONS, useCan } from "@/lib/permissions";
+import {
+  Badge,
+  Button,
+  Card,
+  Checkbox,
+  ConfirmationDialog,
+  ErrorState,
+  Input,
+  LoadingSpinner,
+  Modal as AppModal,
+  Textarea,
+} from "@/components/ui";
 
 
 type StatisticForm = {
@@ -64,6 +77,7 @@ function statisticToForm(
 
 
 export default function StatisticsManager() {
+  const canManage = useCan(PERMISSIONS.WEBSITE_MANAGE);
   const [statistics, setStatistics] =
     useState<WebsiteStatistic[]>([]);
 
@@ -83,6 +97,7 @@ export default function StatisticsManager() {
     useState<WebsiteStatistic | null>(
       null,
     );
+  const [deleting, setDeleting] = useState<WebsiteStatistic | null>(null);
 
   const [form, setForm] =
     useState<StatisticForm>(emptyForm);
@@ -114,6 +129,7 @@ export default function StatisticsManager() {
 
 
   function openCreate() {
+    if (!canManage) return;
     setEditing(null);
     setForm(emptyForm);
     setError("");
@@ -146,6 +162,7 @@ export default function StatisticsManager() {
     event: React.FormEvent,
   ) {
     event.preventDefault();
+    if (!canManage) return;
 
     if (!form.label.trim()) {
       setError(
@@ -190,8 +207,9 @@ export default function StatisticsManager() {
 
       await loadStatistics();
       closeModal();
+      toast.success(editing ? "Statistic updated." : "Statistic created.");
     } catch (caughtError) {
-      setError(
+      toast.error(
         caughtError instanceof Error
           ? caughtError.message
           : "Failed to save statistic.",
@@ -205,14 +223,7 @@ export default function StatisticsManager() {
   async function handleDelete(
     item: WebsiteStatistic,
   ) {
-    if (
-      !window.confirm(
-        `Delete "${item.label}"?`,
-      )
-    ) {
-      return;
-    }
-
+    if (!canManage) return;
     try {
       setError("");
 
@@ -221,8 +232,9 @@ export default function StatisticsManager() {
       );
 
       await loadStatistics();
+      toast.success("Statistic deleted.");
     } catch (caughtError) {
-      setError(
+      toast.error(
         caughtError instanceof Error
           ? caughtError.message
           : "Failed to delete statistic.",
@@ -250,13 +262,7 @@ export default function StatisticsManager() {
         </div>
 
         <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={() =>
-              void loadStatistics()
-            }
-            className="inline-flex h-10 items-center gap-2 rounded-xl border border-(--line) bg-(--card) px-3 text-sm font-semibold"
-          >
+          <Button variant="outline" onClick={() => void loadStatistics()} loading={loading}>
             <RefreshCw
               size={15}
               className={
@@ -266,47 +272,44 @@ export default function StatisticsManager() {
               }
             />
             Refresh
-          </button>
+          </Button>
 
-          <button
-            type="button"
-            onClick={openCreate}
-            className="inline-flex h-10 items-center gap-2 rounded-xl bg-(--accent) px-4 text-sm font-bold text-(--accent-contrast)"
-          >
+          {canManage && <Button onClick={openCreate}>
             <Plus size={16} />
             Add Statistic
-          </button>
+          </Button>}
         </div>
       </div>
 
       {error && (
-        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {error}
-        </div>
+        <ErrorState message={error} className="py-5" />
       )}
 
       {loading ? (
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           {[1, 2, 3, 4].map(
             (item) => (
-              <div
-                key={item}
-                className="h-36 animate-pulse rounded-2xl border border-(--line) bg-(--card)"
-              />
+              <Card key={item} className="h-36 animate-pulse">&nbsp;</Card>
             ),
           )}
         </div>
       ) : statistics.length === 0 ? (
-        <EmptyState
-          text="No statistics added yet."
-          onClick={openCreate}
-        />
+        canManage ? (
+          <EmptyState
+            text="No statistics added yet."
+            onClick={openCreate}
+          />
+        ) : (
+          <div className="rounded-2xl border border-dashed border-(--line) p-8 text-center text-sm text-(--ink-muted)">
+            No statistics have been added yet.
+          </div>
+        )
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           {statistics.map((item) => (
-            <article
+            <Card
               key={item._id}
-              className="rounded-2xl border border-(--line) bg-(--card) p-5 shadow-sm"
+              className="p-5"
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-(--accent-soft) text-(--accent)">
@@ -316,18 +319,11 @@ export default function StatisticsManager() {
                   </span>
                 </div>
 
-                <span
-                  className={[
-                    "rounded-full px-2 py-1 text-[10px] font-bold",
-                    item.isActive
-                      ? "bg-emerald-50 text-emerald-700"
-                      : "bg-gray-100 text-gray-500",
-                  ].join(" ")}
-                >
+                  <Badge variant={item.isActive ? "success" : "neutral"}>
                   {item.isActive
                     ? "ACTIVE"
                     : "HIDDEN"}
-                </span>
+                  </Badge>
               </div>
 
               <div className="mt-5">
@@ -347,48 +343,36 @@ export default function StatisticsManager() {
                 )}
               </div>
 
-              <div className="mt-5 flex gap-2">
-                <button
-                  type="button"
-                  onClick={() =>
-                    openEdit(item)
-                  }
-                  className="flex-1 rounded-lg border border-(--line) py-2 text-xs font-bold"
-                >
+              {canManage && <div className="mt-5 flex gap-2">
+                <Button size="sm" variant="outline" className="flex-1" onClick={() => openEdit(item)}>
                   <Edit3
                     size={13}
                     className="mr-1 inline"
                   />
                   Edit
-                </button>
+                </Button>
 
-                <button
-                  type="button"
-                  onClick={() =>
-                    void handleDelete(
-                      item,
-                    )
-                  }
-                  className="rounded-lg border border-red-200 px-3 py-2 text-red-600"
-                >
+                <Button size="sm" variant="danger" onClick={() => setDeleting(item)} aria-label={`Delete ${item.label}`}>
                   <Trash2 size={14} />
-                </button>
-              </div>
-            </article>
+                </Button>
+              </div>}
+            </Card>
           ))}
         </div>
       )}
 
-      {showModal && (
-        <Modal
+      {showModal && canManage && (
+        <AppModal
+          open={showModal}
           title={
             editing
               ? "Edit Statistic"
               : "Create Statistic"
           }
           onClose={closeModal}
+          footer={<><Button variant="outline" onClick={closeModal} disabled={saving}>Cancel</Button><Button type="submit" form="statistic-form" loading={saving}>{editing ? "Save Changes" : "Create Statistic"}</Button></>}
         >
-          <form
+          <form id="statistic-form"
             onSubmit={handleSave}
             className="space-y-4"
           >
@@ -456,7 +440,7 @@ export default function StatisticsManager() {
               />
 
               <label className="flex items-center gap-3 pt-6">
-                <input
+                <Checkbox
                   type="checkbox"
                   checked={form.isActive}
                   onChange={(event) =>
@@ -487,36 +471,21 @@ export default function StatisticsManager() {
               }
             />
 
-            {error && (
-              <div className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">
-                {error}
-              </div>
-            )}
-
-            <div className="flex justify-end gap-3 pt-2">
-              <button
-                type="button"
-                onClick={closeModal}
-                className="rounded-xl border border-(--line) px-4 py-2.5 text-sm font-bold"
-              >
-                Cancel
-              </button>
-
-              <button
-                type="submit"
-                disabled={saving}
-                className="rounded-xl bg-(--accent) px-5 py-2.5 text-sm font-bold text-(--accent-contrast)"
-              >
-                {saving
-                  ? "Saving..."
-                  : editing
-                    ? "Save Changes"
-                    : "Create Statistic"}
-              </button>
-            </div>
+            {error && <p className="text-sm font-medium text-(--danger)">{error}</p>}
           </form>
-        </Modal>
+        </AppModal>
       )}
+      <ConfirmationDialog
+        open={Boolean(deleting)}
+        title="Delete statistic?"
+        description={deleting ? `Delete “${deleting.label}”? This cannot be undone.` : ""}
+        confirmLabel="Delete statistic"
+        onClose={() => setDeleting(null)}
+        onConfirm={() => {
+          if (!deleting) return;
+          void handleDelete(deleting).finally(() => setDeleting(null));
+        }}
+      />
     </section>
   );
 }
@@ -535,46 +504,9 @@ function EmptyState({
         {text}
       </p>
 
-      <button
-        type="button"
-        onClick={onClick}
-        className="mt-4 rounded-xl bg-(--accent) px-4 py-2 text-sm font-bold text-(--accent-contrast)"
-      >
+      <Button className="mt-4" onClick={onClick}>
         Add Statistic
-      </button>
-    </div>
-  );
-}
-
-
-function Modal({
-  title,
-  onClose,
-  children,
-}: {
-  title: string;
-  onClose: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
-      <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-(--line) bg-(--card) p-5 shadow-2xl">
-        <div className="mb-5 flex items-center justify-between">
-          <h3 className="text-lg font-black">
-            {title}
-          </h3>
-
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-lg p-2 hover:bg-(--hover-bg)"
-          >
-            <X size={18} />
-          </button>
-        </div>
-
-        {children}
-      </div>
+      </Button>
     </div>
   );
 }
@@ -607,7 +539,7 @@ function Field({
         )}
       </span>
 
-      <input
+      <Input
         type={type}
         required={required}
         value={value}
@@ -615,7 +547,6 @@ function Field({
           onChange(event.target.value)
         }
         placeholder={placeholder}
-        className="h-10 w-full rounded-xl border border-(--line) bg-(--background) px-3 text-sm outline-none focus:border-(--accent)"
       />
     </label>
   );
@@ -637,13 +568,12 @@ function TextArea({
         {label}
       </span>
 
-      <textarea
+      <Textarea
         rows={3}
         value={value}
         onChange={(event) =>
           onChange(event.target.value)
         }
-        className="w-full rounded-xl border border-(--line) bg-(--background) px-3 py-2.5 text-sm outline-none focus:border-(--accent)"
       />
     </label>
   );

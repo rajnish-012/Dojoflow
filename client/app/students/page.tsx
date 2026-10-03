@@ -1,6 +1,7 @@
 "use client";
+import { toast } from "@/lib/toast";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   ArrowUpRight,
@@ -10,6 +11,7 @@ import {
   GraduationCap,
   Plus,
   Search,
+  RefreshCw,
   UserRound,
   Users,
   X,
@@ -23,14 +25,20 @@ import {
   Badge,
   Button,
   Card,
+  DataFilters,
+  DataSort,
   EmptyState,
   ErrorState,
+  IconButton,
   Input,
   LoadingSpinner,
   Modal,
   PageHeader,
   Select,
   SummaryCard,
+  TableHeading,
+  TablePagination,
+  type ActiveFilter,
 } from "@/components/ui";
 
 type Student = {
@@ -82,6 +90,7 @@ type Plan = {
   classesPerWeek?: number;
   startingBelt?: string;
   curriculum?: CurriculumItem[];
+  programs?: { program?: { _id?: string; name?: string } | string; curriculum?: CurriculumItem[] }[];
   milestones?: MilestoneItem[];
 };
 
@@ -153,6 +162,19 @@ export default function StudentsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
+  const [branchFilter, setBranchFilter] = useState("");
+  const [planFilter, setPlanFilter] = useState("");
+  const [beltFilter, setBeltFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+  const [joinFrom, setJoinFrom] = useState("");
+  const [joinTo, setJoinTo] = useState("");
+  const [pagination, setPagination] = useState({
+    page: 1,
+    limit: 25,
+    total: 0,
+    pages: 1,
+  });
+  const [sort, setSort] = useState("createdAt-desc");
 
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState<FormData>(initialForm);
@@ -165,20 +187,53 @@ export default function StudentsPage() {
     [plans, form.plan],
   );
 
-  const loadStudents = async () => {
-    try {
-      setLoading(true);
-      setError("");
+  const loadStudents = useCallback(
+    async (page = 1, limit = pagination.limit) => {
+      try {
+        setLoading(true);
+        setError("");
 
-      const data = await getStudents();
-      setStudents(data.students || []);
-    } catch (error) {
-      console.error(error);
-      setError("Failed to load students.");
-    } finally {
-      setLoading(false);
-    }
-  };
+        const data = await getStudents({
+          search: search.trim() || undefined,
+          branch: branchFilter || undefined,
+          plan: planFilter || undefined,
+          belt: beltFilter || undefined,
+          status: statusFilter || undefined,
+          joinFrom: joinFrom || undefined,
+          joinTo: joinTo || undefined,
+          page,
+          limit,
+          sortBy: sort.split("-")[0],
+          sortOrder: sort.endsWith("-asc") ? "asc" : "desc",
+        });
+        setStudents(data.students || []);
+        setPagination(
+          data.pagination || {
+            page,
+            limit,
+            total: data.students?.length || 0,
+            pages: 1,
+          },
+        );
+      } catch (error) {
+        console.error(error);
+        setError("Failed to load students.");
+      } finally {
+        setLoading(false);
+      }
+    },
+    [
+      beltFilter,
+      branchFilter,
+      joinFrom,
+      joinTo,
+      pagination.limit,
+      planFilter,
+      search,
+      sort,
+      statusFilter,
+    ],
+  );
 
   const loadFormData = async () => {
     try {
@@ -193,9 +248,7 @@ export default function StudentsPage() {
         ),
       );
       setPlans(
-        (planData.plans || []).filter(
-          (plan: Plan) => plan.isActive !== false,
-        ),
+        (planData.plans || []).filter((plan: Plan) => plan.isActive !== false),
       );
     } catch (error) {
       console.error(error);
@@ -204,7 +257,15 @@ export default function StudentsPage() {
   };
 
   useEffect(() => {
-    loadStudents();
+    const timer = window.setTimeout(
+      () => void loadStudents(1),
+      search ? 250 : 0,
+    );
+    return () => window.clearTimeout(timer);
+  }, [loadStudents, search]);
+
+  useEffect(() => {
+    void loadFormData();
   }, []);
 
   const openModal = async () => {
@@ -421,34 +482,91 @@ export default function StudentsPage() {
       setForm(initialForm);
       setFieldErrors({});
 
-      await loadStudents();
+      await loadStudents(1);
+      toast.success("Student created successfully.");
     } catch (error) {
       console.error(error);
 
-      setFormError(
-        error instanceof Error ? error.message : "Failed to create student.",
-      );
+      toast.error(error instanceof Error ? error.message : "Failed to create student.");
     } finally {
       setSaving(false);
     }
   };
 
-  const filteredStudents = useMemo(() => {
-    const query = search.trim().toLowerCase();
+  const filteredStudents = students;
 
-    if (!query) return students;
+  const belts = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          [
+            ...students.map((student) => student.currentBelt),
+            beltFilter,
+          ].filter((belt): belt is string => Boolean(belt)),
+        ),
+      ).sort(),
+    [beltFilter, students],
+  );
+  const activeFilters = useMemo<ActiveFilter[]>(() => {
+    const filters: ActiveFilter[] = [];
+    const branch = branches.find((item) => item._id === branchFilter);
+    const plan = plans.find((item) => item._id === planFilter);
+    if (branch)
+      filters.push({
+        id: "branch",
+        label: branch.name,
+        onClear: () => setBranchFilter(""),
+      });
+    if (plan)
+      filters.push({
+        id: "plan",
+        label: plan.name,
+        onClear: () => setPlanFilter(""),
+      });
+    if (beltFilter)
+      filters.push({
+        id: "belt",
+        label: beltFilter,
+        onClear: () => setBeltFilter(""),
+      });
+    if (statusFilter)
+      filters.push({
+        id: "status",
+        label: statusFilter,
+        onClear: () => setStatusFilter(""),
+      });
+    if (joinFrom)
+      filters.push({
+        id: "join-from",
+        label: `From ${joinFrom}`,
+        onClear: () => setJoinFrom(""),
+      });
+    if (joinTo)
+      filters.push({
+        id: "join-to",
+        label: `To ${joinTo}`,
+        onClear: () => setJoinTo(""),
+      });
+    return filters;
+  }, [
+    beltFilter,
+    branchFilter,
+    branches,
+    joinFrom,
+    joinTo,
+    planFilter,
+    plans,
+    statusFilter,
+  ]);
 
-    return students.filter((student) => {
-      return (
-        student.name.toLowerCase().includes(query) ||
-        student.phone?.toLowerCase().includes(query) ||
-        student.email?.toLowerCase().includes(query) ||
-        student.plan?.name?.toLowerCase().includes(query) ||
-        student.branch?.name?.toLowerCase().includes(query) ||
-        student.currentBelt?.toLowerCase().includes(query)
-      );
-    });
-  }, [students, search]);
+  const clearStudentFilters = () => {
+    setBranchFilter("");
+    setPlanFilter("");
+    setBeltFilter("");
+    setStatusFilter("");
+    setJoinFrom("");
+    setJoinTo("");
+  };
 
   const activeStudents = students.filter(
     (student) => student.status === "ACTIVE",
@@ -473,12 +591,26 @@ export default function StudentsPage() {
             branches and academy access.
           "
           actions={
-            canCreateStudent ? (
-              <Button variant="primary" size="lg" onClick={openModal}>
-                <Plus size={18} />
-                Add student
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                variant="outline"
+                onClick={() => void loadStudents(pagination.page)}
+                disabled={loading}
+              >
+                <RefreshCw
+                  size={17}
+                  className={loading ? "animate-spin" : ""}
+                />
+                Refresh
               </Button>
-            ) : undefined
+
+              {canCreateStudent && (
+                <Button variant="primary" size="lg" onClick={openModal}>
+                  <Plus size={18} />
+                  Add student
+                </Button>
+              )}
+            </div>
           }
         />
 
@@ -533,33 +665,34 @@ export default function StudentsPage() {
               </div>
             </div>
 
-            <div className="relative w-full lg:w-[340px]">
-              <Search
-                size={17}
-                aria-hidden="true"
-                className="
+            <div className="flex w-full flex-col gap-2 lg:w-auto lg:flex-row lg:items-start">
+              <div className="relative w-full lg:w-[340px]">
+                <Search
+                  size={17}
+                  aria-hidden="true"
+                  className="
                   pointer-events-none absolute left-3.5
                   top-1/2 -translate-y-1/2
                   text-(--ink-faint)
                 "
-              />
+                />
 
-              <Input
-                type="search"
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="Search students..."
-                aria-label="Search students"
-                className="h-11 pl-10"
-              />
+                <Input
+                  type="search"
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder="Search students..."
+                  aria-label="Search students"
+                  className="h-11 pl-10"
+                />
 
-              {search && (
-                <button
-                  type="button"
-                  aria-label="Clear search"
-                  title="Clear search"
-                  onClick={() => setSearch("")}
-                  className="
+                {search && (
+                  <button
+                    type="button"
+                    aria-label="Clear search"
+                    title="Clear search"
+                    onClick={() => setSearch("")}
+                    className="
                     absolute right-2.5 top-1/2
                     flex h-7 w-7 -translate-y-1/2
                     items-center justify-center
@@ -567,10 +700,99 @@ export default function StudentsPage() {
                     transition hover:bg-(--hover-bg)
                     hover:text-(--foreground)
                   "
-                >
-                  <X size={15} />
-                </button>
-              )}
+                  >
+                    <X size={15} />
+                  </button>
+                )}
+              </div>
+
+              <DataFilters
+                activeFilters={activeFilters}
+                onClearAll={clearStudentFilters}
+              >
+                <label className="grid gap-1.5 text-xs font-bold text-(--foreground-soft)">
+                  Branch
+                  <Select
+                    value={branchFilter}
+                    onChange={(event) => setBranchFilter(event.target.value)}
+                  >
+                    <option value="">All branches</option>
+                    {branches.map((branch) => (
+                      <option key={branch._id} value={branch._id}>
+                        {branch.name}
+                      </option>
+                    ))}
+                  </Select>
+                </label>
+                <label className="grid gap-1.5 text-xs font-bold text-(--foreground-soft)">
+                  Training plan
+                  <Select
+                    value={planFilter}
+                    onChange={(event) => setPlanFilter(event.target.value)}
+                  >
+                    <option value="">All plans</option>
+                    {plans.map((plan) => (
+                      <option key={plan._id} value={plan._id}>
+                        {plan.name}
+                      </option>
+                    ))}
+                  </Select>
+                </label>
+                <label className="grid gap-1.5 text-xs font-bold text-(--foreground-soft)">
+                  Current belt
+                  <Select
+                    value={beltFilter}
+                    onChange={(event) => setBeltFilter(event.target.value)}
+                  >
+                    <option value="">All belts</option>
+                    {belts.map((belt) => (
+                      <option key={belt} value={belt}>
+                        {belt}
+                      </option>
+                    ))}
+                  </Select>
+                </label>
+                <label className="grid gap-1.5 text-xs font-bold text-(--foreground-soft)">
+                  Status
+                  <Select
+                    value={statusFilter}
+                    onChange={(event) => setStatusFilter(event.target.value)}
+                  >
+                    <option value="">All statuses</option>
+                    <option value="ACTIVE">Active</option>
+                    <option value="INACTIVE">Inactive</option>
+                    <option value="COMPLETED">Completed</option>
+                  </Select>
+                </label>
+                <label className="grid gap-1.5 text-xs font-bold text-(--foreground-soft)">
+                  Joined from
+                  <Input
+                    type="date"
+                    value={joinFrom}
+                    onChange={(event) => setJoinFrom(event.target.value)}
+                  />
+                </label>
+                <label className="grid gap-1.5 text-xs font-bold text-(--foreground-soft)">
+                  Joined to
+                  <Input
+                    type="date"
+                    value={joinTo}
+                    onChange={(event) => setJoinTo(event.target.value)}
+                  />
+                </label>
+              </DataFilters>
+              <DataSort
+                value={sort}
+                onChange={setSort}
+                options={[
+                  { value: "createdAt-desc", label: "Newest first" },
+                  { value: "createdAt-asc", label: "Oldest first" },
+                  { value: "name-asc", label: "Name: A to Z" },
+                  { value: "name-desc", label: "Name: Z to A" },
+                  { value: "joinDate-desc", label: "Join date: newest" },
+                  { value: "joinDate-asc", label: "Join date: oldest" },
+                ]}
+              />
             </div>
           </div>
 
@@ -578,26 +800,22 @@ export default function StudentsPage() {
             loading={loading}
             error={error}
             students={filteredStudents}
-            totalStudents={students.length}
+            totalStudents={pagination.total}
             onRetry={loadStudents}
           />
 
-          {!loading && !error && filteredStudents.length > 0 && (
-            <div
-              className="
-                border-t border-(--line)
-                px-5 py-4
-                sm:px-6
-              "
-            >
-              <p
-                className="
-                  text-xs font-medium text-(--ink-faint)
-                "
-              >
-                Showing {filteredStudents.length} of {students.length} students
-              </p>
-            </div>
+          {!loading && !error && (
+            <TablePagination
+              currentPage={pagination.page}
+              totalPages={pagination.pages}
+              totalItems={pagination.total}
+              visibleItems={filteredStudents.length}
+              pageSize={pagination.limit}
+              entityLabel="students"
+              onPrevious={() => void loadStudents(pagination.page - 1)}
+              onNext={() => void loadStudents(pagination.page + 1)}
+              onPageSizeChange={(pageSize) => void loadStudents(1, pageSize)}
+            />
           )}
         </Card>
       </div>
@@ -834,7 +1052,11 @@ function AdmissionTimelinePreview({
   plan: Plan;
   joinDate: string;
 }) {
-  const curriculum = [...(plan.curriculum || [])].sort(
+  const primaryProgram = plan.programs?.[0];
+  const programCurriculum = primaryProgram?.curriculum?.length
+    ? primaryProgram.curriculum
+    : plan.curriculum || [];
+  const curriculum = [...programCurriculum].sort(
     (a, b) => Number(a.day) - Number(b.day),
   );
 
@@ -860,9 +1082,7 @@ function AdmissionTimelinePreview({
     .sort((a, b) => a - b)
     .map((day) => ({
       day,
-      curriculum: curriculum.find(
-        (item) => Number(item.day) === day,
-      ),
+      curriculum: curriculum.find((item) => Number(item.day) === day),
       milestone: milestoneMap.get(day),
     }));
 
@@ -934,6 +1154,11 @@ function AdmissionTimelinePreview({
             >
               Training timeline
             </h3>
+            {primaryProgram && (
+              <p className="mt-1 text-sm text-(--ink-muted)">
+                {typeof primaryProgram.program === "object" ? primaryProgram.program.name : "Program"} curriculum
+              </p>
+            )}
 
             <p
               className="
@@ -941,8 +1166,8 @@ function AdmissionTimelinePreview({
                 text-(--ink-muted)
               "
             >
-              Dates are calculated from the selected join date
-              using the plan&apos;s curriculum and belt milestones.
+              Dates are calculated from the selected join date using the
+              plan&apos;s curriculum and belt milestones.
             </p>
           </div>
         </div>
@@ -1065,10 +1290,7 @@ function AdmissionTimelinePreview({
                           px-3 py-2
                         "
                       >
-                        <GraduationCap
-                          size={14}
-                          className="text-(--accent)"
-                        />
+                        <GraduationCap size={14} className="text-(--accent)" />
 
                         <span className="text-xs font-bold text-(--accent)">
                           {item.milestone.belt} Belt milestone
@@ -1099,7 +1321,8 @@ function AdmissionTimelinePreview({
             "
           >
             <p className="text-xs font-medium text-(--ink-muted)">
-              Showing the first curriculum days and all configured belt milestones.
+              Showing the first curriculum days and all configured belt
+              milestones.
             </p>
 
             {firstMilestone && (
@@ -1281,7 +1504,7 @@ function StudentTableRow({ student }: { student: Student }) {
           <div className="min-w-0">
             <p
               className="
-              truncate text-sm font-bold
+              truncate text-[15px] font-semibold leading-5
               text-(--foreground-soft)
               transition-colors
               group-hover:text-(--accent)
@@ -1292,7 +1515,7 @@ function StudentTableRow({ student }: { student: Student }) {
 
             <p
               className="
-              mt-1 text-xs text-(--ink-muted)
+              mt-1 text-sm leading-5 text-(--ink-muted)
             "
             >
               Age {student.age}
@@ -1304,7 +1527,7 @@ function StudentTableRow({ student }: { student: Student }) {
       <td className="px-6 py-5">
         <p
           className="
-          text-sm font-medium
+          text-[15px] font-medium leading-5
           text-(--foreground-soft)
         "
         >
@@ -1314,7 +1537,7 @@ function StudentTableRow({ student }: { student: Student }) {
         <p
           className="
           mt-1 max-w-[220px] truncate
-          text-xs text-(--ink-muted)
+          text-sm leading-5 text-(--ink-muted)
         "
         >
           {student.email || "No email"}
@@ -1324,7 +1547,7 @@ function StudentTableRow({ student }: { student: Student }) {
       <td className="px-6 py-5">
         <p
           className="
-          text-sm font-medium
+          text-[15px] font-medium leading-5
           text-(--foreground-soft)
         "
         >
@@ -1333,7 +1556,7 @@ function StudentTableRow({ student }: { student: Student }) {
 
         <p
           className="
-          mt-1 text-xs text-(--ink-muted)
+          mt-1 text-sm leading-5 text-(--ink-muted)
         "
         >
           {student.branch?.name || "No branch"}
@@ -1351,27 +1574,20 @@ function StudentTableRow({ student }: { student: Student }) {
       <td
         className="
         whitespace-nowrap px-6 py-5
-        text-sm text-(--ink-muted)
+        text-[15px] leading-5 text-(--foreground-soft)
       "
       >
         {formatDate(student.joinDate)}
       </td>
 
       <td className="px-6 py-5 text-right">
-        <Link
+        <IconButton
           href={`/students/${student._id}`}
-          className="
-            inline-flex items-center gap-1
-            rounded-lg px-2 py-1
-            text-sm font-bold
-            text-(--accent)
-            transition-colors
-            hover:bg-(--accent-soft)
-          "
+          label={`View ${student.name}`}
+          title={`View ${student.name}`}
         >
-          View
-          <ArrowUpRight size={15} />
-        </Link>
+          <ArrowUpRight size={16} />
+        </IconButton>
       </td>
     </tr>
   );
@@ -1550,29 +1766,6 @@ function StudentAvatar({ name }: { name: string }) {
     >
       {initials || "ST"}
     </div>
-  );
-}
-
-function TableHeading({
-  children,
-  align = "left",
-}: {
-  children: React.ReactNode;
-  align?: "left" | "right";
-}) {
-  return (
-    <th
-      scope="col"
-      className={`
-        px-6 py-4
-        text-[10px] font-black
-        uppercase tracking-[0.16em]
-        text-(--ink-faint)
-        ${align === "right" ? "text-right" : "text-left"}
-      `}
-    >
-      {children}
-    </th>
   );
 }
 

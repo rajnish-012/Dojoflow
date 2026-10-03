@@ -8,39 +8,70 @@ const {
 } = require("../controllers/user.controller");
 
 const protect = require("../middleware/auth.middleware");
-const authorize = require("../middleware/role.middleware");
+const { authorizePermission } = require("../middleware/permission.middleware");
 
 const router = express.Router();
 
-// Get all staff users
-router.get(
-  "/",
-  protect,
-  authorize("SUPER_ADMIN"),
-  getStaffUsers,
-);
+/*
+ * =========================================================
+ * STAFF / USER MANAGEMENT
+ * =========================================================
+ *
+ * Authorization is now database-permission based.
+ *
+ * This does NOT allow users to grant themselves permissions.
+ *
+ * The backend still validates:
+ *
+ * - selected role exists
+ * - selected role is a staff role
+ * - SUPER_ADMIN cannot be assigned through staff management
+ * - branch requirements based on the database Role.dataScope
+ * - Super Admin accounts cannot be edited/deactivated here
+ */
 
-// Create staff user
-router.post(
-  "/",
-  protect,
-  authorize("SUPER_ADMIN"),
-  createStaffUser,
-);
+/*
+ * View staff accounts.
+ *
+ * Requires:
+ *   user.view
+ */
+router.get("/", protect, authorizePermission("user.view"), getStaffUsers);
 
-// Update staff user
+/*
+ * Create staff account.
+ *
+ * Requires:
+ *   user.create
+ */
+router.post("/", protect, authorizePermission("user.create"), createStaffUser);
+
+/*
+ * Update staff account.
+ *
+ * Requires:
+ *   user.update
+ */
 router.put(
   "/:id",
   protect,
-  authorize("SUPER_ADMIN"),
+  authorizePermission("user.update"),
   updateStaffUser,
 );
 
-// Delete staff user
+/*
+ * Soft-deactivate staff account.
+ *
+ * Requires:
+ *   user.delete
+ *
+ * The controller performs a soft deactivation rather than
+ * deleting historical user data.
+ */
 router.delete(
   "/:id",
   protect,
-  authorize("SUPER_ADMIN"),
+  authorizePermission("user.delete"),
   deleteStaffUser,
 );
 

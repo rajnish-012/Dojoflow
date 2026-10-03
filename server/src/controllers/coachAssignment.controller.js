@@ -37,6 +37,10 @@ const getCoaches = async (req, res) => {
       role: "COACH",
     };
 
+    if (req.user.role === "COACH") {
+      filter._id = req.user._id;
+    }
+
     if (isBranchScoped(req.user)) {
       if (!req.user.branch) {
         return res.status(403).json({
@@ -77,8 +81,21 @@ const getCoaches = async (req, res) => {
 const getAssignments = async (req, res) => {
   try {
     const filter = {};
+    const { search, page, limit, sortBy, sortOrder } = req.query;
 
-    if (req.query.coach) {
+    if (req.user.role === "COACH") {
+      if (
+        req.query.coach &&
+        req.query.coach.toString() !== req.user._id.toString()
+      ) {
+        return res.status(403).json({
+          success: false,
+          message: "You do not have access to another coach's assignments",
+        });
+      }
+
+      filter.coach = req.user._id;
+    } else if (req.query.coach) {
       if (!mongoose.isValidObjectId(req.query.coach)) {
         return res.status(400).json({
           success: false,
@@ -100,7 +117,18 @@ const getAssignments = async (req, res) => {
       filter.student = req.query.student;
     }
 
-    filter.status = String(req.query.status || "ACTIVE").toUpperCase();
+    const requestedStatus = String(req.query.status || "ACTIVE").toUpperCase();
+
+    if (requestedStatus !== "ALL") {
+      if (!['ACTIVE', 'INACTIVE'].includes(requestedStatus)) {
+        return res.status(400).json({
+          success: false,
+          message: "Status must be ACTIVE, INACTIVE or ALL",
+        });
+      }
+
+      filter.status = requestedStatus;
+    }
 
     if (isBranchScoped(req.user)) {
       if (!req.user.branch) {
@@ -111,22 +139,70 @@ const getAssignments = async (req, res) => {
       }
 
       filter.branch = req.user.branch;
+    } else if (req.query.branch) {
+      if (!mongoose.isValidObjectId(req.query.branch)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid branch ID",
+        });
+      }
+
+      filter.branch = req.query.branch;
     }
 
-    const assignments = await CoachStudentAssignment.find(filter)
+    if (String(search || "").trim()) {
+      const expression = new RegExp(
+        String(search).trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+        "i",
+      );
+      const [students, coaches] = await Promise.all([
+        Student.find({ $or: [{ name: expression }, { phone: expression }] }).select("_id").lean(),
+        User.find({ role: "COACH", name: expression }).select("_id").lean(),
+      ]);
+      const matches = [];
+
+      if (students.length) matches.push({ student: { $in: students.map((item) => item._id) } });
+      if (coaches.length) matches.push({ coach: { $in: coaches.map((item) => item._id) } });
+
+      if (matches.length) {
+        filter.$or = matches;
+      } else {
+        filter._id = { $in: [] };
+      }
+    }
+
+    const shouldPaginate = page !== undefined || limit !== undefined;
+    const pageNumber = Math.max(1, Number.parseInt(page, 10) || 1);
+    const pageSize = Math.min(100, Math.max(1, Number.parseInt(limit, 10) || 25));
+    const sortField = ["assignedAt", "createdAt", "updatedAt", "status"].includes(sortBy)
+      ? sortBy
+      : "assignedAt";
+    const sortDirection = String(sortOrder).toLowerCase() === "asc" ? 1 : -1;
+    const total = await CoachStudentAssignment.countDocuments(filter);
+
+    let assignmentQuery = CoachStudentAssignment.find(filter)
       .populate("coach", "name email role branch")
       .populate("student", "name age phone currentBelt status branch plan")
       .populate("branch", "name")
       .populate("assignedBy", "name email")
-      .sort({
-        assignedAt: -1,
-        createdAt: -1,
-      });
+      .sort({ [sortField]: sortDirection, _id: -1 });
+
+    if (shouldPaginate) {
+      assignmentQuery = assignmentQuery.skip((pageNumber - 1) * pageSize).limit(pageSize);
+    }
+
+    const assignments = await assignmentQuery;
 
     return res.status(200).json({
       success: true,
       count: assignments.length,
       assignments,
+      pagination: {
+        page: shouldPaginate ? pageNumber : 1,
+        limit: shouldPaginate ? pageSize : total,
+        total,
+        pages: shouldPaginate ? Math.max(1, Math.ceil(total / pageSize)) : 1,
+      },
     });
   } catch (error) {
     console.error("Get coach assignments error:", error);

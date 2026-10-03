@@ -12,118 +12,131 @@ const {
 } = require("../controllers/reports.controller");
 
 const protect = require("../middleware/auth.middleware");
-const authorize = require("../middleware/role.middleware");
+const { authorizePermission } = require("../middleware/permission.middleware");
 
 const router = express.Router();
 
-const reportRoles = [
-  "SUPER_ADMIN",
-  "ADMIN",
-  "BRANCH_ADMIN",
-  "COACH",
-];
+/*
+ * =========================================================
+ * REPORT AUTHORIZATION
+ * =========================================================
+ *
+ * All report APIs are protected by the database-driven
+ * report.view permission.
+ *
+ * SUPER_ADMIN remains allowed by the centralized permission
+ * middleware.
+ *
+ * Custom roles receive access only when their database Role
+ * contains:
+ *
+ *   report.view
+ *
+ * Frontend visibility is NOT the security boundary.
+ * =========================================================
+ */
 
 /*
-|--------------------------------------------------------------------------
-| Overview
-|--------------------------------------------------------------------------
-*/
+ * =========================================================
+ * OVERVIEW
+ * =========================================================
+ */
 
 router.get(
   "/summary",
   protect,
-  authorize(...reportRoles),
+  authorizePermission("report.view"),
   getReportsSummary,
 );
 
 /*
-|--------------------------------------------------------------------------
-| Top Performers
-|--------------------------------------------------------------------------
-*/
+ * =========================================================
+ * TOP PERFORMERS
+ * =========================================================
+ */
 
 router.get(
   "/top-performers",
   protect,
-  authorize(...reportRoles),
+  authorizePermission("report.view"),
   getTopPerformers,
 );
 
 /*
-|--------------------------------------------------------------------------
-| Skill Completion
-|--------------------------------------------------------------------------
-*/
+ * =========================================================
+ * SKILL COMPLETION
+ * =========================================================
+ */
 
 router.get(
   "/skills",
   protect,
-  authorize(...reportRoles),
+  authorizePermission("report.view"),
   getSkillCompletionByBelt,
 );
 
 /*
-|--------------------------------------------------------------------------
-| Branches
-|--------------------------------------------------------------------------
-*/
+ * =========================================================
+ * BRANCH REPORTS
+ * =========================================================
+ */
 
 router.get(
   "/branches",
   protect,
-  authorize(...reportRoles),
+  authorizePermission("report.view"),
   getBranchReports,
 );
 
 /*
-|--------------------------------------------------------------------------
-| Coaches
-|--------------------------------------------------------------------------
-*/
+ * =========================================================
+ * COACH REPORTS
+ * =========================================================
+ */
 
 router.get(
   "/coaches",
   protect,
-  authorize(...reportRoles),
+  authorizePermission("report.view"),
   getCoachReports,
 );
 
 /*
-|--------------------------------------------------------------------------
-| Belts
-|--------------------------------------------------------------------------
-*/
+ * =========================================================
+ * BELT REPORTS
+ * =========================================================
+ */
 
 router.get(
   "/belts",
   protect,
-  authorize(...reportRoles),
+  authorizePermission("report.view"),
   getBeltReports,
 );
 
 /*
-|--------------------------------------------------------------------------
-| Branch Filter Options
-|--------------------------------------------------------------------------
-*/
+ * =========================================================
+ * BRANCH FILTER OPTIONS
+ * =========================================================
+ */
 
 router.get(
   "/branch-options",
   protect,
-  authorize(...reportRoles),
+  authorizePermission("report.view"),
   getReportBranches,
 );
 
 /*
-|--------------------------------------------------------------------------
-| Admissions
-|--------------------------------------------------------------------------
-*/
+ * =========================================================
+ * ADMISSION REPORTS
+ * =========================================================
+ */
 
 router.get(
   "/admissions",
   protect,
-  authorize(...reportRoles),
+  authorizePermission("report.view"),
   getAdmissionReports,
 );
 

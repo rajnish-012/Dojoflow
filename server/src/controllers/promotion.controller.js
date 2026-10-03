@@ -4,33 +4,54 @@ const Student = require("../models/Student");
 const Attendance = require("../models/Attendance");
 const BeltHistory = require("../models/BeltHistory");
 const CoachStudentAssignment = require("../models/CoachStudentAssignment");
+const { getProgramLearningProgress } = require("../services/programProgress.service");
+const { resolveProgramCurriculum } = require("../services/curriculumResolver.service");
 
 /* ======================================================
    HELPERS
 ====================================================== */
 
 /**
- * Returns true when the user is restricted to a branch.
+ * SUPER_ADMIN:
+ *   Full academy access.
+ *
+ * Branch-scoped users:
+ *   Access only their assigned branch.
+ *
+ * The branch scope is now driven by the resolved
+ * database Role.dataScope rather than requiring a
+ * specific role name such as BRANCH_ADMIN.
+ *
+ * Legacy COACH behavior is also preserved because
+ * coaches already have branch + assignment restrictions.
  */
 function isBranchScopedUser(user) {
+  if (!user) {
+    return false;
+  }
+
+  if (String(user.role || "").toUpperCase() === "SUPER_ADMIN") {
+    return false;
+  }
+
   return (
-    ["BRANCH_ADMIN", "COACH"].includes(user?.role) && Boolean(user?.branch)
+    Boolean(user.branch) &&
+    String(user.dataScope || "BRANCH").toUpperCase() !== "ALL"
   );
 }
 
 /**
  * Check whether a user can access a branch.
  *
- * SUPER_ADMIN:
+ * SUPER_ADMIN / ALL scope:
  *   Full academy access.
  *
- * BRANCH_ADMIN:
- *   Own branch only.
+ * BRANCH scope:
+ *   Own assigned branch only.
  *
- * COACH:
- *   Branch is checked here, but student-level
- *   access is checked separately through
- *   CoachStudentAssignment.
+ * This is a data-isolation rule, not an authorization
+ * permission. Permission authorization is handled by
+ * the route middleware.
  */
 function hasBranchAccess(user, branchId) {
   if (!isBranchScopedUser(user)) {
@@ -41,15 +62,25 @@ function hasBranchAccess(user, branchId) {
     return false;
   }
 
-  return branchId?.toString() === user.branch.toString();
+  if (!branchId) {
+    return false;
+  }
+
+  return branchId.toString() === user.branch.toString();
 }
 
 /**
- * Get active students assigned to the
- * currently logged-in coach.
+ * Get active students assigned to the currently
+ * logged-in legacy COACH.
+ *
+ * Coach assignment restrictions are preserved as a
+ * business/data-scope rule.
+ *
+ * Custom roles do not automatically become coaches merely
+ * because they have promotion permissions.
  */
 async function getCoachStudentIds(user) {
-  if (user?.role !== "COACH") {
+  if (String(user?.role || "").toUpperCase() !== "COACH") {
     return null;
   }
 
@@ -62,11 +93,11 @@ async function getCoachStudentIds(user) {
 }
 
 /**
- * Check whether the logged-in coach has
- * an active assignment for a particular student.
+ * Check whether the logged-in legacy coach has an
+ * active assignment for a particular student.
  */
 async function hasCoachStudentAccess(user, studentId) {
-  if (user?.role !== "COACH") {
+  if (String(user?.role || "").toUpperCase() !== "COACH") {
     return true;
   }
 
@@ -80,8 +111,8 @@ async function hasCoachStudentAccess(user, studentId) {
 }
 
 /**
- * Same training-day definition used by the
- * existing progress system:
+ * Same training-day definition used by the existing
+ * progress system:
  *
  * PRESENT
  * OR
@@ -113,8 +144,8 @@ async function getCompletedTrainingDay(studentId) {
 /**
  * Find the next belt milestone that:
  *
- * 1. Has already been reached by training day
- * 2. Is different from the student's current belt
+ * 1. Has already been reached by training day.
+ * 2. Is different from the student's current belt.
  *
  * Milestones are sorted ascending so the system
  * promotes students through the configured roadmap
@@ -142,13 +173,13 @@ function getEligibleMilestone(plan, currentBelt, trainingDay) {
 /**
  * Get students visible to the authenticated user.
  *
- * SUPER_ADMIN:
+ * SUPER_ADMIN / ALL scope:
  *   All active/non-inactive students.
  *
- * BRANCH_ADMIN:
+ * BRANCH scope:
  *   Active/non-inactive students in own branch.
  *
- * COACH:
+ * Legacy COACH:
  *   Only active/non-inactive students assigned
  *   to that coach.
  */
@@ -159,17 +190,34 @@ async function buildStudentFilter(user) {
     },
   };
 
-  if (user?.role === "COACH") {
+  const normalizedRole = String(user?.role || "").toUpperCase();
+
+  /*
+   * Preserve the existing coach assignment rule.
+   */
+  if (normalizedRole === "COACH") {
     const studentIds = await getCoachStudentIds(user);
 
     filter._id = {
-      $in: studentIds,
+      $in: Array.isArray(studentIds) ? studentIds : [],
     };
+
+    /*
+     * Keep branch isolation explicit for coaches.
+     */
+    if (user.branch) {
+      filter.branch = user.branch;
+    }
 
     return filter;
   }
 
-  if (user?.role === "BRANCH_ADMIN") {
+  /*
+   * Database Role.dataScope controls branch
+   * isolation for custom roles and existing
+   * branch-scoped roles.
+   */
+  if (isBranchScopedUser(user)) {
     if (!user.branch) {
       filter._id = {
         $in: [],
@@ -195,7 +243,7 @@ const getEligiblePromotions = async (req, res) => {
 
     const students = await Student.find(studentFilter)
       .populate("branch", "name address")
-      .populate("plan")
+      .populate({ path: "plan", populate: { path: "programs.program", select: "name" } })
       .sort({
         name: 1,
       })
@@ -208,21 +256,21 @@ const getEligiblePromotions = async (req, res) => {
         continue;
       }
 
-      /**
+      /*
        * Extra branch-level protection.
        */
       if (!hasBranchAccess(req.user, student.branch?._id || student.branch)) {
         continue;
       }
 
-      /**
+      /*
        * Extra coach-level protection.
        *
-       * This is intentionally checked again
-       * even though the main query already filters
-       * assigned students.
+       * This remains intentionally checked again even
+       * though the main query already filters assigned
+       * students.
        */
-      if (req.user.role === "COACH") {
+      if (String(req.user?.role || "").toUpperCase() === "COACH") {
         const coachHasAccess = await hasCoachStudentAccess(
           req.user,
           student._id,
@@ -233,35 +281,39 @@ const getEligiblePromotions = async (req, res) => {
         }
       }
 
-      const trainingDay = await getCompletedTrainingDay(student._id);
-
-      const milestone = getEligibleMilestone(
-        student.plan,
-        student.currentBelt,
-        trainingDay,
-      );
-
-      if (!milestone) {
-        continue;
-      }
-
-      const existingHistory = await BeltHistory.findOne({
-        student: student._id,
-        toBelt: milestone.belt,
-      }).lean();
-
-      if (existingHistory) {
-        continue;
-      }
-
-      eligible.push({
+      const today = new Date();
+      const enrollment = [...(student.planEnrollments || [])].reverse().find((item) => item.status === "ACTIVE" && new Date(item.startDate) <= today && (!item.endDate || new Date(item.endDate) >= today));
+      const entitlements = enrollment?.programs?.length
+        ? enrollment.programs
+        : (student.plan.programs || []).map((item) => ({ program: item.program?._id || item.program, curriculum: item.curriculum || [] }));
+      for (const entitlement of entitlements) {
+        const programId = entitlement.program?._id || entitlement.program;
+        if (!programId) continue;
+        const program = student.plan.programs?.find((item) => String(item.program?._id || item.program) === String(programId))?.program;
+        const planProgram = (student.plan.programs || []).find((item) => String(item.program?._id || item.program) === String(programId));
+        const curriculum = resolveProgramCurriculum(entitlement, planProgram, student.plan.curriculum);
+        const { currentTrainingDay: trainingDay } = await getProgramLearningProgress({
+          studentId: student._id,
+          programId,
+          enrollmentId: enrollment?._id,
+          enrollmentStartDate: enrollment?.startDate,
+          enrollmentEndDate: enrollment?.endDate,
+          curriculum,
+          asOfDate: today,
+        });
+        const currentBelt = student.programBelts?.find((item) => String(item.program) === String(programId))?.belt || (entitlements.length === 1 ? student.currentBelt : enrollment?.startingBelt) || "White";
+        const milestone = getEligibleMilestone(student.plan, currentBelt, trainingDay);
+        if (!milestone) continue;
+        const existingHistory = await BeltHistory.findOne({ student: student._id, sessionTypeId: programId, toBelt: milestone.belt }).lean();
+        if (existingHistory) continue;
+        eligible.push({
         student: {
           _id: student._id,
           name: student.name,
           age: student.age,
           phone: student.phone,
           email: student.email,
-          currentBelt: student.currentBelt || "White",
+          currentBelt,
         },
 
         branch: student.branch,
@@ -271,6 +323,8 @@ const getEligiblePromotions = async (req, res) => {
           name: student.plan.name,
         },
 
+        program: { _id: String(programId), name: program?.name || "Training program" },
+
         trainingDay,
 
         milestone: {
@@ -279,7 +333,8 @@ const getEligiblePromotions = async (req, res) => {
           skill: milestone.skill || "",
           description: milestone.description || "",
         },
-      });
+        });
+      }
     }
 
     return res.status(200).json({
@@ -304,7 +359,7 @@ const getEligiblePromotions = async (req, res) => {
 
 const promoteStudent = async (req, res) => {
   try {
-    const { student: studentId } = req.body;
+    const { student: studentId, programId } = req.body;
 
     if (!studentId) {
       return res.status(400).json({
@@ -322,7 +377,7 @@ const promoteStudent = async (req, res) => {
 
     const student = await Student.findById(studentId)
       .populate("branch", "name address")
-      .populate("plan");
+      .populate({ path: "plan", populate: { path: "programs.program", select: "name" } });
 
     if (!student) {
       return res.status(404).json({
@@ -331,13 +386,13 @@ const promoteStudent = async (req, res) => {
       });
     }
 
-    /**
-     * Coach access is assignment-based.
+    /*
+     * Preserve legacy COACH assignment protection.
      *
-     * A coach cannot promote a student
-     * who is not actively assigned to them.
+     * A custom role with promotion.manage does not
+     * become a coach simply because it has the permission.
      */
-    if (req.user.role === "COACH") {
+    if (String(req.user?.role || "").toUpperCase() === "COACH") {
       const coachHasAccess = await hasCoachStudentAccess(req.user, student._id);
 
       if (!coachHasAccess) {
@@ -348,10 +403,16 @@ const promoteStudent = async (req, res) => {
       }
     }
 
-    /**
-     * Branch-level access for Branch Admin.
+    /*
+     * Branch-level access now uses the resolved
+     * database role dataScope.
+     *
+     * This covers:
+     * - BRANCH_ADMIN
+     * - COACH
+     * - custom branch-scoped roles
      */
-    if (req.user.role === "BRANCH_ADMIN") {
+    if (isBranchScopedUser(req.user)) {
       if (!req.user.branch) {
         return res.status(403).json({
           success: false,
@@ -365,16 +426,6 @@ const promoteStudent = async (req, res) => {
           message: "You do not have access to this student",
         });
       }
-    }
-
-    if (
-      req.user.role === "COACH" &&
-      !hasBranchAccess(req.user, student.branch?._id || student.branch)
-    ) {
-      return res.status(403).json({
-        success: false,
-        message: "You do not have access to this student's branch",
-      });
     }
 
     if (student.status !== "ACTIVE") {
@@ -391,13 +442,18 @@ const promoteStudent = async (req, res) => {
       });
     }
 
-    const trainingDay = await getCompletedTrainingDay(student._id);
-
-    const milestone = getEligibleMilestone(
-      student.plan,
-      student.currentBelt,
-      trainingDay,
-    );
+    const today = new Date();
+    const enrollment = [...(student.planEnrollments || [])].reverse().find((item) => item.status === "ACTIVE" && new Date(item.startDate) <= today && (!item.endDate || new Date(item.endDate) >= today));
+    const entitlements = enrollment?.programs?.length ? enrollment.programs : (student.plan.programs || []).map((item) => ({ program: item.program?._id || item.program, curriculum: item.curriculum || [] }));
+    if (!programId && entitlements.length > 1) return res.status(400).json({ success: false, message: "programId is required when the student's plan includes multiple programs" });
+    const entitlement = entitlements.find((item) => String(item.program?._id || item.program) === String(programId || item.program?._id || item.program));
+    const selectedProgramId = entitlement?.program?._id || entitlement?.program;
+    if (!entitlement || !selectedProgramId) return res.status(400).json({ success: false, message: "The selected program is not included in the active plan" });
+    const planProgram = (student.plan.programs || []).find((item) => String(item.program?._id || item.program) === String(selectedProgramId));
+    const curriculum = resolveProgramCurriculum(entitlement, planProgram, student.plan.curriculum);
+    const { currentTrainingDay: trainingDay } = await getProgramLearningProgress({ studentId: student._id, programId: selectedProgramId, enrollmentId: enrollment?._id, enrollmentStartDate: enrollment?.startDate, enrollmentEndDate: enrollment?.endDate, curriculum, asOfDate: today });
+    const previousBelt = student.programBelts?.find((item) => String(item.program) === String(selectedProgramId))?.belt || (entitlements.length === 1 ? student.currentBelt : enrollment?.startingBelt) || "White";
+    const milestone = getEligibleMilestone(student.plan, previousBelt, trainingDay);
 
     if (!milestone) {
       return res.status(400).json({
@@ -406,11 +462,12 @@ const promoteStudent = async (req, res) => {
       });
     }
 
-    /**
+    /*
      * Prevent duplicate promotion.
      */
     const existingHistory = await BeltHistory.findOne({
       student: student._id,
+      sessionTypeId: selectedProgramId,
       toBelt: milestone.belt,
     });
 
@@ -421,25 +478,27 @@ const promoteStudent = async (req, res) => {
       });
     }
 
-    const previousBelt =
-      student.currentBelt || student.plan.startingBelt || "White";
-
-    /**
-     * Update the student's current belt.
+    /*
+     * Update student's current belt.
      */
-    student.currentBelt = String(milestone.belt).trim();
+    const existingProgramBelt = student.programBelts.find((item) => String(item.program) === String(selectedProgramId));
+    if (existingProgramBelt) existingProgramBelt.belt = String(milestone.belt).trim();
+    else student.programBelts.push({ program: selectedProgramId, belt: String(milestone.belt).trim() });
+    if (entitlements.length === 1) student.currentBelt = String(milestone.belt).trim();
 
     await student.save();
 
-    /**
+    /*
      * Write immutable promotion history.
      */
     const history = await BeltHistory.create({
       student: student._id,
 
-      branch: student.branch._id || student.branch,
+      branch: student.branch?._id || student.branch,
 
       plan: student.plan._id,
+
+      sessionTypeId: selectedProgramId,
 
       fromBelt: previousBelt,
 
@@ -472,7 +531,7 @@ const promoteStudent = async (req, res) => {
   } catch (error) {
     console.error("Promote student error:", error);
 
-    /**
+    /*
      * Unique index protection.
      */
     if (error?.code === 11000) {
@@ -520,11 +579,10 @@ const getStudentBeltHistory = async (req, res) => {
       });
     }
 
-    /**
-     * Coach can only access history
-     * of actively assigned students.
+    /*
+     * Preserve legacy coach assignment protection.
      */
-    if (req.user.role === "COACH") {
+    if (String(req.user?.role || "").toUpperCase() === "COACH") {
       const coachHasAccess = await hasCoachStudentAccess(req.user, student._id);
 
       if (!coachHasAccess) {
@@ -535,8 +593,9 @@ const getStudentBeltHistory = async (req, res) => {
       }
     }
 
-    /**
-     * Branch Admin / Coach branch protection.
+    /*
+     * Branch isolation for both existing and
+     * custom branch-scoped roles.
      */
     if (!hasBranchAccess(req.user, student.branch?._id || student.branch)) {
       return res.status(403).json({
@@ -549,6 +608,7 @@ const getStudentBeltHistory = async (req, res) => {
       student: studentId,
     })
       .populate("approvedBy", "name email role")
+      .populate("sessionTypeId", "name")
       .sort({
         promotedAt: -1,
       })

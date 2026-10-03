@@ -8,8 +8,6 @@ const {
   validateMakeupDate: validateCentralMakeupDate,
 } = require("../services/branchSchedule.service");
 
-const BRANCH_ROLES = ["BRANCH_ADMIN", "COACH"];
-
 const DAY_NAMES = [
   "Sunday",
   "Monday",
@@ -33,9 +31,12 @@ function checkBranchAccess(req, branchId) {
   }
 
   /*
-   * SUPER_ADMIN has global access.
+   * Branch access is now determined by the database-backed
+   * role dataScope, not by hardcoded role names.
+   *
+   * SUPER_ADMIN resolves to ALL in auth.middleware.
    */
-  if (!BRANCH_ROLES.includes(req.user.role)) {
+  if (req.user.dataScope === "ALL") {
     return null;
   }
 
@@ -259,8 +260,10 @@ function populateMakeup(query) {
     .populate("branch", "name address")
     .populate(
       "originalAttendance",
-      "date planDay curriculumTitle status makeupRequired makeupCompleted",
+      "date planDay curriculumTitle curriculumSkill status makeupRequired makeupCompleted sessionTypeId sessionName",
     )
+    .populate("sessionTypeId", "name")
+    .populate("makeupAttendance")
     .populate("markedBy", "name email")
     .populate("completedBy", "name email");
 }
@@ -281,14 +284,14 @@ function populateMakeup(query) {
 
 const getMakeups = async (req, res) => {
   try {
-    const { status, student, fromDate, toDate } = req.query;
+    const { status, student, fromDate, toDate, search, page, limit, sortBy, sortOrder } = req.query;
 
     const filter = {};
 
     /*
      * Branch restriction.
      */
-    if (BRANCH_ROLES.includes(req.user.role)) {
+    if (req.user.dataScope !== "ALL") {
       if (!req.user.branch) {
         return res.status(403).json({
           success: false,
@@ -377,16 +380,57 @@ const getMakeups = async (req, res) => {
       }
     }
 
-    const makeups = await populateMakeup(Makeup.find(filter)).sort({
-      status: 1,
-      makeupDate: 1,
-      originalDate: -1,
-    });
+    if (String(search || "").trim()) {
+      const expression = new RegExp(
+        String(search).trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+        "i",
+      );
+      const students = await Student.find({
+        $or: [{ name: expression }, { phone: expression }, { email: expression }],
+      }).select("_id").lean();
+
+      const matchingIds = students.map((item) => item._id.toString());
+
+      if (filter.student && typeof filter.student === "object" && Array.isArray(filter.student.$in)) {
+        filter.student = {
+          $in: filter.student.$in.filter((id) => matchingIds.includes(id.toString())),
+        };
+      } else if (filter.student) {
+        filter.student = matchingIds.includes(filter.student.toString())
+          ? filter.student
+          : { $in: [] };
+      } else {
+        filter.student = { $in: students.map((item) => item._id) };
+      }
+    }
+
+    const shouldPaginate = page !== undefined || limit !== undefined;
+    const pageNumber = Math.max(1, Number.parseInt(page, 10) || 1);
+    const pageSize = Math.min(100, Math.max(1, Number.parseInt(limit, 10) || 25));
+    const sortField = ["makeupDate", "originalDate", "createdAt", "updatedAt", "status"].includes(sortBy)
+      ? sortBy
+      : "makeupDate";
+    const sortDirection = String(sortOrder).toLowerCase() === "asc" ? 1 : -1;
+    const total = await Makeup.countDocuments(filter);
+
+    let makeupQuery = populateMakeup(Makeup.find(filter)).sort({ [sortField]: sortDirection, _id: -1 });
+
+    if (shouldPaginate) {
+      makeupQuery = makeupQuery.skip((pageNumber - 1) * pageSize).limit(pageSize);
+    }
+
+    const makeups = await makeupQuery;
 
     return res.status(200).json({
       success: true,
       count: makeups.length,
       makeups,
+      pagination: {
+        page: shouldPaginate ? pageNumber : 1,
+        limit: shouldPaginate ? pageSize : total,
+        total,
+        pages: shouldPaginate ? Math.max(1, Math.ceil(total / pageSize)) : 1,
+      },
     });
   } catch (error) {
     console.error("Get makeups error:", error);
@@ -691,7 +735,7 @@ const scheduleMakeup = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const { makeupDate, notes } = req.body;
+    const { makeupDate, notes, sessionSlotId } = req.body;
 
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({
@@ -732,7 +776,9 @@ const scheduleMakeup = async (req, res) => {
       });
     }
 
-    const studentRecord = await Student.findById(makeup.student).select("status");
+    const studentRecord = await Student.findById(makeup.student).select(
+      "status plan planEnrollments",
+    ).populate("plan", "classesPerWeek programs");
 
     if (!studentRecord || studentRecord.status !== "ACTIVE") {
       return res.status(400).json({
@@ -741,10 +787,7 @@ const scheduleMakeup = async (req, res) => {
       });
     }
 
-    const coachAccessError = await checkCoachStudentAccess(
-      req,
-      makeup.student,
-    );
+    const coachAccessError = await checkCoachStudentAccess(req, makeup.student);
 
     if (coachAccessError) {
       return res.status(coachAccessError.status).json({
@@ -786,20 +829,67 @@ const scheduleMakeup = async (req, res) => {
       });
     }
 
-    /*
-     * Prevent same student from
-     * having two scheduled makeups
-     * on the same date.
-     */
+    const sessionSlot = (availability.schedule?.slots || []).find((slot) =>
+      String(slot._id) === String(sessionSlotId),
+    );
+    if (!sessionSlotId || !sessionSlot) {
+      return res.status(400).json({ success: false, message: "Select an active session slot for the makeup date" });
+    }
+    if (makeup.sessionTypeId && String(sessionSlot.sessionTypeId) !== String(makeup.sessionTypeId)) {
+      return res.status(409).json({ success: false, message: "Makeup must be booked into a session for the same program as the missed class" });
+    }
     const selectedStart = getStartOfDay(String(makeupDate));
-
     const selectedEnd = getEndOfDay(String(makeupDate));
+    const enrollment = (studentRecord.planEnrollments || []).find((item) => item.status === "ACTIVE" && new Date(item.startDate) <= selectedEnd && (!item.endDate || new Date(item.endDate) > selectedStart));
+    if (studentRecord.planEnrollments?.length && !enrollment) {
+      return res.status(409).json({ success: false, message: "The student has no active plan enrollment on the selected makeup date" });
+    }
+    const originalAttendance = await Attendance.findById(makeup.originalAttendance).select("sessionTypeId sessionSlotId enrollment plan").lean();
+    const assignedProgramId = makeup.sessionTypeId || originalAttendance?.sessionTypeId || sessionSlot.sessionTypeId;
+    if (String(sessionSlot.sessionTypeId) !== String(assignedProgramId)) return res.status(409).json({ success: false, message: "Makeup must be booked into a session for the same program as the missed class" });
+    makeup.sessionTypeId = assignedProgramId;
+    if (makeup.sessionSlotId == null && originalAttendance?.sessionSlotId) makeup.sessionSlotId = originalAttendance.sessionSlotId;
+    const planEntitlement = studentRecord.plan?.programs?.find((item) => String(item.program?._id || item.program) === String(assignedProgramId));
+    const enrollmentEntitlement = enrollment?.programs?.find((item) => String(item.program?._id || item.program) === String(assignedProgramId));
+    if ((enrollment?.programs?.length || studentRecord.plan?.programs?.length) && !enrollmentEntitlement && !planEntitlement) {
+      return res.status(409).json({ success: false, message: "The student's active plan does not include this training program" });
+    }
+    if (enrollment) {
+      makeup.enrollment = enrollment._id;
+      makeup.plan = enrollment.plan;
+    }
 
+    const weekStart = new Date(selectedStart);
+    weekStart.setDate(weekStart.getDate() - ((weekStart.getDay() + 6) % 7));
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekEnd.getDate() + 7);
+    const [weekAttendance, otherScheduledMakeups] = await Promise.all([
+      Attendance.countDocuments({ student: makeup.student, date: { $gte: weekStart, $lt: weekEnd }, status: "PRESENT" }),
+      Makeup.find({ _id: { $ne: makeup._id }, student: makeup.student, status: "SCHEDULED", makeupDate: { $gte: weekStart, $lt: weekEnd } }).select("sessionTypeId").lean(),
+    ]);
+    const sharedLimit = enrollment?.classesPerWeek ?? studentRecord.plan?.classesPerWeek;
+    const scheduledMakeupCount = otherScheduledMakeups.length;
+    if (Number(sharedLimit) > 0 && weekAttendance + scheduledMakeupCount >= Number(sharedLimit)) {
+      return res.status(409).json({ success: false, message: `The student's plan allows ${sharedLimit} sessions per week, including makeups. This makeup would exceed the weekly limit.` });
+    }
+    const programLimit = enrollmentEntitlement?.weeklyLimit ?? planEntitlement?.weeklyLimit;
+    const programScheduledCount = otherScheduledMakeups.filter((item) => String(item.sessionTypeId) === String(assignedProgramId)).length;
+    const programAttendance = await Attendance.countDocuments({ student: makeup.student, sessionTypeId: assignedProgramId, date: { $gte: weekStart, $lt: weekEnd }, status: "PRESENT" });
+    if (Number(programLimit) > 0 && programAttendance + programScheduledCount >= Number(programLimit)) {
+      return res.status(409).json({ success: false, message: `The plan allows ${programLimit} weekly sessions for this program, including makeups. This makeup would exceed the program limit.` });
+    }
+
+    /*
+     * A student may attend more than one
+     * program on a date, but only one makeup
+     * can occupy a specific session slot.
+     */
     const conflictingMakeup = await Makeup.findOne({
       _id: {
         $ne: makeup._id,
       },
       student: makeup.student,
+      sessionSlotId: sessionSlot._id,
       makeupDate: {
         $gte: selectedStart,
         $lte: selectedEnd,
@@ -811,12 +901,13 @@ const scheduleMakeup = async (req, res) => {
       return res.status(409).json({
         success: false,
         message:
-          "This student already has another scheduled makeup on the selected date",
+          "This student already has a scheduled makeup in this session slot on the selected date",
         conflictingMakeup: conflictingMakeup._id,
       });
     }
 
     makeup.makeupDate = selectedStart;
+    makeup.sessionSlotId = sessionSlot._id;
 
     makeup.status = "SCHEDULED";
 
@@ -894,10 +985,7 @@ const completeMakeup = async (req, res) => {
       });
     }
 
-    const coachAccessError = await checkCoachStudentAccess(
-      req,
-      makeup.student,
-    );
+    const coachAccessError = await checkCoachStudentAccess(req, makeup.student);
 
     if (coachAccessError) {
       return res.status(coachAccessError.status).json({
@@ -927,6 +1015,10 @@ const completeMakeup = async (req, res) => {
       });
     }
 
+    if (!makeup.sessionSlotId || !makeup.sessionTypeId) {
+      return res.status(409).json({ success: false, message: "This makeup has no program session assigned. Reschedule it into a valid program session first." });
+    }
+
     /*
      * Before completing, verify that
      * the scheduled date was actually
@@ -953,7 +1045,70 @@ const completeMakeup = async (req, res) => {
       });
     }
 
+    const sessionSlot = (availability.schedule?.slots || []).find((slot) =>
+      String(slot._id) === String(makeup.sessionSlotId),
+    );
+    if (!sessionSlot || String(sessionSlot.sessionTypeId) !== String(makeup.sessionTypeId)) {
+      return res.status(409).json({ success: false, message: "The selected makeup session is no longer available for this program. Reschedule the makeup." });
+    }
+
+    const dayStart = getStartOfDay(formatDate(makeup.makeupDate));
+    const dayEnd = getEndOfDay(formatDate(makeup.makeupDate));
+    const existingAttendance = await Attendance.findOne({ student: makeup.student, date: { $gte: dayStart, $lte: dayEnd }, sessionSlotId: makeup.sessionSlotId }).select("_id");
+    if (existingAttendance) {
+      return res.status(409).json({ success: false, message: "Attendance is already recorded for this student in the selected session" });
+    }
+    const student = await Student.findById(makeup.student).select("status planEnrollments plan").populate("plan", "classesPerWeek programs");
+    if (!student || student.status !== "ACTIVE") {
+      return res.status(400).json({ success: false, message: "Only active students can complete a makeup" });
+    }
+    const enrollment = (student.planEnrollments || []).find((item) =>
+      item.status === "ACTIVE" && new Date(item.startDate) <= dayEnd && (!item.endDate || new Date(item.endDate) > dayStart),
+    );
+    if (enrollment && makeup.enrollment && String(enrollment._id) !== String(makeup.enrollment)) {
+      return res.status(409).json({ success: false, message: "The student's plan enrollment changed after this makeup was scheduled. Review the plan before completing it." });
+    }
+    if (student.planEnrollments?.length && !enrollment) {
+      return res.status(409).json({ success: false, message: "The student has no active plan enrollment on the makeup date" });
+    }
+    const planEntitlement = student.plan?.programs?.find((item) => String(item.program?._id || item.program) === String(makeup.sessionTypeId));
+    const entitlement = enrollment?.programs?.find((item) => String(item.program?._id || item.program) === String(makeup.sessionTypeId)) || planEntitlement;
+    if ((enrollment?.programs?.length || student.plan?.programs?.length) && !entitlement) {
+      return res.status(409).json({ success: false, message: "The active plan does not include this training program" });
+    }
+    const weekStart = new Date(dayStart);
+    weekStart.setDate(weekStart.getDate() - ((weekStart.getDay() + 6) % 7));
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekEnd.getDate() + 7);
+    const weeklyAttendance = await Attendance.find({ student: makeup.student, date: { $gte: weekStart, $lt: weekEnd }, status: "PRESENT" }).select("sessionTypeId").lean();
+    const classesLimit = enrollment?.classesPerWeek ?? student.plan?.classesPerWeek;
+    if (Number.isFinite(Number(classesLimit)) && Number(classesLimit) > 0 && weeklyAttendance.length >= Number(classesLimit)) {
+      return res.status(409).json({ success: false, message: `The student's plan allows ${classesLimit} attended sessions per week; this makeup would exceed that limit` });
+    }
+    if (Number.isFinite(Number(entitlement?.weeklyLimit)) && Number(entitlement.weeklyLimit) > 0 && weeklyAttendance.filter((item) => String(item.sessionTypeId) === String(makeup.sessionTypeId)).length >= Number(entitlement.weeklyLimit)) {
+      return res.status(409).json({ success: false, message: `The plan allows ${entitlement.weeklyLimit} weekly sessions for this program; this makeup would exceed that limit` });
+    }
+    const makeupAttendance = await Attendance.create({
+      student: makeup.student,
+      branch: makeup.branch,
+      date: dayStart,
+      status: "PRESENT",
+      markedBy: req.user._id,
+      sessionTypeId: makeup.sessionTypeId,
+      sessionSlotId: makeup.sessionSlotId,
+      sessionName: sessionSlot.sessionName || "",
+      enrollment: enrollment?._id || makeup.enrollment || null,
+      plan: enrollment?.plan || makeup.plan || student.plan,
+      planDay: makeup.planDay,
+      curriculumTitle: makeup.curriculumTitle || "Makeup session",
+      curriculumSkill: makeup.curriculumSkill || "",
+      curriculumDescription: "",
+      makeupRequired: false,
+      makeupCompleted: false,
+    });
+
     makeup.status = "COMPLETED";
+    makeup.makeupAttendance = makeupAttendance._id;
 
     makeup.completedBy = req.user._id;
 
@@ -967,6 +1122,7 @@ const completeMakeup = async (req, res) => {
     await Attendance.findByIdAndUpdate(makeup.originalAttendance, {
       $set: {
         makeupCompleted: true,
+        makeupAttendance: makeupAttendance._id,
       },
     });
 
@@ -1028,10 +1184,7 @@ const cancelMakeup = async (req, res) => {
       });
     }
 
-    const coachAccessError = await checkCoachStudentAccess(
-      req,
-      makeup.student,
-    );
+    const coachAccessError = await checkCoachStudentAccess(req, makeup.student);
 
     if (coachAccessError) {
       return res.status(coachAccessError.status).json({

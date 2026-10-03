@@ -1,24 +1,19 @@
+import { fetchWithSession } from "@/lib/sessionFetch";
 const API_URL =
   process.env.NEXT_PUBLIC_API_URL ||
   "http://localhost:5000/api";
 
-function getToken() {
-  return localStorage.getItem("token");
-}
 
 async function request(
   path: string,
   options: RequestInit = {},
 ) {
-  const token = getToken();
-
-  const response = await fetch(
+  const response = await fetchWithSession(
     `${API_URL}${path}`,
     {
       ...options,
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
         ...(options.headers || {}),
       },
       cache: "no-store",
@@ -104,9 +99,16 @@ export async function getCoachAssignments(
   params?: {
     coach?: string;
     student?: string;
+    branch?: string;
     status?:
       | "ACTIVE"
-      | "INACTIVE";
+      | "INACTIVE"
+      | "ALL";
+    search?: string;
+    page?: number;
+    limit?: number;
+    sortBy?: "assignedAt" | "createdAt" | "updatedAt" | "status";
+    sortOrder?: "asc" | "desc";
   },
 ) {
   const search =
@@ -126,12 +128,22 @@ export async function getCoachAssignments(
     );
   }
 
+  if (params?.branch) {
+    search.set("branch", params.branch);
+  }
+
   if (params?.status) {
     search.set(
       "status",
       params.status,
     );
   }
+
+  if (params?.search) search.set("search", params.search);
+  if (params?.page) search.set("page", String(params.page));
+  if (params?.limit) search.set("limit", String(params.limit));
+  if (params?.sortBy) search.set("sortBy", params.sortBy);
+  if (params?.sortOrder) search.set("sortOrder", params.sortOrder);
 
   const query =
     search.toString();

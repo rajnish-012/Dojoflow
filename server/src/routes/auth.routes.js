@@ -1,8 +1,9 @@
 const express = require("express");
 
-const { login, changePassword } = require("../controllers/auth.controller");
+const { login, changePassword, logout, migrateLegacySession } = require("../controllers/auth.controller");
 
 const protect = require("../middleware/auth.middleware");
+const Branch = require("../models/Branch");
 
 const router = express.Router();
 
@@ -12,13 +13,18 @@ const router = express.Router();
 ------------------------- */
 
 router.post("/login", login);
+router.post("/migrate-legacy-session", migrateLegacySession);
+router.post("/logout", logout);
 
 /* -------------------------
    GET /api/auth/me
    Returns the authenticated user's profile.
 ------------------------- */
 
-router.get("/me", protect, (req, res) => {
+router.get("/me", protect, async (req, res) => {
+  const branchRecord = req.user.branch
+    ? await Branch.findById(req.user.branch).select("name").lean()
+    : null;
   res.status(200).json({
     success: true,
     user: {
@@ -27,6 +33,11 @@ router.get("/me", protect, (req, res) => {
       email: req.user.email,
       role: req.user.role,
       branch: req.user.branch,
+      branchName: branchRecord?.name || null,
+      dataScope: req.user.dataScope,
+      permissions: Array.isArray(req.user.permissions)
+        ? req.user.permissions
+        : [],
     },
   });
 });

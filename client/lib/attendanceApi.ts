@@ -1,16 +1,10 @@
+import { fetchWithSession } from "@/lib/sessionFetch";
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api";
 
 /* ==========================================
    AUTH
 ========================================== */
 
-function getToken() {
-  if (typeof window === "undefined") {
-    return null;
-  }
-
-  return localStorage.getItem("token");
-}
 
 /* ==========================================
    DATE HELPERS
@@ -380,15 +374,13 @@ async function parseResponse<
 export async function getAttendanceDailySheet(
   date: string,
 ): Promise<AttendanceDailySheetResponse> {
-  const token = getToken();
-
   /*
    * Normalize the date before sending it
    * to the daily-sheet endpoint as well.
    */
   const normalizedDate = normalizeAttendanceDate(date);
 
-  const response = await fetch(
+  const response = await fetchWithSession(
     `${API_URL}/attendance/daily-sheet?date=${encodeURIComponent(
       normalizedDate,
     )}`,
@@ -397,8 +389,6 @@ export async function getAttendanceDailySheet(
 
       headers: {
         "Content-Type": "application/json",
-
-        Authorization: `Bearer ${token}`,
       },
 
       cache: "no-store",
@@ -420,6 +410,7 @@ export async function getAttendanceDailySheet(
 
 export type MarkAttendancePayload = {
   student: string;
+  sessionSlotId?: string;
 
   date: string;
 
@@ -440,6 +431,12 @@ export type MarkAttendanceResponse = AttendanceApiResponse & {
   data?: unknown;
 };
 
+export type MarkAllAttendanceResponse = AttendanceApiResponse & {
+  marked: number;
+  skipped: number;
+  failed: number;
+};
+
 /**
  * Mark attendance for a student.
  *
@@ -452,8 +449,6 @@ export type MarkAttendanceResponse = AttendanceApiResponse & {
 export async function markAttendance(
   data: MarkAttendancePayload,
 ): Promise<MarkAttendanceResponse> {
-  const token = getToken();
-
   const normalizedDate = normalizeAttendanceDate(data.date);
 
   const payload: MarkAttendancePayload = {
@@ -462,17 +457,31 @@ export async function markAttendance(
     date: normalizedDate,
   };
 
-  const response = await fetch(`${API_URL}/attendance`, {
+  const response = await fetchWithSession(`${API_URL}/attendance`, {
     method: "POST",
 
     headers: {
       "Content-Type": "application/json",
-
-      Authorization: `Bearer ${token}`,
     },
 
     body: JSON.stringify(payload),
   });
 
   return parseResponse<MarkAttendanceResponse>(response);
+}
+
+export async function markAllAttendancePresent(
+  date: string,
+): Promise<MarkAllAttendanceResponse> {
+  const normalizedDate = normalizeAttendanceDate(date);
+
+  const response = await fetchWithSession(`${API_URL}/attendance/bulk-present`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ date: normalizedDate }),
+  });
+
+  return parseResponse<MarkAllAttendanceResponse>(response);
 }

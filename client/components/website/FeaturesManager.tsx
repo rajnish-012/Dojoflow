@@ -1,4 +1,5 @@
 "use client";
+import { confirmAction, toast } from "@/lib/toast";
 
 import {
   useEffect,
@@ -20,6 +21,7 @@ import {
   updateWebsiteFeature,
   type WebsiteFeature,
 } from "@/lib/websiteApi";
+import { PERMISSIONS, useCan } from "@/lib/permissions";
 
 
 type FeatureForm = {
@@ -67,6 +69,7 @@ function toForm(
 
 
 export default function FeaturesManager() {
+  const canManage = useCan(PERMISSIONS.WEBSITE_MANAGE);
   const [features, setFeatures] =
     useState<WebsiteFeature[]>([]);
 
@@ -117,6 +120,7 @@ export default function FeaturesManager() {
 
 
   function openCreate() {
+    if (!canManage) return;
     setEditing(null);
     setForm(emptyForm);
     setError("");
@@ -146,6 +150,7 @@ export default function FeaturesManager() {
     event: React.FormEvent,
   ) {
     event.preventDefault();
+    if (!canManage) return;
 
     if (!form.title.trim()) {
       setError(
@@ -186,8 +191,9 @@ export default function FeaturesManager() {
 
       await loadFeatures();
       closeModal();
+      toast.success(editing ? "Feature updated." : "Feature created.");
     } catch (caughtError) {
-      setError(
+      toast.error(
         caughtError instanceof Error
           ? caughtError.message
           : "Failed to save feature.",
@@ -201,11 +207,8 @@ export default function FeaturesManager() {
   async function handleDelete(
     item: WebsiteFeature,
   ) {
-    if (
-      !window.confirm(
-        `Delete "${item.title}"?`,
-      )
-    ) {
+    if (!canManage) return;
+    if (!(await confirmAction({ title: "Delete feature?", message: `Delete "${item.title}"?`, confirmLabel: "Delete feature", destructive: true }))) {
       return;
     }
 
@@ -215,8 +218,9 @@ export default function FeaturesManager() {
       );
 
       await loadFeatures();
+      toast.success("Feature deleted.");
     } catch (caughtError) {
-      setError(
+      toast.error(
         caughtError instanceof Error
           ? caughtError.message
           : "Failed to delete feature.",
@@ -262,14 +266,14 @@ export default function FeaturesManager() {
             Refresh
           </button>
 
-          <button
+          {canManage && <button
             type="button"
             onClick={openCreate}
             className="inline-flex h-10 items-center gap-2 rounded-xl bg-(--accent) px-4 text-sm font-bold text-(--accent-contrast)"
           >
             <Plus size={16} />
             Add Feature
-          </button>
+          </button>}
         </div>
       </div>
 
@@ -296,13 +300,13 @@ export default function FeaturesManager() {
             No features added yet.
           </p>
 
-          <button
+          {canManage && <button
             type="button"
             onClick={openCreate}
             className="mt-4 rounded-xl bg-(--accent) px-4 py-2 text-sm font-bold text-(--accent-contrast)"
           >
             Add Feature
-          </button>
+          </button>}
         </div>
       ) : (
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -357,7 +361,7 @@ export default function FeaturesManager() {
                     {item.sortOrder ?? 0}
                   </span>
 
-                  <div className="flex gap-2">
+                  {canManage && <div className="flex gap-2">
                     <button
                       type="button"
                       onClick={() =>
@@ -383,7 +387,7 @@ export default function FeaturesManager() {
                     >
                       <Trash2 size={14} />
                     </button>
-                  </div>
+                  </div>}
                 </div>
               </div>
             </article>
@@ -391,7 +395,7 @@ export default function FeaturesManager() {
         </div>
       )}
 
-      {showModal && (
+      {showModal && canManage && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
           <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-(--line) bg-(--card) p-5 shadow-2xl">
             <div className="mb-5 flex items-center justify-between">

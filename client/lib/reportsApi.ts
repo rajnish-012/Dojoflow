@@ -1,6 +1,5 @@
-const API_URL =
-  process.env.NEXT_PUBLIC_API_URL ||
-  "http://localhost:5000/api";
+import { fetchWithSession } from "@/lib/sessionFetch";
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api";
 
 /*
 |--------------------------------------------------------------------------
@@ -144,6 +143,7 @@ export interface BeltTransition {
 export interface BeltReports {
   year: number;
   totalPromotions: number;
+
   distribution: BeltReport[];
 
   monthly: {
@@ -220,79 +220,56 @@ export interface ReportBranchOption {
 |--------------------------------------------------------------------------
 | Request Helper
 |--------------------------------------------------------------------------
+|
+| IMPORTANT:
+| Authenticated requests use the server-managed session cookie.
+|
+| It does NOT send:
+| - permissions
+| - role
+| - branch authorization
+|
+| The backend resolves those values from the database.
+|--------------------------------------------------------------------------
 */
 
-function getToken() {
-  if (typeof window === "undefined") {
-    return null;
-  }
+async function request<T>(endpoint: string): Promise<T> {
+  const response = await fetchWithSession(`${API_URL}${endpoint}`, {
+    method: "GET",
 
-  return localStorage.getItem("token");
-}
+    headers: {
+      "Content-Type": "application/json",
 
-async function request<T>(
-  endpoint: string,
-): Promise<T> {
-  const token = getToken();
-
-  const response = await fetch(
-    `${API_URL}${endpoint}`,
-    {
-      method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-
-        ...(token
-          ? {
-              Authorization: `Bearer ${token}`,
-            }
-          : {}),
-      },
-
-      cache: "no-store",
     },
-  );
 
-  const data = await response
-    .json()
-    .catch(() => null);
+    cache: "no-store",
+  });
+
+  const data = await response.json().catch(() => null);
 
   if (!response.ok) {
     throw new Error(
-      data?.message ||
-        `Request failed with status ${response.status}`,
+      data?.message || `Request failed with status ${response.status}`,
     );
   }
 
   return data;
 }
 
-function buildQuery(
-  year?: number,
-  branch?: string,
-) {
+function buildQuery(year?: number, branch?: string): string {
   const params = new URLSearchParams();
 
   if (year) {
-    params.set(
-      "year",
-      String(year),
-    );
+    params.set("year", String(year));
   }
 
   if (branch) {
-    params.set(
-      "branch",
-      branch,
-    );
+    params.set("branch", branch);
   }
 
-  const query =
-    params.toString();
+  const query = params.toString();
 
-  return query
-    ? `?${query}`
-    : "";
+  return query ? `?${query}` : "";
 }
 
 /*
@@ -304,17 +281,11 @@ function buildQuery(
 export async function getReportsSummary(
   year: number,
   branch?: string,
-) {
-  const response =
-    await request<{
-      success: boolean;
-      data: ReportSummary;
-    }>(
-      `/reports/summary${buildQuery(
-        year,
-        branch,
-      )}`,
-    );
+): Promise<ReportSummary> {
+  const response = await request<{
+    success: boolean;
+    data: ReportSummary;
+  }>(`/reports/summary${buildQuery(year, branch)}`);
 
   return response.data;
 }
@@ -328,17 +299,11 @@ export async function getReportsSummary(
 export async function getTopPerformers(
   year: number,
   branch?: string,
-) {
-  const response =
-    await request<{
-      success: boolean;
-      data: TopPerformer[];
-    }>(
-      `/reports/top-performers${buildQuery(
-        year,
-        branch,
-      )}`,
-    );
+): Promise<TopPerformer[]> {
+  const response = await request<{
+    success: boolean;
+    data: TopPerformer[];
+  }>(`/reports/top-performers${buildQuery(year, branch)}`);
 
   return response.data || [];
 }
@@ -352,17 +317,11 @@ export async function getTopPerformers(
 export async function getSkillCompletion(
   year: number,
   branch?: string,
-) {
-  const response =
-    await request<{
-      success: boolean;
-      data: SkillReport[];
-    }>(
-      `/reports/skills${buildQuery(
-        year,
-        branch,
-      )}`,
-    );
+): Promise<SkillReport[]> {
+  const response = await request<{
+    success: boolean;
+    data: SkillReport[];
+  }>(`/reports/skills${buildQuery(year, branch)}`);
 
   return response.data || [];
 }
@@ -376,17 +335,11 @@ export async function getSkillCompletion(
 export async function getBranchReports(
   year: number,
   branch?: string,
-) {
-  const response =
-    await request<{
-      success: boolean;
-      data: BranchReport[];
-    }>(
-      `/reports/branches${buildQuery(
-        year,
-        branch,
-      )}`,
-    );
+): Promise<BranchReport[]> {
+  const response = await request<{
+    success: boolean;
+    data: BranchReport[];
+  }>(`/reports/branches${buildQuery(year, branch)}`);
 
   return response.data || [];
 }
@@ -400,17 +353,11 @@ export async function getBranchReports(
 export async function getCoachReports(
   year: number,
   branch?: string,
-) {
-  const response =
-    await request<{
-      success: boolean;
-      data: CoachReport[];
-    }>(
-      `/reports/coaches${buildQuery(
-        year,
-        branch,
-      )}`,
-    );
+): Promise<CoachReport[]> {
+  const response = await request<{
+    success: boolean;
+    data: CoachReport[];
+  }>(`/reports/coaches${buildQuery(year, branch)}`);
 
   return response.data || [];
 }
@@ -424,17 +371,11 @@ export async function getCoachReports(
 export async function getBeltReports(
   year: number,
   branch?: string,
-) {
-  const response =
-    await request<{
-      success: boolean;
-      data: BeltReports;
-    }>(
-      `/reports/belts${buildQuery(
-        year,
-        branch,
-      )}`,
-    );
+): Promise<BeltReports> {
+  const response = await request<{
+    success: boolean;
+    data: BeltReports;
+  }>(`/reports/belts${buildQuery(year, branch)}`);
 
   return response.data;
 }
@@ -448,17 +389,11 @@ export async function getBeltReports(
 export async function getAdmissionReports(
   year: number,
   branch?: string,
-) {
-  const response =
-    await request<{
-      success: boolean;
-      data: AdmissionReports;
-    }>(
-      `/reports/admissions${buildQuery(
-        year,
-        branch,
-      )}`,
-    );
+): Promise<AdmissionReports> {
+  const response = await request<{
+    success: boolean;
+    data: AdmissionReports;
+  }>(`/reports/admissions${buildQuery(year, branch)}`);
 
   return response.data;
 }
@@ -469,14 +404,11 @@ export async function getAdmissionReports(
 |--------------------------------------------------------------------------
 */
 
-export async function getReportBranches() {
-  const response =
-    await request<{
-      success: boolean;
-      data: ReportBranchOption[];
-    }>(
-      "/reports/branch-options",
-    );
+export async function getReportBranches(): Promise<ReportBranchOption[]> {
+  const response = await request<{
+    success: boolean;
+    data: ReportBranchOption[];
+  }>("/reports/branch-options");
 
   return response.data || [];
 }

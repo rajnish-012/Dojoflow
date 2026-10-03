@@ -1,4 +1,5 @@
 "use client";
+import { confirmAction, toast } from "@/lib/toast";
 
 import {
   useEffect,
@@ -21,6 +22,7 @@ import {
   updateWebsiteHero,
   type WebsiteHero,
 } from "@/lib/websiteApi";
+import { PERMISSIONS, useCan } from "@/lib/permissions";
 
 
 type HeroForm = {
@@ -93,6 +95,7 @@ function heroToForm(
 
 
 export default function HeroManager() {
+  const canManage = useCan(PERMISSIONS.WEBSITE_MANAGE);
   const [heroes, setHeroes] = useState<
     WebsiteHero[]
   >([]);
@@ -143,6 +146,7 @@ export default function HeroManager() {
 
 
   function openCreate() {
+    if (!canManage) return;
     setEditingHero(null);
     setForm(emptyForm);
     setError("");
@@ -153,6 +157,7 @@ export default function HeroManager() {
   function openEdit(
     hero: WebsiteHero,
   ) {
+    if (!canManage) return;
     setEditingHero(hero);
     setForm(heroToForm(hero));
     setError("");
@@ -184,6 +189,7 @@ export default function HeroManager() {
     event: React.FormEvent,
   ) {
     event.preventDefault();
+    if (!canManage) return;
 
     if (!form.title.trim()) {
       setError(
@@ -236,8 +242,9 @@ export default function HeroManager() {
 
       await loadHeroes();
       closeModal();
+      toast.success(editingHero ? "Hero slide updated." : "Hero slide created.");
     } catch (caughtError) {
-      setError(
+      toast.error(
         caughtError instanceof Error
           ? caughtError.message
           : "Failed to save hero.",
@@ -251,10 +258,8 @@ export default function HeroManager() {
   async function handleDelete(
     hero: WebsiteHero,
   ) {
-    const confirmed =
-      window.confirm(
-        `Delete the hero "${hero.title}"? This cannot be undone.`,
-      );
+    if (!canManage) return;
+    const confirmed = await confirmAction({ title: "Delete hero?", message: `Delete the hero "${hero.title}"? This cannot be undone.`, confirmLabel: "Delete hero", destructive: true });
 
     if (!confirmed) return;
 
@@ -266,8 +271,9 @@ export default function HeroManager() {
       );
 
       await loadHeroes();
+      toast.success("Hero slide deleted.");
     } catch (caughtError) {
-      setError(
+      toast.error(
         caughtError instanceof Error
           ? caughtError.message
           : "Failed to delete hero.",
@@ -311,14 +317,14 @@ export default function HeroManager() {
             Refresh
           </button>
 
-          <button
+          {canManage && <button
             type="button"
             onClick={openCreate}
             className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-(--accent) px-4 text-sm font-bold text-(--accent-contrast) shadow-sm transition hover:opacity-90"
           >
             <Plus size={17} />
             Add Hero
-          </button>
+          </button>}
         </div>
       </div>
 
@@ -352,13 +358,15 @@ export default function HeroManager() {
             Create your first homepage hero.
           </p>
 
-          <button
-            type="button"
-            onClick={openCreate}
-            className="mt-5 rounded-xl bg-(--accent) px-4 py-2.5 text-sm font-bold text-(--accent-contrast)"
-          >
-            Create Hero
-          </button>
+          {canManage && (
+            <button
+              type="button"
+              onClick={openCreate}
+              className="mt-5 rounded-xl bg-(--accent) px-4 py-2.5 text-sm font-bold text-(--accent-contrast)"
+            >
+              Create Hero
+            </button>
+          )}
         </div>
       ) : (
         <div className="grid gap-4 xl:grid-cols-2">
@@ -422,7 +430,7 @@ export default function HeroManager() {
                     Order #{hero.sortOrder ?? 0}
                   </span>
 
-                  <div className="flex gap-2">
+                  {canManage && <div className="flex gap-2">
                     <button
                       type="button"
                       onClick={() =>
@@ -446,7 +454,7 @@ export default function HeroManager() {
                       <Trash2 size={14} />
                       Delete
                     </button>
-                  </div>
+                  </div>}
                 </div>
               </div>
             </article>
@@ -454,7 +462,7 @@ export default function HeroManager() {
         </div>
       )}
 
-      {showModal && (
+      {showModal && canManage && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
           <div className="max-h-[92vh] w-full max-w-3xl overflow-hidden rounded-2xl border border-(--line) bg-(--card) shadow-2xl">
             <div className="flex items-center justify-between border-b border-(--line) px-5 py-4">

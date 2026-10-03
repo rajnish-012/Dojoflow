@@ -1,3 +1,4 @@
+import { fetchWithSession } from "@/lib/sessionFetch";
 const API_URL =
   process.env.NEXT_PUBLIC_API_URL ||
   "http://localhost:5000/api";
@@ -29,13 +30,6 @@ export type Holiday = {
   updatedAt?: string;
 };
 
-function getToken() {
-  if (typeof window === "undefined") {
-    return "";
-  }
-
-  return localStorage.getItem("token") || "";
-}
 
 async function parseResponse(
   response: Response,
@@ -75,8 +69,6 @@ export async function getHolidays(
     includeInactive?: boolean;
   },
 ) {
-  const token = getToken();
-
   const searchParams =
     new URLSearchParams();
 
@@ -118,7 +110,7 @@ export async function getHolidays(
   const query =
     searchParams.toString();
 
-  const response = await fetch(
+  const response = await fetchWithSession(
     `${API_URL}/holidays${
       query ? `?${query}` : ""
     }`,
@@ -127,7 +119,6 @@ export async function getHolidays(
       headers: {
         "Content-Type":
           "application/json",
-        Authorization: `Bearer ${token}`,
       },
       cache: "no-store",
     },
@@ -143,9 +134,7 @@ export async function getHolidays(
 export async function getHolidayByDate(
   date: string,
 ) {
-  const token = getToken();
-
-  const response = await fetch(
+  const response = await fetchWithSession(
     `${API_URL}/holidays/by-date?date=${encodeURIComponent(
       date,
     )}`,
@@ -154,7 +143,6 @@ export async function getHolidayByDate(
       headers: {
         "Content-Type":
           "application/json",
-        Authorization: `Bearer ${token}`,
       },
       cache: "no-store",
     },
@@ -175,16 +163,13 @@ export async function createHoliday(
     branch?: string | null;
   },
 ) {
-  const token = getToken();
-
-  const response = await fetch(
+  const response = await fetchWithSession(
     `${API_URL}/holidays`,
     {
       method: "POST",
       headers: {
         "Content-Type":
           "application/json",
-        Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify(data),
     },
@@ -207,16 +192,13 @@ export async function updateHoliday(
     isActive?: boolean;
   },
 ) {
-  const token = getToken();
-
-  const response = await fetch(
+  const response = await fetchWithSession(
     `${API_URL}/holidays/${id}`,
     {
       method: "PUT",
       headers: {
         "Content-Type":
           "application/json",
-        Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify(data),
     },
@@ -232,16 +214,13 @@ export async function updateHoliday(
 export async function deleteHoliday(
   id: string,
 ) {
-  const token = getToken();
-
-  const response = await fetch(
+  const response = await fetchWithSession(
     `${API_URL}/holidays/${id}`,
     {
       method: "DELETE",
       headers: {
         "Content-Type":
           "application/json",
-        Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify({}),
     },

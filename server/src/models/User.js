@@ -27,14 +27,21 @@ const userSchema = new mongoose.Schema(
       select: false,
     },
 
+    /*
+     * Stable database role key.
+     *
+     * This intentionally remains a string rather than becoming a competing
+     * role ObjectId system. The Role collection owns the role definition and
+     * permissions, while this field preserves existing user documents and
+     * historical references.
+     */
+
     role: {
       type: String,
-      enum: [
-        "SUPER_ADMIN",
-        "BRANCH_ADMIN",
-        "COACH",
-        "STUDENT",
-      ],
+      uppercase: true,
+      trim: true,
+      maxlength: 40,
+      match: /^[A-Z][A-Z0-9_]*$/,
       default: "STUDENT",
     },
 

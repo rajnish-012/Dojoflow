@@ -1,3 +1,4 @@
+import { fetchWithSession } from "@/lib/sessionFetch";
 const API_URL =
   process.env.NEXT_PUBLIC_API_URL ||
   "http://localhost:5000/api";
@@ -32,6 +33,12 @@ export interface MakeupAttendance {
   date: string;
   planDay: number;
   curriculumTitle?: string;
+
+  curriculumSkill?: string;
+
+  sessionTypeId?: string | { _id: string; name?: string } | null;
+
+  sessionSlotId?: string | null;
   status:
     | "PRESENT"
     | "ABSENT"
@@ -78,6 +85,12 @@ export interface Makeup {
 
   curriculumTitle?: string;
 
+  curriculumSkill?: string;
+
+  sessionTypeId?: string | { _id: string; name?: string } | null;
+
+  sessionSlotId?: string | null;
+
   notes?: string;
 
   markedBy?: MakeupUser | null;
@@ -101,6 +114,7 @@ export interface Makeup {
 
 export interface BranchScheduleSlot {
   _id?: string;
+  sessionTypeId?: string | { _id: string; name?: string };
   sessionName: string;
   startTime: string;
   endTime: string;
@@ -189,6 +203,8 @@ export interface CreateMakeupPayload {
 export interface ScheduleMakeupPayload {
   makeupDate: string;
 
+  sessionSlotId: string;
+
   notes?: string;
 }
 
@@ -200,19 +216,22 @@ export interface GetMakeupsParams {
   fromDate?: string;
 
   toDate?: string;
+
+  search?: string;
+
+  page?: number;
+
+  limit?: number;
+
+  sortBy?: "makeupDate" | "originalDate" | "createdAt" | "updatedAt" | "status";
+
+  sortOrder?: "asc" | "desc";
 }
 
 /* ======================================================
    HELPERS
 ====================================================== */
 
-function getToken() {
-  if (typeof window === "undefined") {
-    return "";
-  }
-
-  return localStorage.getItem("token") || "";
-}
 
 async function parseResponse<T>(
   response: Response,
@@ -242,11 +261,8 @@ async function parseResponse<T>(
 }
 
 function getHeaders() {
-  const token = getToken();
-
   return {
     "Content-Type": "application/json",
-    Authorization: `Bearer ${token}`,
   };
 }
 
@@ -260,6 +276,7 @@ export async function getMakeups(
   success: boolean;
   count: number;
   makeups: Makeup[];
+  pagination?: { page: number; limit: number; total: number; pages: number };
 }> {
   const searchParams = new URLSearchParams();
 
@@ -291,10 +308,16 @@ export async function getMakeups(
     );
   }
 
+  if (params?.search) searchParams.set("search", params.search);
+  if (params?.page) searchParams.set("page", String(params.page));
+  if (params?.limit) searchParams.set("limit", String(params.limit));
+  if (params?.sortBy) searchParams.set("sortBy", params.sortBy);
+  if (params?.sortOrder) searchParams.set("sortOrder", params.sortOrder);
+
   const query =
     searchParams.toString();
 
-  const response = await fetch(
+  const response = await fetchWithSession(
     `${API_URL}/makeups${
       query ? `?${query}` : ""
     }`,
@@ -321,7 +344,7 @@ export async function getMakeupById(
   success: boolean;
   makeup: Makeup;
 }> {
-  const response = await fetch(
+  const response = await fetchWithSession(
     `${API_URL}/makeups/${id}`,
     {
       method: "GET",
@@ -346,7 +369,7 @@ export async function createMakeup(
   success: boolean;
   makeup: Makeup;
 }> {
-  const response = await fetch(
+  const response = await fetchWithSession(
     `${API_URL}/makeups`,
     {
       method: "POST",
@@ -372,7 +395,7 @@ export async function scheduleMakeup(
   success: boolean;
   makeup: Makeup;
 }> {
-  const response = await fetch(
+  const response = await fetchWithSession(
     `${API_URL}/makeups/${id}/schedule`,
     {
       method: "PUT",
@@ -397,7 +420,7 @@ export async function completeMakeup(
   success: boolean;
   makeup: Makeup;
 }> {
-  const response = await fetch(
+  const response = await fetchWithSession(
     `${API_URL}/makeups/${id}/complete`,
     {
       method: "PUT",
@@ -421,7 +444,7 @@ export async function cancelMakeup(
   success: boolean;
   makeup: Makeup;
 }> {
-  const response = await fetch(
+  const response = await fetchWithSession(
     `${API_URL}/makeups/${id}/cancel`,
     {
       method: "PUT",
@@ -448,7 +471,7 @@ export async function getBranchSchedule(
     );
   }
 
-  const response = await fetch(
+  const response = await fetchWithSession(
     `${API_URL}/branch-schedules/${branchId}`,
     {
       method: "GET",

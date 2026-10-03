@@ -24,7 +24,7 @@ type TrainingTimelineProps = {
   items: TrainingTimelineItem[];
 };
 
-function formatDate(value: string) {
+function formatDate(value: string | null) {
   if (!value) {
     return "—";
   }

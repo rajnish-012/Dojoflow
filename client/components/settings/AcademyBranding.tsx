@@ -1,10 +1,11 @@
 "use client";
 
+
+import { fetchWithSession } from "@/lib/sessionFetch";
 import { useEffect, useMemo, useState } from "react";
 
 import {
   Building2,
-  Check,
   ExternalLink,
   Globe,
   Image as ImageIcon,
@@ -18,6 +19,7 @@ import {
 } from "lucide-react";
 
 import { Button, Card, Input, Select } from "@/components/ui";
+import { toast } from "@/lib/toast";
 
 import { useAcademyBrand } from "./AcademyBrandProvider";
 
@@ -122,13 +124,6 @@ function normalizeSettings(
   };
 }
 
-function getToken() {
-  if (typeof window === "undefined") {
-    return null;
-  }
-
-  return localStorage.getItem("token");
-}
 
 function isValidHex(value: string) {
   return /^#[0-9A-Fa-f]{6}$/.test(value);
@@ -433,7 +428,6 @@ export default function AcademyBranding() {
   const [saving, setSaving] = useState(false);
 
   const [error, setError] = useState("");
-  const [success, setSuccess] = useState("");
 
   const hasDatabaseSettings = useMemo(
     () => Boolean(lastSavedSettings?._id),
@@ -444,19 +438,10 @@ export default function AcademyBranding() {
     try {
       setLoading(true);
       setError("");
-      setSuccess("");
 
-      const token = getToken();
-
-      if (!token) {
-        window.location.href = "/login";
-        return;
-      }
-
-      const response = await fetch(`${API_URL}/settings/academy`, {
+      const response = await fetchWithSession(`${API_URL}/settings/academy`, {
         method: "GET",
         headers: {
-          Authorization: `Bearer ${token}`,
         },
         cache: "no-store",
       });
@@ -507,7 +492,6 @@ export default function AcademyBranding() {
       [field]: value,
     }));
 
-    setSuccess("");
     setError("");
   }
 
@@ -521,31 +505,22 @@ export default function AcademyBranding() {
     }
 
     setError("");
-    setSuccess("");
   }
 
   async function handleSave() {
     try {
       setSaving(true);
       setError("");
-      setSuccess("");
-
       if (!settings.academyName.trim()) {
-        throw new Error("Academy name is required.");
-      }
-
-      const token = getToken();
-
-      if (!token) {
-        window.location.href = "/login";
+        setError("Academy name is required.");
+        setSaving(false);
         return;
       }
 
-      const response = await fetch(`${API_URL}/settings/academy`, {
+      const response = await fetchWithSession(`${API_URL}/settings/academy`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
           academyName: settings.academyName.trim(),
@@ -597,15 +572,10 @@ export default function AcademyBranding() {
 
       await reload();
 
-      setSuccess("Academy settings saved successfully.");
+      toast.success("Academy settings saved successfully.");
     } catch (caughtError) {
       console.error("Save academy settings error:", caughtError);
-
-      setError(
-        caughtError instanceof Error
-          ? caughtError.message
-          : "Failed to update academy settings.",
-      );
+      toast.error(caughtError instanceof Error ? caughtError.message : "Failed to update academy settings.");
     } finally {
       setSaving(false);
     }
@@ -674,22 +644,6 @@ export default function AcademyBranding() {
         </div>
       )}
 
-      {success && (
-        <div
-          className="
-            flex items-center gap-3
-            rounded-2xl border
-            border-(--success)/20
-            bg-(--success-soft)
-            px-4 py-3
-            text-sm font-semibold
-            text-(--success)
-          "
-        >
-          <Check size={17} />
-          {success}
-        </div>
-      )}
 
       <Card padding="none">
         <div

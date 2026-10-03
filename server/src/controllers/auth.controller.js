@@ -1,6 +1,23 @@
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const User = require("../models/User");
+const Role = require("../models/Role");
+const Branch = require("../models/Branch");
+
+const SESSION_COOKIE = "forcestrike_session";
+const sessionCookieOptions = () => ({
+  httpOnly: true,
+  secure: process.env.NODE_ENV === "production",
+  sameSite: "lax",
+  path: "/",
+  maxAge: 7 * 24 * 60 * 60 * 1000,
+});
+const clearSessionCookie = (res) => res.clearCookie(SESSION_COOKIE, {
+  httpOnly: true,
+  secure: process.env.NODE_ENV === "production",
+  sameSite: "lax",
+  path: "/",
+});
 
 /* =========================================================
    HELPERS
@@ -136,18 +153,37 @@ const login = async (req, res) => {
      */
     await User.updateOne({ _id: user._id }, { lastLogin: new Date() });
 
+    const role = await Role.findOne({
+      key: String(user.role || "").toUpperCase(),
+    }).select("key permissions dataScope");
+
+    const permissions = Array.isArray(role?.permissions)
+      ? Array.from(new Set(role.permissions))
+      : [];
+
     const token = generateToken(user);
+    res.cookie(SESSION_COOKIE, token, sessionCookieOptions());
+    const branchRecord = user.branch
+      ? await Branch.findById(user.branch).select("name").lean()
+      : null;
 
     res.status(200).json({
       success: true,
       message: "Login successful",
-      token,
       user: {
         id: user._id,
         name: user.name,
         email: user.email,
         role: user.role,
         branch: user.branch,
+        branchName: branchRecord?.name || null,
+        dataScope:
+          String(user.role || "").toUpperCase() === "SUPER_ADMIN"
+            ? "ALL"
+            : role?.dataScope === "ALL"
+              ? "ALL"
+              : "BRANCH",
+        permissions,
       },
     });
   } catch (error) {
@@ -157,6 +193,30 @@ const login = async (req, res) => {
       success: false,
       message: "Server error",
     });
+  }
+};
+
+const logout = (req, res) => {
+  clearSessionCookie(res);
+  res.status(200).json({ success: true, message: "Logged out successfully" });
+};
+
+// One-time bridge for sessions created before the HttpOnly-cookie migration.
+const migrateLegacySession = async (req, res) => {
+  try {
+    const token = typeof req.body?.token === "string" ? req.body.token : "";
+    if (!token) return res.status(400).json({ success: false, message: "Legacy session is missing" });
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const user = await User.findById(decoded.id);
+    if (!user || user.isActive === false || (user.passwordChangedAt && decoded.iat < Math.floor(user.passwordChangedAt.getTime() / 1000))) {
+      clearSessionCookie(res);
+      return res.status(401).json({ success: false, message: "Session expired. Please log in again." });
+    }
+    res.cookie(SESSION_COOKIE, token, sessionCookieOptions());
+    return res.status(204).end();
+  } catch {
+    clearSessionCookie(res);
+    return res.status(401).json({ success: false, message: "Session expired. Please log in again." });
   }
 };
 
@@ -241,4 +301,6 @@ module.exports = {
   register,
   login,
   changePassword,
+  logout,
+  migrateLegacySession,
 };

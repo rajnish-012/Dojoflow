@@ -15,6 +15,7 @@ const {
 
 const protect = require("../middleware/auth.middleware");
 const authorize = require("../middleware/role.middleware");
+const { authorizePermission } = require("../middleware/permission.middleware");
 
 const router = express.Router();
 
@@ -22,26 +23,12 @@ const router = express.Router();
 // STUDENT'S OWN PROFILE
 // IMPORTANT: /me must come before /:id
 // ==============================
-router.get(
-  "/me",
-  protect,
-  authorize("STUDENT"),
-  getMyStudentProfile
-);
+router.get("/me", protect, authorize("STUDENT"), getMyStudentProfile);
 
 // ==============================
 // GET ALL STUDENTS
 // ==============================
-router.get(
-  "/",
-  protect,
-  authorize(
-    "SUPER_ADMIN",
-    "BRANCH_ADMIN",
-    "COACH"
-  ),
-  getStudents
-);
+router.get("/", protect, authorizePermission("student.view"), getStudents);
 
 // ==============================
 // GET STUDENT TIMELINE
@@ -50,12 +37,8 @@ router.get(
 router.get(
   "/:id/timeline",
   protect,
-  authorize(
-    "SUPER_ADMIN",
-    "BRANCH_ADMIN",
-    "COACH"
-  ),
-  getStudentTimeline
+  authorizePermission("student.view"),
+  getStudentTimeline,
 );
 
 // ==============================
@@ -64,26 +47,14 @@ router.get(
 router.get(
   "/:id",
   protect,
-  authorize(
-    "SUPER_ADMIN",
-    "BRANCH_ADMIN",
-    "COACH"
-  ),
-  getStudentById
+  authorizePermission("student.view"),
+  getStudentById,
 );
 
 // ==============================
 // CREATE STUDENT
 // ==============================
-router.post(
-  "/",
-  protect,
-  authorize(
-    "SUPER_ADMIN",
-    "BRANCH_ADMIN"
-  ),
-  createStudent
-);
+router.post("/", protect, authorizePermission("student.create"), createStudent);
 
 // ==============================
 // UPDATE STUDENT
@@ -91,11 +62,8 @@ router.post(
 router.put(
   "/:id",
   protect,
-  authorize(
-    "SUPER_ADMIN",
-    "BRANCH_ADMIN"
-  ),
-  updateStudent
+  authorizePermission("student.update"),
+  updateStudent,
 );
 
 // ==============================
@@ -104,8 +72,8 @@ router.put(
 router.delete(
   "/:id",
   protect,
-  authorize("SUPER_ADMIN"),
-  deleteStudent
+  authorizePermission("student.delete"),
+  deleteStudent,
 );
 
 module.exports = router;

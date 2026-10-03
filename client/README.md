@@ -16,7 +16,8 @@ The application provides separate experiences for academy administrators, branch
 - Role-based access control
 - Protected backend APIs
 - Protected frontend routes
-- Persistent login using localStorage
+- Persistent login using a server-set HttpOnly session cookie
+- Authenticated user profile and permissions loaded from `/auth/me` into React memory
 - Logout functionality
 
 ### User Roles

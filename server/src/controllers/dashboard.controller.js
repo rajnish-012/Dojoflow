@@ -1,4 +1,5 @@
 const { isBranchScoped } = require("../utils/access");
+
 const Student = require("../models/Student");
 const Plan = require("../models/Plan");
 const Attendance = require("../models/Attendance");
@@ -13,8 +14,22 @@ const getDashboard = async (req, res) => {
   try {
     const filter = {};
 
-    // Branch-level users only see their branch
-    if (["BRANCH_ADMIN", "COACH"].includes(req.user.role)) {
+    /*
+     * =====================================================
+     * DATA SCOPE
+     * =====================================================
+     *
+     * Authorization is handled by:
+     *
+     *   dashboard.view
+     *
+     * The controller is responsible only for applying
+     * the user's database-backed data scope.
+     *
+     * ALL    -> every branch
+     * BRANCH -> assigned branch only
+     */
+    if (isBranchScoped(req.user)) {
       if (!req.user.branch) {
         return res.status(403).json({
           success: false,
@@ -25,7 +40,20 @@ const getDashboard = async (req, res) => {
       filter.branch = req.user.branch;
     }
 
+    /*
+     * =====================================================
+     * COACH-SPECIFIC BUSINESS SCOPE
+     * =====================================================
+     *
+     * Keep the existing Coach behavior:
+     * a real COACH sees only students assigned to them.
+     *
+     * This is not the authorization mechanism.
+     * The route has already been authorized through
+     * dashboard.view.
+     */
     let assignedStudentIds = null;
+
     if (req.user.role === "COACH") {
       const assignments = await CoachStudentAssignment.find({
         coach: req.user._id,
@@ -33,7 +61,10 @@ const getDashboard = async (req, res) => {
       }).select("student");
 
       assignedStudentIds = assignments.map((assignment) => assignment.student);
-      filter._id = { $in: assignedStudentIds };
+
+      filter._id = {
+        $in: assignedStudentIds,
+      };
     }
 
     // ==============================
@@ -70,17 +101,16 @@ const getDashboard = async (req, res) => {
     // ==============================
 
     const startOfDay = new Date();
+
     startOfDay.setHours(0, 0, 0, 0);
 
     const endOfDay = new Date();
+
     endOfDay.setHours(23, 59, 59, 999);
 
     /*
-     * First get the current active students.
-     *
-     * This prevents old attendance records belonging
-     * to deleted/inactive students from being counted
-     * in today's dashboard attendance.
+     * Only active students should contribute
+     * to today's dashboard attendance.
      */
     const activeStudentFilter = {
       ...filter,
@@ -95,12 +125,16 @@ const getDashboard = async (req, res) => {
         $gte: startOfDay,
         $lte: endOfDay,
       },
+
       student: {
         $in: activeStudentIds,
       },
     };
 
-    if (["BRANCH_ADMIN", "COACH"].includes(req.user.role)) {
+    /*
+     * Apply database-backed branch data scope.
+     */
+    if (isBranchScoped(req.user)) {
       attendanceFilter.branch = req.user.branch;
     }
 
@@ -122,11 +156,16 @@ const getDashboard = async (req, res) => {
       student: {
         $in: activeStudentIds,
       },
+
       makeupRequired: true,
+
       makeupCompleted: false,
     };
 
-    if (["BRANCH_ADMIN", "COACH"].includes(req.user.role)) {
+    /*
+     * Apply database-backed branch data scope.
+     */
+    if (isBranchScoped(req.user)) {
       makeupFilter.branch = req.user.branch;
     }
 
@@ -138,11 +177,20 @@ const getDashboard = async (req, res) => {
 
     const performanceFilter = {};
 
+    /*
+     * Real Coach accounts remain restricted
+     * to their assigned students.
+     */
     if (assignedStudentIds) {
-      performanceFilter.student = { $in: assignedStudentIds };
+      performanceFilter.student = {
+        $in: assignedStudentIds,
+      };
     }
 
-    if (["BRANCH_ADMIN", "COACH"].includes(req.user.role)) {
+    /*
+     * Apply database-backed branch data scope.
+     */
+    if (isBranchScoped(req.user)) {
       performanceFilter.branch = req.user.branch;
     }
 
@@ -158,7 +206,7 @@ const getDashboard = async (req, res) => {
     // RESPONSE
     // ==============================
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
 
       dashboard: {
@@ -185,7 +233,7 @@ const getDashboard = async (req, res) => {
   } catch (error) {
     console.error("Get dashboard error:", error);
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: "Failed to fetch dashboard data",
     });

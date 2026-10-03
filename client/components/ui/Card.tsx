@@ -24,7 +24,7 @@ export default function Card({
   };
 
   const hoverClasses = hoverable
-    ? "hover:-translate-y-1 hover:shadow-[0_16px_40px_var(--shadow-color)]"
+    ? "hover:-translate-y-0.5 hover:shadow-[var(--shadow-sm)]"
     : "";
 
   return (
@@ -36,7 +36,7 @@ export default function Card({
         border-(--line)
         bg-(--card)
         text-(--foreground)
-        shadow-[0_6px_24px_var(--shadow-color)]
+        shadow-none
         transition-all
         duration-300
         ease-(--ease-premium)

@@ -1,7 +1,5 @@
 const mongoose = require("mongoose");
 
-const { isBranchScoped } = require("../utils/access");
-
 const Performance = require("../models/Performance");
 const Student = require("../models/Student");
 const Branch = require("../models/Branch");
@@ -9,11 +7,45 @@ const Attendance = require("../models/Attendance");
 const CoachStudentAssignment = require("../models/CoachStudentAssignment");
 
 /* ==========================================
+   USER SCOPE HELPERS
+========================================== */
+
+/**
+ * Returns true when the authenticated user's
+ * database Role restricts them to their branch.
+ *
+ * Authorization itself is handled by
+ * permission.middleware.js.
+ *
+ * This helper only handles data visibility.
+ */
+const isBranchScopedUser = (user) => {
+  if (!user) {
+    return false;
+  }
+
+  if (String(user.role || "").toUpperCase() === "SUPER_ADMIN") {
+    return false;
+  }
+
+  return String(user.dataScope || "").toUpperCase() === "BRANCH";
+};
+
+/* ==========================================
    COACH ASSIGNMENT HELPERS
 ========================================== */
 
+/**
+ * Coach assignment is a business/data restriction.
+ *
+ * A COACH can only access students actively assigned
+ * to that coach.
+ *
+ * This is intentionally kept separate from the
+ * database permission check.
+ */
 const getCoachStudentIds = async (req) => {
-  if (req.user.role !== "COACH") {
+  if (String(req.user?.role || "").toUpperCase() !== "COACH") {
     return null;
   }
 
@@ -25,8 +57,14 @@ const getCoachStudentIds = async (req) => {
   return assignments.map((item) => item.student);
 };
 
+/**
+ * Check whether a COACH has access to a student.
+ *
+ * Other roles return null because they are controlled
+ * by permission + branch scope instead.
+ */
 const checkCoachStudentAccess = async (req, studentId) => {
-  if (req.user.role !== "COACH") {
+  if (String(req.user?.role || "").toUpperCase() !== "COACH") {
     return null;
   }
 
@@ -46,6 +84,28 @@ const checkCoachStudentAccess = async (req, studentId) => {
   return null;
 };
 
+/**
+ * Check whether a branch-scoped user can access
+ * the supplied branch.
+ *
+ * SUPER_ADMIN / ALL scope users are not restricted.
+ */
+const hasBranchAccess = (user, branchId) => {
+  if (!isBranchScopedUser(user)) {
+    return true;
+  }
+
+  if (!user.branch) {
+    return false;
+  }
+
+  if (!branchId) {
+    return false;
+  }
+
+  return branchId.toString() === user.branch.toString();
+};
+
 /* ==========================================
    GET ALL PERFORMANCE
 ========================================== */
@@ -54,13 +114,28 @@ const getPerformance = async (req, res) => {
   try {
     const filter = {};
 
-    if (req.user.role === "COACH") {
+    /*
+     * COACH:
+     * Only actively assigned students.
+     */
+    if (String(req.user?.role || "").toUpperCase() === "COACH") {
       const studentIds = await getCoachStudentIds(req);
 
       filter.student = {
-        $in: studentIds,
+        $in: Array.isArray(studentIds) ? studentIds : [],
       };
-    } else if (req.user.role === "BRANCH_ADMIN") {
+    }
+
+    /*
+     * DATABASE ROLE DATA SCOPE:
+     *
+     * Any custom role configured with BRANCH scope
+     * is restricted to the authenticated user's branch.
+     *
+     * This replaces the previous hardcoded
+     * BRANCH_ADMIN-only check.
+     */
+    if (isBranchScopedUser(req.user)) {
       if (!req.user.branch) {
         return res.status(403).json({
           success: false,
@@ -75,6 +150,7 @@ const getPerformance = async (req, res) => {
       .populate("student", "name age phone currentBelt status")
       .populate("branch", "name address")
       .populate("evaluatedBy", "name email")
+      .populate("sessionTypeId", "name")
       .sort({
         evaluationDate: -1,
         createdAt: -1,
@@ -120,6 +196,7 @@ const getMyPerformance = async (req, res) => {
       .populate("student", "name age phone currentBelt status")
       .populate("branch", "name address")
       .populate("evaluatedBy", "name email")
+      .populate("sessionTypeId", "name")
       .sort({
         evaluationDate: -1,
         createdAt: -1,
@@ -165,6 +242,9 @@ const getPerformanceByStudent = async (req, res) => {
       });
     }
 
+    /*
+     * COACH assignment restriction.
+     */
     const coachAccessError = await checkCoachStudentAccess(req, student._id);
 
     if (coachAccessError) {
@@ -174,7 +254,10 @@ const getPerformanceByStudent = async (req, res) => {
       });
     }
 
-    if (isBranchScoped(req.user)) {
+    /*
+     * Database Role branch-scope restriction.
+     */
+    if (isBranchScopedUser(req.user)) {
       if (!req.user.branch) {
         return res.status(403).json({
           success: false,
@@ -182,10 +265,7 @@ const getPerformanceByStudent = async (req, res) => {
         });
       }
 
-      if (
-        !student.branch ||
-        student.branch.toString() !== req.user.branch.toString()
-      ) {
+      if (!hasBranchAccess(req.user, student.branch)) {
         return res.status(403).json({
           success: false,
           message: "You do not have access to this student",
@@ -199,6 +279,7 @@ const getPerformanceByStudent = async (req, res) => {
       .populate("student", "name age phone currentBelt status")
       .populate("branch", "name address")
       .populate("evaluatedBy", "name email")
+      .populate("sessionTypeId", "name")
       .sort({
         evaluationDate: -1,
         createdAt: -1,
@@ -238,7 +319,8 @@ const getPerformanceById = async (req, res) => {
     const performance = await Performance.findById(id)
       .populate("student", "name age phone currentBelt status")
       .populate("branch", "name address")
-      .populate("evaluatedBy", "name email");
+      .populate("evaluatedBy", "name email")
+      .populate("sessionTypeId", "name");
 
     if (!performance) {
       return res.status(404).json({
@@ -247,19 +329,25 @@ const getPerformanceById = async (req, res) => {
       });
     }
 
-    if (req.user.role === "COACH") {
-      const coachAccessError = await checkCoachStudentAccess(
-        req,
-        performance.student?._id,
-      );
+    /*
+     * COACH assignment restriction.
+     */
+    const coachAccessError = await checkCoachStudentAccess(
+      req,
+      performance.student?._id,
+    );
 
-      if (coachAccessError) {
-        return res.status(coachAccessError.status).json({
-          success: false,
-          message: "You do not have access to this performance record",
-        });
-      }
-    } else if (isBranchScoped(req.user)) {
+    if (coachAccessError) {
+      return res.status(coachAccessError.status).json({
+        success: false,
+        message: "You do not have access to this performance record",
+      });
+    }
+
+    /*
+     * Database Role branch-scope restriction.
+     */
+    if (isBranchScopedUser(req.user)) {
       if (!req.user.branch) {
         return res.status(403).json({
           success: false,
@@ -269,7 +357,7 @@ const getPerformanceById = async (req, res) => {
 
       if (
         !performance.branch ||
-        performance.branch._id.toString() !== req.user.branch.toString()
+        !hasBranchAccess(req.user, performance.branch._id)
       ) {
         return res.status(403).json({
           success: false,
@@ -300,8 +388,7 @@ const createPerformance = async (req, res) => {
   try {
     const {
       student,
-      planDay,
-      curriculumTitle,
+      attendanceId,
       skill,
       rating,
       remarks,
@@ -310,16 +397,14 @@ const createPerformance = async (req, res) => {
 
     if (
       !student ||
-      planDay === undefined ||
-      !curriculumTitle ||
-      !skill ||
+      !attendanceId ||
       rating === undefined ||
       !evaluationDate
     ) {
       return res.status(400).json({
         success: false,
         message:
-          "student, planDay, curriculumTitle, skill, rating and evaluationDate are required",
+          "student, attendanceId, rating and evaluationDate are required",
       });
     }
 
@@ -330,12 +415,7 @@ const createPerformance = async (req, res) => {
       });
     }
 
-    if (!Number.isInteger(Number(planDay)) || Number(planDay) < 1) {
-      return res.status(400).json({
-        success: false,
-        message: "planDay must be a positive integer",
-      });
-    }
+    if (!mongoose.Types.ObjectId.isValid(attendanceId)) return res.status(400).json({ success: false, message: "Invalid attendance ID" });
 
     const numericRating = Number(rating);
 
@@ -365,8 +445,12 @@ const createPerformance = async (req, res) => {
       });
     }
 
-    // Coach can create performance
-    // only for assigned students.
+    /*
+     * COACH assignment restriction.
+     *
+     * This remains role-specific business logic,
+     * not authorization.
+     */
     const coachAccessError = await checkCoachStudentAccess(
       req,
       studentRecord._id,
@@ -379,9 +463,13 @@ const createPerformance = async (req, res) => {
       });
     }
 
-    // Branch Admin can only create
-    // performance for their branch.
-    if (isBranchScoped(req.user)) {
+    /*
+     * Database Role branch-scope restriction.
+     *
+     * This applies to BRANCH_ADMIN and custom roles
+     * configured with dataScope = BRANCH.
+     */
+    if (isBranchScopedUser(req.user)) {
       if (!req.user.branch) {
         return res.status(403).json({
           success: false,
@@ -389,10 +477,7 @@ const createPerformance = async (req, res) => {
         });
       }
 
-      if (
-        !studentRecord.branch ||
-        studentRecord.branch.toString() !== req.user.branch.toString()
-      ) {
+      if (!hasBranchAccess(req.user, studentRecord.branch)) {
         return res.status(403).json({
           success: false,
           message: "You do not have access to this student",
@@ -423,32 +508,35 @@ const createPerformance = async (req, res) => {
      * for a training day for which
      * attendance was marked as PRESENT.
      */
+    const attendanceForDay = await Attendance.findById(attendanceId);
 
-    const attendanceForDay = await Attendance.findOne({
-      student: studentRecord._id,
-      planDay: Number(planDay),
-    });
-
-    if (!attendanceForDay) {
-      return res.status(400).json({
-        success: false,
-        message: `Attendance has not been marked for Day ${planDay}. Mark attendance before submitting a performance evaluation.`,
-      });
-    }
+    if (!attendanceForDay || String(attendanceForDay.student) !== String(studentRecord._id)) return res.status(404).json({ success: false, message: "The selected attendance record was not found for this student." });
 
     if (attendanceForDay.status !== "PRESENT") {
       return res.status(400).json({
         success: false,
-        message: `This student was marked absent for Day ${planDay} and cannot be evaluated for that day.`,
+        message: "Performance can only be evaluated for a present session.",
       });
     }
+
+    if (!attendanceForDay.sessionTypeId) return res.status(409).json({ success: false, message: "This legacy attendance record is not linked to a program session and cannot receive a program-specific evaluation." });
+    const skillName = typeof skill === "string" && skill.trim() ? skill.trim() : attendanceForDay.curriculumSkill || attendanceForDay.curriculumTitle;
+    if (!skillName) return res.status(400).json({ success: false, message: "Skill is required." });
+    const sessionDate = new Date(attendanceForDay.date); sessionDate.setHours(0, 0, 0, 0);
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    if (parsedEvaluationDate < sessionDate || parsedEvaluationDate > today) return res.status(400).json({ success: false, message: "Evaluation date must be on or after the attended session and cannot be in the future." });
 
     const performance = await Performance.create({
       student: studentRecord._id,
       branch: studentRecord.branch,
-      planDay: Number(planDay),
-      curriculumTitle: curriculumTitle.trim(),
-      skill: skill.trim(),
+      attendance: attendanceForDay._id,
+      enrollment: attendanceForDay.enrollment || null,
+      plan: attendanceForDay.plan || studentRecord.plan,
+      sessionTypeId: attendanceForDay.sessionTypeId,
+      sessionSlotId: attendanceForDay.sessionSlotId || null,
+      planDay: attendanceForDay.planDay,
+      curriculumTitle: attendanceForDay.curriculumTitle,
+      skill: skillName,
       rating: numericRating,
       remarks: remarks ? remarks.trim() : "",
       evaluatedBy: req.user._id,
@@ -458,7 +546,8 @@ const createPerformance = async (req, res) => {
     const populatedPerformance = await Performance.findById(performance._id)
       .populate("student", "name age phone currentBelt status")
       .populate("branch", "name address")
-      .populate("evaluatedBy", "name email");
+      .populate("evaluatedBy", "name email")
+      .populate("sessionTypeId", "name");
 
     return res.status(201).json({
       success: true,
@@ -467,6 +556,8 @@ const createPerformance = async (req, res) => {
     });
   } catch (error) {
     console.error("Create performance error:", error);
+
+    if (error?.code === 11000) return res.status(409).json({ success: false, message: "This skill has already been evaluated for the selected session." });
 
     return res.status(500).json({
       success: false,

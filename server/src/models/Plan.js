@@ -57,6 +57,12 @@ const curriculumSchema = new mongoose.Schema(
   }
 );
 
+const programPlanSchema = new mongoose.Schema({
+  program: { type: mongoose.Schema.Types.ObjectId, ref: "TrainingSessionType", required: true },
+  weeklyLimit: { type: Number, min: 1, default: null },
+  curriculum: { type: [curriculumSchema], default: [] },
+}, { _id: false });
+
 const planSchema = new mongoose.Schema(
   {
     name: {
@@ -88,6 +94,10 @@ const planSchema = new mongoose.Schema(
       default: 4,
       min: 1,
     },
+
+    // Programs included in this plan. Legacy plans may have an empty list
+    // until an administrator assigns their existing students' programs.
+    programs: { type: [programPlanSchema], default: [] },
 
     startingBelt: {
       type: String,

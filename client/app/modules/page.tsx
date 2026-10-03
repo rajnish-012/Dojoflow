@@ -1,4 +1,5 @@
 "use client";
+import { confirmAction, toast } from "@/lib/toast";
 
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -18,6 +19,7 @@ import {
   Card,
   EmptyState,
   ErrorState,
+  IconButton,
   Input,
   LoadingSpinner,
   Modal,
@@ -41,6 +43,7 @@ import {
   NAVIGATION_ICON_NAMES,
   getNavigationIcon,
 } from "@/lib/navigation-icons";
+import { PERMISSIONS, useCan } from "@/lib/permissions";
 
 /* =========================================================
    CONSTANTS
@@ -92,10 +95,12 @@ function roleLabel(value: string, options: { value: string; label: string }[]) {
    ========================================================= */
 
 export default function ModulesPage() {
+  const canViewModules = useCan(PERMISSIONS.MODULE_VIEW);
+  const canManageModules = useCan(PERMISSIONS.MODULE_MANAGE);
+
   const [modules, setModules] = useState<ManagedModule[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
 
@@ -112,6 +117,12 @@ export default function ModulesPage() {
 
   useEffect(() => {
     let cancelled = false;
+
+    if (!canViewModules) {
+      return () => {
+        cancelled = true;
+      };
+    }
 
     getModules()
       .then((data) => {
@@ -132,7 +143,7 @@ export default function ModulesPage() {
     return () => {
       cancelled = true;
     };
-  }, [reloadKey]);
+  }, [reloadKey, canViewModules]);
 
   useEffect(() => {
     let cancelled = false;
@@ -175,12 +186,14 @@ export default function ModulesPage() {
      ------------------------------------------------------- */
 
   const openCreate = () => {
+    if (!canManageModules) return;
     setForm(EMPTY_FORM);
     setFormError("");
     setModalOpen(true);
   };
 
   const openEdit = (item: ManagedModule) => {
+    if (!canManageModules) return;
     setForm({
       id: item._id,
       key: item.key,
@@ -204,6 +217,7 @@ export default function ModulesPage() {
   };
 
   const handleSave = async () => {
+    if (!canManageModules) return;
     setFormError("");
 
     if (!form.label.trim()) {
@@ -222,7 +236,7 @@ export default function ModulesPage() {
           allowedRoles: form.allowedRoles,
         });
 
-        setNotice("Module updated");
+        toast.success("Module updated successfully.");
       } else {
         await createModule({
           key: form.key.trim() || slugify(form.label),
@@ -232,28 +246,28 @@ export default function ModulesPage() {
           allowedRoles: form.allowedRoles,
         });
 
-        setNotice("Module created");
+        toast.success("Module created successfully.");
       }
 
       setModalOpen(false);
       refresh();
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : "Failed to save");
+      toast.error(err instanceof Error ? err.message : "Failed to save module.");
     } finally {
       setBusy(false);
     }
   };
 
   const handleToggleActive = async (item: ManagedModule) => {
+    if (!canManageModules) return;
     try {
       setBusy(true);
-      setNotice("");
 
       await updateModule(item._id, {
         isActive: !item.isActive,
       });
 
-      setNotice(
+      toast.success(
         item.isActive
           ? `${item.label} is now hidden`
           : `${item.label} is now visible`,
@@ -261,37 +275,34 @@ export default function ModulesPage() {
 
       refresh();
     } catch (err) {
-      setNotice(err instanceof Error ? err.message : "Failed to update");
+      toast.error(err instanceof Error ? err.message : "Failed to update module.");
     } finally {
       setBusy(false);
     }
   };
 
   const handleDelete = async (item: ManagedModule) => {
-    if (
-      !window.confirm(
-        `Delete the "${item.label}" module? This only removes it from the sidebar list.`,
-      )
-    ) {
+    if (!canManageModules) return;
+    if (!(await confirmAction({ title: "Delete module?", message: `Delete the "${item.label}" module? This only removes it from the sidebar list.`, confirmLabel: "Delete module", destructive: true }))) {
       return;
     }
 
     try {
       setBusy(true);
-      setNotice("");
 
       await deleteModule(item._id);
 
-      setNotice("Module deleted");
+      toast.success("Module deleted successfully.");
       refresh();
     } catch (err) {
-      setNotice(err instanceof Error ? err.message : "Failed to delete");
+      toast.error(err instanceof Error ? err.message : "Failed to delete module.");
     } finally {
       setBusy(false);
     }
   };
 
   const handleMove = async (index: number, direction: -1 | 1) => {
+    if (!canManageModules) return;
     const target = index + direction;
 
     if (target < 0 || target >= sorted.length) return;
@@ -306,13 +317,13 @@ export default function ModulesPage() {
 
     try {
       setBusy(true);
-      setNotice("");
 
       await reorderModules(items);
 
+      toast.success("Navigation order saved.");
       refresh();
     } catch (err) {
-      setNotice(err instanceof Error ? err.message : "Failed to reorder");
+      toast.error(err instanceof Error ? err.message : "Failed to reorder modules.");
     } finally {
       setBusy(false);
     }
@@ -324,6 +335,18 @@ export default function ModulesPage() {
 
   const PreviewIcon = NAVIGATION_ICONS[form.icon] ?? LayoutGrid;
 
+  if (!canViewModules) {
+    return (
+      <div className="df-page">
+        <PageHeader
+          eyebrow="Authorization"
+          title="Modules"
+          description="Your role does not include permission to view modules."
+        />
+      </div>
+    );
+  }
+
   return (
     <div>
       <div className="df-page">
@@ -331,18 +354,13 @@ export default function ModulesPage() {
           eyebrow="Academy Management"
           title="Modules"
           description="Control which pages appear in the sidebar, their order, and which roles can see them."
-          actions={
-            <Button leftIcon={<Plus size={16} />} onClick={openCreate}>
-              Add Module
-            </Button>
-          }
+          actions={canManageModules ? (
+              <Button leftIcon={<Plus size={16} />} onClick={openCreate}>
+                Add Module
+              </Button>
+          ) : undefined}
         />
 
-        {notice && (
-          <div className="mb-4 rounded-xl border border-(--line) bg-(--card) px-4 py-3 text-sm font-medium text-(--foreground)">
-            {notice}
-          </div>
-        )}
 
         {loading ? (
           <div className="flex min-h-64 items-center justify-center">
@@ -426,28 +444,24 @@ export default function ModulesPage() {
                         className="transition-colors duration-150 hover:bg-(--hover-bg)"
                       >
                         <td className="px-6 py-5">
-                          <div className="flex items-center gap-1">
-                            <Button
-                              variant="ghost"
-                              size="sm"
+                          <div className="flex items-center gap-2">
+                            <IconButton
+                              label={`Move ${item.label} up`}
                               title="Move up"
-                              aria-label={`Move ${item.label} up`}
                               disabled={busy || index === 0}
                               onClick={() => void handleMove(index, -1)}
                             >
                               <ArrowUp size={16} />
-                            </Button>
+                            </IconButton>
 
-                            <Button
-                              variant="ghost"
-                              size="sm"
+                            <IconButton
+                              label={`Move ${item.label} down`}
                               title="Move down"
-                              aria-label={`Move ${item.label} down`}
                               disabled={busy || index === sorted.length - 1}
                               onClick={() => void handleMove(index, 1)}
                             >
                               <ArrowDown size={16} />
-                            </Button>
+                            </IconButton>
                           </div>
                         </td>
 
@@ -504,20 +518,18 @@ export default function ModulesPage() {
                         </td>
 
                         <td className="px-6 py-5 text-right">
-                          <div className="flex items-center justify-end gap-1">
+                          {canManageModules && <div className="flex items-center justify-end gap-2">
                             {!item.isSystem && (
-                              <Button
-                                variant="ghost"
-                                size="sm"
+                              <IconButton
+                                label={
+                                  item.isActive
+                                    ? `Hide ${item.label}`
+                                    : `Show ${item.label}`
+                                }
                                 disabled={busy}
                                 onClick={() => void handleToggleActive(item)}
                                 title={
                                   item.isActive ? "Hide module" : "Show module"
-                                }
-                                aria-label={
-                                  item.isActive
-                                    ? `Hide ${item.label}`
-                                    : `Show ${item.label}`
                                 }
                               >
                                 {item.isActive ? (
@@ -525,34 +537,30 @@ export default function ModulesPage() {
                                 ) : (
                                   <Eye size={16} />
                                 )}
-                              </Button>
+                              </IconButton>
                             )}
 
-                            <Button
-                              variant="ghost"
-                              size="sm"
+                            <IconButton
+                              label={`Edit ${item.label}`}
                               disabled={busy}
                               onClick={() => openEdit(item)}
                               title="Edit module"
-                              aria-label={`Edit ${item.label}`}
                             >
                               <Pencil size={16} />
-                            </Button>
+                            </IconButton>
 
                             {!item.isSystem && (
-                              <Button
-                                variant="ghost"
-                                size="sm"
+                              <IconButton
+                                variant="danger"
+                                label={`Delete ${item.label}`}
                                 disabled={busy}
                                 onClick={() => void handleDelete(item)}
                                 title="Delete module"
-                                aria-label={`Delete ${item.label}`}
-                                className="text-(--danger) hover:bg-(--danger-soft)"
                               >
                                 <Trash2 size={16} />
-                              </Button>
+                              </IconButton>
                             )}
-                          </div>
+                          </div>}
                         </td>
                       </tr>
                     );
@@ -587,9 +595,11 @@ export default function ModulesPage() {
               Cancel
             </Button>
 
-            <Button loading={busy} onClick={() => void handleSave()}>
-              {form.id ? "Save Changes" : "Create Module"}
-            </Button>
+            {canManageModules && (
+              <Button loading={busy} onClick={() => void handleSave()}>
+                {form.id ? "Save Changes" : "Create Module"}
+              </Button>
+            )}
           </>
         }
       >

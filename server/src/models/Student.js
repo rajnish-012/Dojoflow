@@ -1,5 +1,26 @@
 const mongoose = require("mongoose");
 
+const planEnrollmentProgramSchema = new mongoose.Schema({
+  program: { type: mongoose.Schema.Types.ObjectId, ref: "TrainingSessionType", required: true },
+  weeklyLimit: { type: Number, default: null },
+  curriculum: [{ day: Number, title: String, description: String, skill: String }],
+}, { _id: false });
+
+const planEnrollmentSchema = new mongoose.Schema({
+  plan: { type: mongoose.Schema.Types.ObjectId, ref: "Plan", required: true },
+  startDate: { type: Date, required: true },
+  endDate: { type: Date, default: null },
+  status: { type: String, enum: ["ACTIVE", "ENDED"], default: "ACTIVE", required: true },
+  classesPerWeek: { type: Number, default: null },
+  startingBelt: { type: String, default: "White" },
+  programs: { type: [planEnrollmentProgramSchema], default: [] },
+}, { timestamps: true });
+
+const programBeltSchema = new mongoose.Schema({
+  program: { type: mongoose.Schema.Types.ObjectId, ref: "TrainingSessionType", required: true },
+  belt: { type: String, trim: true, required: true },
+}, { _id: false });
+
 const studentSchema = new mongoose.Schema(
   {
     /*
@@ -65,6 +86,7 @@ const studentSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
+    planEnrollments: { type: [planEnrollmentSchema], default: [] },
 
     /*
      * Official admission/join date.
@@ -88,6 +110,7 @@ const studentSchema = new mongoose.Schema(
       trim: true,
       maxlength: 50,
     },
+    programBelts: { type: [programBeltSchema], default: [] },
 
     /*
      * Student lifecycle status.

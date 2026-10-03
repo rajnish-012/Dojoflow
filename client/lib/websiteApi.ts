@@ -1,5 +1,7 @@
 "use client";
 
+
+import { fetchWithSession } from "@/lib/sessionFetch";
 const API_URL =
   process.env.NEXT_PUBLIC_API_URL ||
   "http://localhost:5000/api";
@@ -96,13 +98,6 @@ function getApiUrl() {
   return API_URL.replace(/\/+$/, "");
 }
 
-function getToken() {
-  if (typeof window === "undefined") {
-    return "";
-  }
-
-  return localStorage.getItem("token") || "";
-}
 
 async function parseResponse<T>(
   response: Response,
@@ -136,21 +131,8 @@ async function authenticatedFetch(
   path: string,
   options: RequestInit = {},
 ) {
-  const token = getToken();
-
-  if (!token) {
-    throw new Error(
-      "Authentication required. Please log in again.",
-    );
-  }
-
   const headers = new Headers(
     options.headers,
-  );
-
-  headers.set(
-    "Authorization",
-    `Bearer ${token}`,
   );
 
   if (
@@ -163,7 +145,7 @@ async function authenticatedFetch(
     );
   }
 
-  return fetch(
+  return fetchWithSession(
     `${getApiUrl()}${path}`,
     {
       ...options,
@@ -441,7 +423,7 @@ export async function deleteWebsiteFeature(
 ========================================================= */
 
 export async function getPublicWebsiteHome() {
-  const response = await fetch(
+  const response = await fetchWithSession(
     `${getApiUrl()}/website/home`,
     {
       method: "GET",

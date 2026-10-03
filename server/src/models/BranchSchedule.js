@@ -23,6 +23,17 @@ const timeSlotSchema = new mongoose.Schema(
       default: "Training Session",
     },
 
+    /** Legacy string retained for reads until the data migration is run. */
+    sessionType: {
+      type: String,
+      trim: true,
+    },
+
+    sessionTypeId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "TrainingSessionType",
+    },
+
     /**
      * Session start time in 24-hour HH:mm format.
      *
@@ -215,6 +226,8 @@ const branchScheduleSchema = new mongoose.Schema(
  *
  * Duplicate schema index on {"branch":1}
  */
+
+branchScheduleSchema.index({ "weeklySchedule.slots.sessionTypeId": 1 });
 
 // =========================================================
 // EXPORT

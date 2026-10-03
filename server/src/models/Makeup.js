@@ -8,6 +8,11 @@ const makeupSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
+    enrollment: { type: mongoose.Schema.Types.ObjectId, default: null },
+    plan: { type: mongoose.Schema.Types.ObjectId, ref: "Plan", default: null },
+    sessionTypeId: { type: mongoose.Schema.Types.ObjectId, ref: "TrainingSessionType", default: null },
+    sessionSlotId: { type: mongoose.Schema.Types.ObjectId, default: null },
+    makeupAttendance: { type: mongoose.Schema.Types.ObjectId, ref: "Attendance", default: null },
 
     branch: {
       type: mongoose.Schema.Types.ObjectId,
@@ -58,6 +63,7 @@ const makeupSchema = new mongoose.Schema(
       trim: true,
       default: "",
     },
+    curriculumSkill: { type: String, trim: true, default: "" },
 
     notes: {
       type: String,

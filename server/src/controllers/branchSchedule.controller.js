@@ -2,6 +2,7 @@ const mongoose = require("mongoose");
 
 const Branch = require("../models/Branch");
 const BranchSchedule = require("../models/BranchSchedule");
+const TrainingSessionType = require("../models/TrainingSessionType");
 
 const {
   getBranchMonthAvailability,
@@ -9,7 +10,7 @@ const {
 
 /* =========================================================
    CONSTANTS
-   ========================================================= */
+========================================================= */
 
 const DAY_NAMES = [
   "Sunday",
@@ -21,19 +22,209 @@ const DAY_NAMES = [
   "Saturday",
 ];
 
-const READ_ROLES = ["SUPER_ADMIN", "BRANCH_ADMIN", "COACH"];
-
-const WRITE_ROLES = ["SUPER_ADMIN", "BRANCH_ADMIN"];
-
 const TIME_PATTERN = /^([01]\d|2[0-3]):([0-5]\d)$/;
 
+/*
+ * Database-driven authorization.
+ *
+ * These permissions already exist in the central
+ * ForceStrike permission catalog:
+ *
+ * branch_schedule.view
+ * branch_schedule.manage
+ *
+ * The backend auth middleware resolves the user's current
+ * Role document and places its permissions on req.user.
+ */
+const PERMISSIONS = {
+  BRANCH_SCHEDULE_VIEW: "branch_schedule.view",
+  BRANCH_SCHEDULE_MANAGE: "branch_schedule.manage",
+};
+
 /* =========================================================
-   HELPERS
-   ========================================================= */
+   BASIC HELPERS
+========================================================= */
 
 function isValidObjectId(value) {
   return mongoose.Types.ObjectId.isValid(value);
 }
+
+function normalizeRole(role) {
+  return String(role || "")
+    .trim()
+    .toUpperCase();
+}
+
+function isSuperAdmin(req) {
+  return normalizeRole(req.user?.role) === "SUPER_ADMIN";
+}
+
+/**
+ * Check a database-backed permission.
+ *
+ * SUPER_ADMIN is intentionally handled as a permanent
+ * system-level bypass.
+ *
+ * Normal/custom roles MUST have the permission in their
+ * database Role.permissions array.
+ */
+function hasPermission(req, permission) {
+  if (!req.user) {
+    return false;
+  }
+
+  if (isSuperAdmin(req)) {
+    return true;
+  }
+
+  const permissions = Array.isArray(req.user.permissions)
+    ? req.user.permissions
+    : [];
+
+  return permissions.some(
+    (value) => typeof value === "string" && value.trim() === permission,
+  );
+}
+
+/**
+ * Return the user's effective data scope.
+ *
+ * auth.middleware.js resolves this from the database Role:
+ *
+ * SUPER_ADMIN -> ALL
+ * Role.dataScope === ALL -> ALL
+ * otherwise -> BRANCH
+ */
+function getDataScope(req) {
+  if (isSuperAdmin(req)) {
+    return "ALL";
+  }
+
+  return String(req.user?.dataScope || "BRANCH").toUpperCase() === "ALL"
+    ? "ALL"
+    : "BRANCH";
+}
+
+function getUserBranchId(req) {
+  if (!req.user?.branch) {
+    return null;
+  }
+
+  return req.user.branch.toString();
+}
+
+/* =========================================================
+   ACCESS CONTROL
+========================================================= */
+
+/**
+ * Determine whether the authenticated user may access
+ * a specific branch for READ operations.
+ *
+ * Authorization:
+ *
+ * 1. Authentication is required.
+ * 2. SUPER_ADMIN bypasses permission checks.
+ * 3. Normal/custom roles require branch_schedule.view for this schedule module.
+ * 4. ALL data scope allows global branch access.
+ * 5. BRANCH data scope requires an assigned branch and
+ *    restricts access to that branch.
+ *
+ * This preserves branch isolation while allowing custom
+ * database roles to work.
+ */
+function userCanReadBranch(req, branchId) {
+  if (!req.user) {
+    return false;
+  }
+
+  if (!hasPermission(req, PERMISSIONS.BRANCH_SCHEDULE_VIEW)) {
+    return false;
+  }
+
+  if (isSuperAdmin(req)) {
+    return true;
+  }
+
+  const dataScope = getDataScope(req);
+
+  if (dataScope === "ALL") {
+    return true;
+  }
+
+  const userBranch = getUserBranchId(req);
+
+  if (!userBranch) {
+    return false;
+  }
+
+  return userBranch === branchId.toString();
+}
+
+/**
+ * Determine whether the authenticated user may modify
+ * a specific branch schedule.
+ *
+ * Authorization:
+ *
+ * 1. Authentication is required.
+ * 2. SUPER_ADMIN bypasses permission checks.
+ * 3. Normal/custom roles require branch_schedule.manage.
+ * 4. ALL data scope allows global management.
+ * 5. BRANCH data scope restricts management to the
+ *    user's assigned branch.
+ */
+function userCanWriteBranch(req, branchId) {
+  if (!req.user) {
+    return false;
+  }
+
+  if (!hasPermission(req, PERMISSIONS.BRANCH_SCHEDULE_MANAGE)) {
+    return false;
+  }
+
+  if (isSuperAdmin(req)) {
+    return true;
+  }
+
+  const dataScope = getDataScope(req);
+
+  if (dataScope === "ALL") {
+    return true;
+  }
+
+  const userBranch = getUserBranchId(req);
+
+  if (!userBranch) {
+    return false;
+  }
+
+  return userBranch === branchId.toString();
+}
+
+/**
+ * Authorization for global branch-list access.
+ *
+ * A user with:
+ *
+ *   branch_schedule.view + dataScope ALL
+ *
+ * can see all branches.
+ *
+ * A branch-scoped user only receives their assigned
+ * branch from getBranchSchedules().
+ */
+function userCanListBranches(req) {
+  if (!req.user) {
+    return false;
+  }
+
+  return hasPermission(req, PERMISSIONS.BRANCH_SCHEDULE_VIEW);
+}
+
+/* =========================================================
+   TIME HELPERS
+========================================================= */
 
 function timeToMinutes(value) {
   if (!TIME_PATTERN.test(String(value || ""))) {
@@ -61,6 +252,10 @@ function formatTimeForDisplay(value) {
   )}:${String(minutes).padStart(2, "0")} ${period}`;
 }
 
+/* =========================================================
+   DEFAULT WEEKLY SCHEDULE
+========================================================= */
+
 function getDefaultWeeklySchedule() {
   return DAY_NAMES.map((_, index) => ({
     dayOfWeek: index,
@@ -68,6 +263,10 @@ function getDefaultWeeklySchedule() {
     slots: [],
   }));
 }
+
+/* =========================================================
+   NORMALIZE WEEKLY SCHEDULE
+========================================================= */
 
 function normalizeWeeklySchedule(weeklySchedule) {
   const source = Array.isArray(weeklySchedule) ? weeklySchedule : [];
@@ -103,9 +302,9 @@ function normalizeWeeklySchedule(weeklySchedule) {
 
 /* =========================================================
    SCHEDULE VALIDATION
-   ========================================================= */
+========================================================= */
 
-function validateSchedulePayload(body) {
+async function validateSchedulePayload(body, existingSchedule) {
   const openingTime = String(body?.openingTime || "").trim();
 
   const closingTime = String(body?.closingTime || "").trim();
@@ -143,8 +342,44 @@ function validateSchedulePayload(body) {
   }
 
   const weeklySchedule = normalizeWeeklySchedule(body?.weeklySchedule);
+  const existingSlots = new Map();
+  for (const day of existingSchedule?.weeklySchedule || []) {
+    for (const slot of day.slots || []) existingSlots.set(String(slot._id), slot);
+  }
+  const submittedIds = [];
+  for (const day of weeklySchedule) for (const slot of day.slots || []) {
+    if (slot?.sessionTypeId != null) {
+      if (!mongoose.Types.ObjectId.isValid(slot.sessionTypeId)) return { valid: false, message: "Invalid training session type reference." };
+      submittedIds.push(String(slot.sessionTypeId));
+    } else if (!existingSlots.has(String(slot?._id || ""))) {
+      return { valid: false, message: "Select a training session type for every new session." };
+  }
+  }
+  const typeDocs = submittedIds.length ? await TrainingSessionType.find({ _id: { $in: [...new Set(submittedIds)] } }).select("_id isActive").lean() : [];
+  const typesById = new Map(typeDocs.map((type) => [String(type._id), type]));
+  if (typesById.size !== new Set(submittedIds).size) return { valid: false, message: "One or more selected training session types no longer exist." };
 
   for (const day of weeklySchedule) {
+    const daySlots = Array.isArray(day.slots) ? day.slots : [];
+    for (const slot of daySlots) {
+      const id = slot?.sessionTypeId == null ? "" : String(slot.sessionTypeId);
+      if (id && typesById.get(id)?.isActive === false && String(existingSlots.get(String(slot?._id))?.sessionTypeId || "") !== id) return { valid: false, message: "Inactive training session types cannot be assigned to new sessions." };
+    }
+
+    // Closed days may retain slots for future reactivation, but active slots
+    // must still never conflict with one another.
+    const collisionSlots = daySlots.filter((slot) => slot?.isActive !== false && TIME_PATTERN.test(String(slot?.startTime || "")) && TIME_PATTERN.test(String(slot?.endTime || "")));
+    for (let index = 0; index < collisionSlots.length; index += 1) for (let otherIndex = index + 1; otherIndex < collisionSlots.length; otherIndex += 1) {
+      const first = collisionSlots[index], second = collisionSlots[otherIndex];
+      const firstStart = timeToMinutes(first.startTime), firstEnd = timeToMinutes(first.endTime);
+      const secondStart = timeToMinutes(second.startTime), secondEnd = timeToMinutes(second.endTime);
+      if (secondStart < firstEnd && secondEnd > firstStart) {
+        const existing = secondStart >= firstStart ? first : second;
+        const requested = existing === first ? second : first;
+        return { valid: false, message: `${DAY_NAMES[day.dayOfWeek]} already has a session scheduled from ${formatTimeForDisplay(existing.startTime)} to ${formatTimeForDisplay(existing.endTime)}. The requested time ${formatTimeForDisplay(requested.startTime)} to ${formatTimeForDisplay(requested.endTime)} overlaps with it.` };
+      }
+    }
+
     if (day.isClosed) {
       /*
        * A closed recurring day should not contain
@@ -156,7 +391,7 @@ function validateSchedulePayload(body) {
       continue;
     }
 
-    const slots = Array.isArray(day.slots) ? day.slots : [];
+    const slots = daySlots;
 
     const normalizedSlots = [];
 
@@ -225,6 +460,12 @@ function validateSchedulePayload(body) {
       normalizedSlots.push({
         _id: slot?._id,
         sessionName,
+        ...(slot?.sessionTypeId
+          ? { sessionTypeId: slot.sessionTypeId }
+          : existingSlots.get(String(slot?._id))?.sessionTypeId
+            ? { sessionTypeId: existingSlots.get(String(slot?._id)).sessionTypeId }
+            : {}),
+        ...(slot?.sessionType ? { sessionType: String(slot.sessionType).trim() } : {}),
         startTime,
         endTime,
         isActive: slot?.isActive !== false,
@@ -234,30 +475,15 @@ function validateSchedulePayload(body) {
     /*
      * Sort before checking overlaps.
      */
-    normalizedSlots.sort(
-      (a, b) => timeToMinutes(a.startTime) - timeToMinutes(b.startTime),
-    );
-
-    for (let index = 1; index < normalizedSlots.length; index += 1) {
-      const previous = normalizedSlots[index - 1];
-
-      const current = normalizedSlots[index];
-
-      const previousEnd = timeToMinutes(previous.endTime);
-
-      const currentStart = timeToMinutes(current.startTime);
-
-      if (
-        previousEnd !== null &&
-        currentStart !== null &&
-        currentStart < previousEnd
-      ) {
-        return {
-          valid: false,
-          message:
-            `${DAY_NAMES[day.dayOfWeek]} has overlapping sessions: ` +
-            `"${previous.sessionName}" and "${current.sessionName}".`,
-        };
+    const activeSlots = normalizedSlots.filter((slot) => slot.isActive);
+    for (let index = 0; index < activeSlots.length; index += 1) for (let otherIndex = index + 1; otherIndex < activeSlots.length; otherIndex += 1) {
+      const first = activeSlots[index], second = activeSlots[otherIndex];
+      const firstStart = timeToMinutes(first.startTime), firstEnd = timeToMinutes(first.endTime);
+      const secondStart = timeToMinutes(second.startTime), secondEnd = timeToMinutes(second.endTime);
+      if (secondStart < firstEnd && secondEnd > firstStart) {
+        const existing = secondStart >= firstStart ? first : second;
+        const requested = existing === first ? second : first;
+        return { valid: false, message: `${DAY_NAMES[day.dayOfWeek]} already has a session scheduled from ${formatTimeForDisplay(existing.startTime)} to ${formatTimeForDisplay(existing.endTime)}. The requested time ${formatTimeForDisplay(requested.startTime)} to ${formatTimeForDisplay(requested.endTime)} overlaps with it.` };
       }
     }
   }
@@ -271,56 +497,8 @@ function validateSchedulePayload(body) {
 }
 
 /* =========================================================
-   AUTHORIZATION HELPERS
-   ========================================================= */
-
-function userHasGlobalAccess(req) {
-  return req.user?.role === "SUPER_ADMIN";
-}
-
-function userCanReadBranch(req, branchId) {
-  if (!req.user) {
-    return false;
-  }
-
-  if (userHasGlobalAccess(req)) {
-    return true;
-  }
-
-  if (!READ_ROLES.includes(String(req.user.role || ""))) {
-    return false;
-  }
-
-  if (!req.user.branch) {
-    return false;
-  }
-
-  return req.user.branch.toString() === branchId.toString();
-}
-
-function userCanWriteBranch(req, branchId) {
-  if (!req.user) {
-    return false;
-  }
-
-  if (userHasGlobalAccess(req)) {
-    return true;
-  }
-
-  if (!WRITE_ROLES.includes(String(req.user.role || ""))) {
-    return false;
-  }
-
-  if (!req.user.branch) {
-    return false;
-  }
-
-  return req.user.branch.toString() === branchId.toString();
-}
-
-/* =========================================================
    SERIALIZATION
-   ========================================================= */
+========================================================= */
 
 function serializeSchedule(schedule) {
   if (!schedule) {
@@ -341,7 +519,7 @@ function serializeSchedule(schedule) {
 
 /* =========================================================
    PUBLIC BRANCH SCHEDULES
-   ========================================================= */
+========================================================= */
 
 /**
  * GET /api/branch-schedules/public
@@ -533,18 +711,14 @@ const getPublicBranchMonthCalendar = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-
       branch,
-
       calendar: {
         year: requestedYear,
         month: requestedMonth,
         monthName,
         daysInMonth: days.length,
       },
-
       summary,
-
       days,
     });
   } catch (error) {
@@ -560,7 +734,7 @@ const getPublicBranchMonthCalendar = async (req, res) => {
 /* =========================================================
    GET ALL BRANCH SCHEDULES
    GET /api/branch-schedules
-   ========================================================= */
+========================================================= */
 
 const getBranchSchedules = async (req, res) => {
   try {
@@ -571,15 +745,27 @@ const getBranchSchedules = async (req, res) => {
       });
     }
 
+    if (!userCanListBranches(req)) {
+      return res.status(403).json({
+        success: false,
+        message: "You do not have permission to view branch schedules.",
+      });
+    }
+
     /*
-     * SUPER_ADMIN can see every branch.
+     * SUPER_ADMIN or any database role with:
      *
-     * BRANCH_ADMIN / COACH can only see
-     * their assigned branch.
+     * branch_schedule.manage
+     * dataScope = ALL
+     *
+     * can see every branch.
+     *
+     * Branch-scoped users only receive their assigned
+     * branch.
      */
     const branchFilter = {};
 
-    if (!userHasGlobalAccess(req)) {
+    if (getDataScope(req) !== "ALL") {
       if (!req.user.branch) {
         return res.status(403).json({
           success: false,
@@ -639,7 +825,7 @@ const getBranchSchedules = async (req, res) => {
 /* =========================================================
    GET MONTHLY AVAILABILITY
    GET /api/branch-schedules/:branchId/calendar
-   ========================================================= */
+========================================================= */
 
 /**
  * Returns every actual calendar date for the
@@ -737,15 +923,20 @@ const getBranchMonthCalendar = async (req, res) => {
 
     const summary = {
       totalDays: days.length,
+
       availableDays: days.filter(
         (day) => day.isTrainingDay === true && day.isHoliday === false,
       ).length,
+
       holidayDays: days.filter((day) => day.isHoliday === true).length,
+
       closedDays: days.filter(
         (day) => day.isClosed === true && day.isHoliday === false,
       ).length,
+
       noTrainingDays: days.filter((day) => day.reason === "NO_ACTIVE_SLOTS")
         .length,
+
       noScheduleDays: days.filter(
         (day) => day.reason === "NO_SCHEDULE_CONFIGURED",
       ).length,
@@ -761,18 +952,14 @@ const getBranchMonthCalendar = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-
       branch,
-
       calendar: {
         year: requestedYear,
         month: requestedMonth,
         monthName,
         daysInMonth: days.length,
       },
-
       summary,
-
       days,
     });
   } catch (error) {
@@ -788,7 +975,7 @@ const getBranchMonthCalendar = async (req, res) => {
 /* =========================================================
    GET ONE BRANCH SCHEDULE
    GET /api/branch-schedules/:branchId
-   ========================================================= */
+========================================================= */
 
 const getBranchSchedule = async (req, res) => {
   try {
@@ -860,7 +1047,7 @@ const getBranchSchedule = async (req, res) => {
 /* =========================================================
    CREATE / UPDATE BRANCH SCHEDULE
    PUT /api/branch-schedules/:branchId
-   ========================================================= */
+========================================================= */
 
 const upsertBranchSchedule = async (req, res) => {
   try {
@@ -889,7 +1076,15 @@ const upsertBranchSchedule = async (req, res) => {
       });
     }
 
-    const validation = validateSchedulePayload(req.body);
+    if (branch.isActive === false) {
+      return res.status(400).json({
+        success: false,
+        message: "Cannot modify the schedule of an inactive branch.",
+      });
+    }
+
+    const existingSchedule = await BranchSchedule.findOne({ branch: branchId }).lean();
+    const validation = await validateSchedulePayload(req.body, existingSchedule);
 
     if (!validation.valid) {
       return res.status(400).json({
@@ -952,8 +1147,22 @@ const upsertBranchSchedule = async (req, res) => {
 /* =========================================================
    DELETE / RESET BRANCH SCHEDULE
    DELETE /api/branch-schedules/:branchId
-   ========================================================= */
+========================================================= */
 
+/**
+ * Resetting a branch schedule is treated as a branch
+ * management operation.
+ *
+ * Therefore:
+ *
+ * SUPER_ADMIN -> allowed
+ * custom role with branch_schedule.manage + ALL -> allowed
+ * custom role with branch_schedule.manage + BRANCH -> only own branch
+ * branch.view only -> denied
+ *
+ * This replaces the previous hardcoded SUPER_ADMIN-only
+ * authorization with the database permission model.
+ */
 const deleteBranchSchedule = async (req, res) => {
   try {
     const { branchId } = req.params;
@@ -965,14 +1174,28 @@ const deleteBranchSchedule = async (req, res) => {
       });
     }
 
-    /*
-     * Only SUPER_ADMIN can completely remove
-     * the configured schedule.
-     */
-    if (!userHasGlobalAccess(req)) {
+    if (!userCanWriteBranch(req, branchId)) {
       return res.status(403).json({
         success: false,
-        message: "Only Super Admin can reset a branch schedule.",
+        message: "You do not have permission to reset this branch schedule.",
+      });
+    }
+
+    const branch = await Branch.findById(branchId)
+      .select("_id name isActive")
+      .lean();
+
+    if (!branch) {
+      return res.status(404).json({
+        success: false,
+        message: "Branch not found.",
+      });
+    }
+
+    if (branch.isActive === false) {
+      return res.status(400).json({
+        success: false,
+        message: "Cannot reset the schedule of an inactive branch.",
       });
     }
 
@@ -1003,7 +1226,7 @@ const deleteBranchSchedule = async (req, res) => {
 
 /* =========================================================
    EXPORTS
-   ========================================================= */
+========================================================= */
 
 module.exports = {
   getPublicBranchSchedules,
@@ -1014,4 +1237,5 @@ module.exports = {
   upsertBranchSchedule,
   deleteBranchSchedule,
   formatTimeForDisplay,
+  validateSchedulePayload,
 };

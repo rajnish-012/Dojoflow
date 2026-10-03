@@ -27,13 +27,13 @@ export default function SummaryCard({
         bg-(--card)
         p-5
         text-(--foreground)
-        shadow-[0_6px_24px_var(--shadow-color)]
+        shadow-none
         transition-all
         duration-300
         ease-(--ease-premium)
-        hover:-translate-y-1
+        hover:-translate-y-0.5
         hover:border-(--line-strong)
-        hover:shadow-[0_16px_40px_var(--shadow-color)]
+        hover:shadow-[var(--shadow-sm)]
         ${className}
       `}
     >

@@ -1,3 +1,4 @@
+import { fetchWithSession } from "@/lib/sessionFetch";
 const API_URL = (
   process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api"
 ).replace(/\/+$/, "");
@@ -13,12 +14,15 @@ export interface NavigationModule {
   href: string;
   icon: string;
   order: number;
+  allowedRoles?: string[];
+  requiredPermission?: string | null;
 }
 
 export interface ManagedModule extends NavigationModule {
   allowedRoles: string[];
   isActive: boolean;
   isSystem: boolean;
+  requiredPermission?: string | null;
 }
 
 export interface ModulePayload {
@@ -38,13 +42,10 @@ async function moduleRequest(
     body?: unknown;
   } = {},
 ) {
-  const token = localStorage.getItem("token");
-
-  const response = await fetch(`${API_URL}/modules${path}`, {
+  const response = await fetchWithSession(`${API_URL}/modules${path}`, {
     method: options.method || "GET",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
     },
     body: options.body === undefined ? undefined : JSON.stringify(options.body),
     cache: "no-store",
@@ -53,11 +54,6 @@ async function moduleRequest(
   const data = await response.json().catch(() => ({}));
 
   if (response.status === 401) {
-    localStorage.removeItem("token");
-    localStorage.removeItem("user");
-    localStorage.removeItem("dojoUser");
-    localStorage.removeItem("currentUser");
-
     window.location.href = "/login";
 
     throw new Error("Authentication required.");
@@ -71,16 +67,10 @@ async function moduleRequest(
 }
 
 let navigationRequest: Promise<NavigationModule[]> | null = null;
-let navigationToken: string | null = null;
 
 /** Sidebar items for the logged-in user. */
 export function getMyNavigation(): Promise<NavigationModule[]> {
-  const token = localStorage.getItem("token");
-  if (navigationRequest && navigationToken === token) {
-    return navigationRequest;
-  }
-
-  navigationToken = token;
+  if (navigationRequest) return navigationRequest;
 
   const request = moduleRequest("/navigation")
     .then((data) =>
@@ -89,7 +79,6 @@ export function getMyNavigation(): Promise<NavigationModule[]> {
     .catch((error) => {
       if (navigationRequest === request) {
         navigationRequest = null;
-        navigationToken = null;
       }
 
       throw error;
@@ -97,7 +86,6 @@ export function getMyNavigation(): Promise<NavigationModule[]> {
     .finally(() => {
       if (navigationRequest === request) {
         navigationRequest = null;
-        navigationToken = null;
       }
     });
 
@@ -241,8 +229,6 @@ export interface GetMakeupsParams {
  * Get all makeup classes.
  */
 export async function getMakeups(params?: GetMakeupsParams) {
-  const token = localStorage.getItem("token");
-
   const searchParams = new URLSearchParams();
 
   if (params?.status) {
@@ -263,13 +249,12 @@ export async function getMakeups(params?: GetMakeupsParams) {
 
   const queryString = searchParams.toString();
 
-  const response = await fetch(
+  const response = await fetchWithSession(
     `${API_URL}/makeups${queryString ? `?${queryString}` : ""}`,
     {
       method: "GET",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
       },
       cache: "no-store",
     },
@@ -288,13 +273,10 @@ export async function getMakeups(params?: GetMakeupsParams) {
  * Get one makeup class by ID.
  */
 export async function getMakeupById(id: string) {
-  const token = localStorage.getItem("token");
-
-  const response = await fetch(`${API_URL}/makeups/${id}`, {
+  const response = await fetchWithSession(`${API_URL}/makeups/${id}`, {
     method: "GET",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
     },
     cache: "no-store",
   });
@@ -312,13 +294,10 @@ export async function getMakeupById(id: string) {
  * Schedule a new makeup class.
  */
 export async function createMakeup(makeup: CreateMakeupPayload) {
-  const token = localStorage.getItem("token");
-
-  const response = await fetch(`${API_URL}/makeups`, {
+  const response = await fetchWithSession(`${API_URL}/makeups`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
     },
     body: JSON.stringify(makeup),
   });
@@ -336,13 +315,10 @@ export async function createMakeup(makeup: CreateMakeupPayload) {
  * Mark a scheduled makeup class as completed.
  */
 export async function completeMakeup(id: string) {
-  const token = localStorage.getItem("token");
-
-  const response = await fetch(`${API_URL}/makeups/${id}/complete`, {
+  const response = await fetchWithSession(`${API_URL}/makeups/${id}/complete`, {
     method: "PUT",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
     },
   });
 
@@ -359,13 +335,10 @@ export async function completeMakeup(id: string) {
  * Cancel a scheduled makeup class.
  */
 export async function cancelMakeup(id: string) {
-  const token = localStorage.getItem("token");
-
-  const response = await fetch(`${API_URL}/makeups/${id}/cancel`, {
+  const response = await fetchWithSession(`${API_URL}/makeups/${id}/cancel`, {
     method: "PUT",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
     },
   });
 
@@ -383,13 +356,10 @@ export async function cancelMakeup(id: string) {
 ========================================================= */
 
 export async function getDashboard() {
-  const token = localStorage.getItem("token");
-
-  const response = await fetch(`${API_URL}/dashboard`, {
+  const response = await fetchWithSession(`${API_URL}/dashboard`, {
     method: "GET",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
     },
   });
 
@@ -435,16 +405,32 @@ export interface StudentsResponse {
   students: StudentRecord[];
   count?: number;
   message?: string;
+  pagination?: { page: number; limit: number; total: number; pages: number };
 }
 
-export async function getStudents(): Promise<StudentsResponse> {
-  const token = localStorage.getItem("token");
+export async function getStudents(params?: {
+  search?: string;
+  branch?: string;
+  plan?: string;
+  status?: string;
+  belt?: string;
+  joinFrom?: string;
+  joinTo?: string;
+  page?: number;
+  limit?: number;
+  sortBy?: string;
+  sortOrder?: "asc" | "desc";
+}): Promise<StudentsResponse> {
+  const search = new URLSearchParams();
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined && value !== "") search.set(key, String(value));
+  });
+  const query = search.toString();
 
-  const response = await fetch(`${API_URL}/students`, {
+  const response = await fetchWithSession(`${API_URL}/students${query ? `?${query}` : ""}`, {
     method: "GET",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
     },
     cache: "no-store",
   });
@@ -472,8 +458,6 @@ export async function createStudent(student: {
   loginEmail: string;
   loginPassword: string;
 }) {
-  const token = localStorage.getItem("token");
-
   const normalizedJoinDate = student.joinDate.trim();
   const [year, month, day] = normalizedJoinDate.split("-").map(Number);
   const parsedJoinDate = new Date(year, month - 1, day);
@@ -503,11 +487,10 @@ export async function createStudent(student: {
     joinDate: normalizedJoinDate,
   };
 
-  const response = await fetch(`${API_URL}/students`, {
+  const response = await fetchWithSession(`${API_URL}/students`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
     },
     body: JSON.stringify(payload),
   });
@@ -522,13 +505,10 @@ export async function createStudent(student: {
 }
 
 export async function getPlans() {
-  const token = localStorage.getItem("token");
-
-  const response = await fetch(`${API_URL}/plans`, {
+  const response = await fetchWithSession(`${API_URL}/plans`, {
     method: "GET",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
     },
     cache: "no-store",
   });
@@ -545,14 +525,182 @@ export async function getPlans() {
   };
 }
 
-export async function getStudentById(id: string) {
-  const token = localStorage.getItem("token");
+/* =========================================================
+   CURRICULUM APIs
+========================================================= */
 
-  const response = await fetch(`${API_URL}/students/${id}`, {
+export interface CurriculumApiItem {
+  day: number;
+  title: string;
+  description?: string;
+  skill?: string;
+}
+
+export interface CurriculumApiPlan {
+  _id: string;
+  name: string;
+  price?: number;
+  duration?: number;
+  durationUnit?: "MONTHS" | "DAYS";
+  classesPerWeek?: number;
+  startingBelt?: string;
+  progressReports?: string;
+  curriculum?: CurriculumApiItem[];
+  programs?: { program: string | { _id: string; name: string; isActive?: boolean }; curriculum?: CurriculumApiItem[]; weeklyLimit?: number | null }[];
+  milestones?: {
+    day: number;
+    belt: string;
+    skill: string;
+    description?: string;
+  }[];
+  isActive?: boolean;
+}
+
+/**
+ * Get plans for the Curriculum module.
+ *
+ * IMPORTANT:
+ * This endpoint is protected by:
+ *
+ *   curriculum.view
+ *
+ * It does NOT require plan.view.
+ */
+export async function getCurriculumPlans(): Promise<{
+  success?: boolean;
+  count?: number;
+  plans: CurriculumApiPlan[];
+  message?: string;
+}> {
+  const response = await fetchWithSession(`${API_URL}/plans/curriculum`, {
     method: "GET",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
+    },
+    cache: "no-store",
+  });
+
+  const data = await response.json().catch(() => ({}));
+
+  if (response.status === 401) {
+    if (typeof window !== "undefined") {
+      window.location.href = "/login";
+    }
+
+    throw new Error("Authentication required.");
+  }
+
+  if (!response.ok) {
+    throw new Error(data?.message || "Failed to fetch curriculum plans");
+  }
+
+  return {
+    ...data,
+    plans: Array.isArray(data?.plans) ? data.plans : [],
+  };
+}
+
+/**
+ * Get curriculum for one training plan.
+ *
+ * Requires:
+ *   curriculum.view
+ */
+export async function getPlanCurriculum(id: string, programId: string): Promise<{
+  success?: boolean;
+  plan?: CurriculumApiPlan;
+  curriculum: CurriculumApiItem[];
+  programId: string;
+  message?: string;
+}> {
+  const response = await fetchWithSession(`${API_URL}/plans/${id}/curriculum?programId=${encodeURIComponent(programId)}`, {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    cache: "no-store",
+  });
+
+  const data = await response.json().catch(() => ({}));
+
+  if (response.status === 401) {
+    if (typeof window !== "undefined") {
+      window.location.href = "/login";
+    }
+
+    throw new Error("Authentication required.");
+  }
+
+  if (!response.ok) {
+    throw new Error(data?.message || "Failed to fetch curriculum");
+  }
+
+  return {
+    ...data,
+    curriculum: Array.isArray(data?.curriculum) ? data.curriculum : [],
+  };
+}
+
+/**
+ * Update ONLY the curriculum field of a training plan.
+ *
+ * Requires:
+ *   curriculum.manage
+ *
+ * This intentionally does NOT call PUT /plans/:id.
+ */
+export async function updatePlanCurriculum(
+  id: string,
+  programId: string,
+  curriculum: CurriculumApiItem[],
+): Promise<{
+  success?: boolean;
+  message?: string;
+  plan?: CurriculumApiPlan;
+    curriculum: CurriculumApiItem[];
+    programId: string;
+}> {
+  const response = await fetchWithSession(`${API_URL}/plans/${id}/curriculum`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      programId,
+      curriculum,
+    }),
+    cache: "no-store",
+  });
+
+  const data = await response.json().catch(() => ({}));
+
+  if (response.status === 401) {
+    if (typeof window !== "undefined") {
+      window.location.href = "/login";
+    }
+
+    throw new Error("Authentication required.");
+  }
+
+  if (!response.ok) {
+    throw new Error(data?.message || "Failed to update curriculum");
+  }
+
+  return {
+    ...data,
+    curriculum: Array.isArray(data?.curriculum)
+      ? data.curriculum
+      : Array.isArray(data?.plan?.curriculum)
+        ? data.plan.curriculum
+        : [],
+  };
+}
+
+export async function getStudentById(id: string) {
+  const response = await fetchWithSession(`${API_URL}/students/${id}`, {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
     },
     cache: "no-store",
   });
@@ -566,14 +714,12 @@ export async function getStudentById(id: string) {
   return data;
 }
 
-export async function getStudentProgress(studentId: string) {
-  const token = localStorage.getItem("token");
-
-  const response = await fetch(`${API_URL}/progress/student/${studentId}`, {
+export async function getStudentProgress(studentId: string, programId?: string) {
+  const query = programId ? `?programId=${encodeURIComponent(programId)}` : "";
+  const response = await fetchWithSession(`${API_URL}/progress/student/${studentId}${query}`, {
     method: "GET",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
     },
     cache: "no-store",
   });
@@ -592,13 +738,10 @@ export async function getStudentProgress(studentId: string) {
 ========================================================= */
 
 export async function getStudentAttendance(studentId: string) {
-  const token = localStorage.getItem("token");
-
-  const response = await fetch(`${API_URL}/attendance/student/${studentId}`, {
+  const response = await fetchWithSession(`${API_URL}/attendance/student/${studentId}`, {
     method: "GET",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
     },
     cache: "no-store",
   });
@@ -617,13 +760,10 @@ export async function getStudentAttendance(studentId: string) {
 ========================================================= */
 
 export async function getStudentPerformance(studentId: string) {
-  const token = localStorage.getItem("token");
-
-  const response = await fetch(`${API_URL}/performance/student/${studentId}`, {
+  const response = await fetchWithSession(`${API_URL}/performance/student/${studentId}`, {
     method: "GET",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
     },
     cache: "no-store",
   });
@@ -652,13 +792,10 @@ export async function updateStudent(
     password?: string;
   },
 ) {
-  const token = localStorage.getItem("token");
-
-  const response = await fetch(`${API_URL}/students/${id}`, {
+  const response = await fetchWithSession(`${API_URL}/students/${id}`, {
     method: "PUT",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
     },
     body: JSON.stringify(data),
   });
@@ -673,13 +810,10 @@ export async function updateStudent(
 }
 
 export async function deleteStudent(id: string) {
-  const token = localStorage.getItem("token");
-
-  const response = await fetch(`${API_URL}/students/${id}`, {
+  const response = await fetchWithSession(`${API_URL}/students/${id}`, {
     method: "DELETE",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
     },
   });
 
@@ -697,13 +831,10 @@ export async function deleteStudent(id: string) {
 ========================================================= */
 
 export async function getPlanById(id: string) {
-  const token = localStorage.getItem("token");
-
-  const response = await fetch(`${API_URL}/plans/${id}`, {
+  const response = await fetchWithSession(`${API_URL}/plans/${id}`, {
     method: "GET",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
     },
     cache: "no-store",
   });
@@ -723,6 +854,7 @@ export async function createPlan(plan: {
   duration: number;
   durationUnit: "MONTHS" | "DAYS";
   classesPerWeek: number;
+  programs: { program: string; weeklyLimit?: number | null }[];
   startingBelt: string;
   progressReports: string;
 
@@ -740,13 +872,10 @@ export async function createPlan(plan: {
     skill?: string;
   }[];
 }) {
-  const token = localStorage.getItem("token");
-
-  const response = await fetch(`${API_URL}/plans`, {
+  const response = await fetchWithSession(`${API_URL}/plans`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
     },
     body: JSON.stringify(plan),
   });
@@ -768,6 +897,7 @@ export async function updatePlan(
     duration: number;
     durationUnit: "MONTHS" | "DAYS";
     classesPerWeek: number;
+    programs: { program: string; weeklyLimit?: number | null }[];
     startingBelt: string;
     progressReports: string;
 
@@ -788,13 +918,10 @@ export async function updatePlan(
     isActive: boolean;
   }>,
 ) {
-  const token = localStorage.getItem("token");
-
-  const response = await fetch(`${API_URL}/plans/${id}`, {
+  const response = await fetchWithSession(`${API_URL}/plans/${id}`, {
     method: "PUT",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
     },
     body: JSON.stringify(plan),
   });
@@ -809,13 +936,10 @@ export async function updatePlan(
 }
 
 export async function deletePlan(id: string) {
-  const token = localStorage.getItem("token");
-
-  const response = await fetch(`${API_URL}/plans/${id}`, {
+  const response = await fetchWithSession(`${API_URL}/plans/${id}`, {
     method: "DELETE",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
     },
   });
 
@@ -836,12 +960,9 @@ export const updateInquiryStatus = async (
   id: string,
   status: "NEW" | "CONTACTED" | "ENROLLED" | "CLOSED",
 ) => {
-  const token = localStorage.getItem("token");
-
-  const response = await fetch(`${API_URL}/inquiries/${id}/status`, {
+  const response = await fetchWithSession(`${API_URL}/inquiries/${id}/status`, {
     method: "PATCH",
     headers: {
-      Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({ status }),
@@ -857,12 +978,9 @@ export const updateInquiryStatus = async (
 };
 
 export const getInquiries = async () => {
-  const token = localStorage.getItem("token");
-
-  const response = await fetch(`${API_URL}/inquiries`, {
+  const response = await fetchWithSession(`${API_URL}/inquiries`, {
     method: "GET",
     headers: {
-      Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
     },
     cache: "no-store",
@@ -930,15 +1048,8 @@ export type BranchesApiResponse = {
 };
 
 export async function getBranches(): Promise<BranchesApiResponse> {
-  const token = localStorage.getItem("token");
-
   const headers: HeadersInit = {
     "Content-Type": "application/json",
-    ...(token
-      ? {
-          Authorization: `Bearer ${token}`,
-        }
-      : {}),
   };
 
   /*
@@ -947,7 +1058,7 @@ export async function getBranches(): Promise<BranchesApiResponse> {
    * GET /api/branches
    * =========================================================
    */
-  const response = await fetch(`${API_URL}/branches`, {
+  const response = await fetchWithSession(`${API_URL}/branches`, {
     method: "GET",
     headers,
     cache: "no-store",
@@ -959,11 +1070,6 @@ export async function getBranches(): Promise<BranchesApiResponse> {
    * Handle expired session.
    */
   if (response.status === 401) {
-    localStorage.removeItem("token");
-    localStorage.removeItem("user");
-    localStorage.removeItem("dojoUser");
-    localStorage.removeItem("currentUser");
-
     if (typeof window !== "undefined") {
       window.location.href = "/login";
     }
@@ -1045,7 +1151,7 @@ export async function getBranches(): Promise<BranchesApiResponse> {
    * =========================================================
    */
   try {
-    const scheduleResponse = await fetch(`${API_URL}/branch-schedules`, {
+    const scheduleResponse = await fetchWithSession(`${API_URL}/branch-schedules`, {
       method: "GET",
       headers,
       cache: "no-store",
@@ -1054,11 +1160,6 @@ export async function getBranches(): Promise<BranchesApiResponse> {
     const scheduleResult = await scheduleResponse.json().catch(() => ({}));
 
     if (scheduleResponse.status === 401) {
-      localStorage.removeItem("token");
-      localStorage.removeItem("user");
-      localStorage.removeItem("dojoUser");
-      localStorage.removeItem("currentUser");
-
       if (typeof window !== "undefined") {
         window.location.href = "/login";
       }
@@ -1122,9 +1223,8 @@ export async function getBranches(): Promise<BranchesApiResponse> {
 
             return null;
           })
-          .filter(
-            (branch: BranchApiRecord | null): branch is BranchApiRecord =>
-              Boolean(branch),
+          .filter((branch: BranchApiRecord | null): branch is BranchApiRecord =>
+            Boolean(branch),
           );
       }
 
@@ -1134,7 +1234,10 @@ export async function getBranches(): Promise<BranchesApiResponse> {
          */
         const uniqueBranches = Array.from(
           new Map(
-            branches.map((branch: BranchApiRecord) => [String(branch._id), branch]),
+            branches.map((branch: BranchApiRecord) => [
+              String(branch._id),
+              branch,
+            ]),
           ).values(),
         );
 
@@ -1170,13 +1273,10 @@ export async function createBranch(data: {
   address: string;
   phone?: string;
 }) {
-  const token = localStorage.getItem("token");
-
-  const response = await fetch(`${API_URL}/branches`, {
+  const response = await fetchWithSession(`${API_URL}/branches`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
     },
     body: JSON.stringify(data),
   });
@@ -1204,13 +1304,10 @@ export async function updateStaffUser(
     password?: string;
   },
 ) {
-  const token = localStorage.getItem("token");
-
-  const response = await fetch(`${API_URL}/users/${id}`, {
+  const response = await fetchWithSession(`${API_URL}/users/${id}`, {
     method: "PUT",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
     },
     body: JSON.stringify(data),
   });
@@ -1236,6 +1333,7 @@ export interface RoleRecord {
   name: string;
   description: string;
   dataScope: DataScope;
+  permissions: string[];
   isSystem: boolean;
   userCount: number;
 }
@@ -1244,6 +1342,7 @@ export interface RolePayload {
   name?: string;
   description?: string;
   dataScope?: DataScope;
+  permissions?: string[];
 }
 
 async function roleRequest(
@@ -1253,13 +1352,10 @@ async function roleRequest(
     body?: unknown;
   } = {},
 ) {
-  const token = localStorage.getItem("token");
-
-  const response = await fetch(`${API_URL}/roles${path}`, {
+  const response = await fetchWithSession(`${API_URL}/roles${path}`, {
     method: options.method || "GET",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
     },
     body: options.body === undefined ? undefined : JSON.stringify(options.body),
     cache: "no-store",
@@ -1268,11 +1364,6 @@ async function roleRequest(
   const data = await response.json().catch(() => ({}));
 
   if (response.status === 401) {
-    localStorage.removeItem("token");
-    localStorage.removeItem("user");
-    localStorage.removeItem("dojoUser");
-    localStorage.removeItem("currentUser");
-
     if (typeof window !== "undefined") {
       window.location.href = "/login";
     }
@@ -1287,13 +1378,30 @@ async function roleRequest(
   return data;
 }
 
-/** Every role with its user count (Super Admin only). */
+/**
+ * Every role with its user count.
+ */
 export async function getRoles(): Promise<RoleRecord[]> {
   const data = await roleRequest("");
 
   return Array.isArray(data?.roles) ? data.roles : [];
 }
 
+/**
+ * Canonical database permission catalog.
+ *
+ * This comes from the backend rather than being used
+ * as the authorization source in the browser.
+ */
+export async function getRolePermissions(): Promise<string[]> {
+  const data = await roleRequest("/permissions");
+
+  return Array.isArray(data?.permissions) ? data.permissions : [];
+}
+
+/**
+ * Create a custom role.
+ */
 export async function createRole(payload: RolePayload): Promise<RoleRecord> {
   const data = await roleRequest("", {
     method: "POST",
@@ -1303,6 +1411,9 @@ export async function createRole(payload: RolePayload): Promise<RoleRecord> {
   return data.role;
 }
 
+/**
+ * Update a role.
+ */
 export async function updateRole(
   id: string,
   payload: RolePayload,
@@ -1315,6 +1426,9 @@ export async function updateRole(
   return data.role;
 }
 
+/**
+ * Delete a custom role.
+ */
 export async function deleteRole(id: string) {
   return roleRequest(`/${id}`, {
     method: "DELETE",
@@ -1331,7 +1445,42 @@ export interface CurrentUserRecord {
   email: string;
   role: string;
   branch?: string | null;
+  branchName?: string | null;
+  dataScope?: DataScope;
   permissions?: string[];
+}
+
+/** Exchange a recognized pre-migration ForceStrike JWT for the HttpOnly cookie once. */
+export async function migrateLegacySession(): Promise<void> {
+  if (typeof window === "undefined") return;
+  const token = localStorage.getItem("token");
+  if (!token) return;
+  let isForceStrikeToken = false;
+  try {
+    const payload = JSON.parse(atob(token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
+    const legacyUser = ["user", "dojoUser", "currentUser"].map((key) => {
+      try { return JSON.parse(localStorage.getItem(key) || "null"); } catch { return null; }
+    }).find((candidate) => candidate && String(candidate.id || candidate._id) === String(payload.id));
+    isForceStrikeToken = Boolean(payload.id && payload.role && legacyUser) && String(legacyUser.role || "").toUpperCase() === String(payload.role).toUpperCase();
+  } catch { /* Not a ForceStrike JWT: leave another app's generic token untouched. */ }
+  if (!isForceStrikeToken) return;
+  try {
+    await fetchWithSession(`${API_URL}/auth/migrate-legacy-session`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token }),
+    });
+  } finally {
+    localStorage.removeItem("token");
+    for (const key of ["user", "dojoUser", "currentUser"]) {
+      const raw = localStorage.getItem(key);
+      try {
+        const candidate = raw ? JSON.parse(raw) : null;
+        const payload = JSON.parse(atob(token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
+        if (candidate && String(candidate.id || candidate._id) === String(payload.id)) localStorage.removeItem(key);
+      } catch { /* Leave unrelated application data untouched. */ }
+    }
+  }
 }
 
 /**
@@ -1340,34 +1489,14 @@ export interface CurrentUserRecord {
  * /auth/me is the source of truth for the current session.
  */
 export async function getCurrentUser(): Promise<CurrentUserRecord> {
-  const token = localStorage.getItem("token");
-
-  if (!token) {
-    throw new Error("Authentication required");
-  }
-
-  const response = await fetch(`${API_URL}/auth/me`, {
+  const response = await fetchWithSession(`${API_URL}/auth/me`, {
     method: "GET",
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
     cache: "no-store",
   });
 
   const data = await response.json().catch(() => ({}));
 
   if (response.status === 401) {
-    localStorage.removeItem("token");
-    localStorage.removeItem("user");
-    localStorage.removeItem("dojoUser");
-    localStorage.removeItem("currentUser");
-
-    if (typeof window !== "undefined") {
-      window.dispatchEvent(new Event("forcstrike:auth-changed"));
-
-      window.location.href = "/login";
-    }
-
     throw new Error("Your session has expired. Please log in again.");
   }
 

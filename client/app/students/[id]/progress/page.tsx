@@ -32,6 +32,7 @@ import {
   ErrorState,
   LoadingSpinner,
   SummaryCard,
+  Select,
 } from "@/components/ui";
 
 type Student = {
@@ -63,6 +64,7 @@ type AttendanceItem = {
   status?: string;
   makeupRequired?: boolean;
   makeupCompleted?: boolean;
+  sessionTypeId?: string | { _id: string; name?: string } | null;
 };
 
 type PerformanceItem = {
@@ -73,6 +75,7 @@ type PerformanceItem = {
   rating?: number | string;
   remarks?: string;
   evaluationDate?: string;
+  sessionTypeId?: string | { _id: string; name?: string } | null;
 };
 
 type CurriculumItem = {
@@ -90,6 +93,9 @@ type Milestone = {
 };
 
 type ProgressData = {
+  currentBelt?: string;
+  selectedProgram?: { _id?: string; name?: string } | string | null;
+  tracks?: { program?: { _id?: string; name?: string } | string }[];
   currentTrainingDay?: number | string;
   completedDays?: number | string;
   totalCurriculumDays?: number | string;
@@ -497,11 +503,13 @@ export default function StudentProgressPage() {
 
   const [performance, setPerformance] = useState<PerformanceItem[]>([]);
 
+  const [selectedProgramId, setSelectedProgramId] = useState("");
+
   const [loading, setLoading] = useState(true);
 
   const [error, setError] = useState("");
 
-  async function loadProgress() {
+  async function loadProgress(programId = selectedProgramId) {
     if (!studentId) {
       return;
     }
@@ -512,7 +520,7 @@ export default function StudentProgressPage() {
 
       const [studentResponse, progressResponse] = await Promise.all([
         getStudentById(studentId),
-        getStudentProgress(studentId),
+        getStudentProgress(studentId, programId || undefined),
       ]);
 
       const studentResult =
@@ -523,6 +531,9 @@ export default function StudentProgressPage() {
 
       const progressResult = unwrapProgress(progressResponse);
 
+      const selectedProgram = progressResult?.selectedProgram;
+      const resolvedProgramId = typeof selectedProgram === "object" ? selectedProgram?._id || "" : selectedProgram || programId;
+      if (resolvedProgramId && resolvedProgramId !== selectedProgramId) setSelectedProgramId(resolvedProgramId);
       let attendanceResult: AttendanceItem[] = [];
 
       let performanceResult: PerformanceItem[] = [];
@@ -558,6 +569,14 @@ export default function StudentProgressPage() {
           performanceResult = normalizePerformance(progressResult);
         }
       }
+
+      const programKey = resolvedProgramId;
+      const belongsToProgram = (item: { sessionTypeId?: string | { _id: string } | null }) => {
+        const itemProgramId = typeof item.sessionTypeId === "object" ? item.sessionTypeId?._id : item.sessionTypeId;
+        return !programKey || String(itemProgramId || "") === String(programKey);
+      };
+      attendanceResult = attendanceResult.filter(belongsToProgram);
+      performanceResult = performanceResult.filter(belongsToProgram);
 
       /*
        * The progress API returns the training and performance values
@@ -665,8 +684,13 @@ export default function StudentProgressPage() {
   }
 
   useEffect(() => {
-    loadProgress();
+    loadProgress("");
   }, [studentId]);
+
+  const programOptions = useMemo(() => (progress?.tracks || []).map((track) => {
+    const program = track.program;
+    return typeof program === "object" && program?._id ? { id: program._id, name: program.name || "Training program" } : null;
+  }).filter((item): item is { id: string; name: string } => Boolean(item)), [progress?.tracks]);
 
   const attendanceStats = useMemo(() => {
     const presentFromRecords = attendance.filter(
@@ -866,7 +890,7 @@ export default function StudentProgressPage() {
               title="Unable to load progress"
               message={error || "Student could not be found."}
               action={
-                <Button variant="outline" onClick={loadProgress}>
+                <Button variant="outline" onClick={() => loadProgress()}>
                   Try again
                 </Button>
               }
@@ -907,7 +931,16 @@ export default function StudentProgressPage() {
             Back to Student
           </Button>
 
-          <Button variant="outline" onClick={loadProgress}>
+          {programOptions.length > 0 && (
+            <label className="flex items-center gap-3 text-sm font-semibold text-(--ink-muted)">
+              Program
+              <Select value={selectedProgramId} onChange={(event) => { setSelectedProgramId(event.target.value); void loadProgress(event.target.value); }}>
+                {programOptions.map((program) => <option key={program.id} value={program.id}>{program.name}</option>)}
+              </Select>
+            </label>
+          )}
+
+          <Button variant="outline" onClick={() => loadProgress()}>
             <RefreshCw size={15} />
             Refresh
           </Button>
@@ -981,7 +1014,7 @@ export default function StudentProgressPage() {
                     text-(--ink-muted)
                   "
                 >
-                  {student.currentBelt || "White Belt"}
+                  {progress?.currentBelt || student.currentBelt || "White Belt"}
 
                   {student.plan?.name ? ` • ${student.plan.name}` : ""}
                 </p>

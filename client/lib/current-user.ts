@@ -1,12 +1,9 @@
 "use client";
 
-import {
-  useEffect,
-  useMemo,
-  useSyncExternalStore,
-} from "react";
+import { useEffect, useMemo, useSyncExternalStore } from "react";
 
 import { getCurrentUser } from "@/lib/api";
+import { fetchWithSession } from "@/lib/sessionFetch";
 
 export type CurrentUser = {
   id?: string;
@@ -14,6 +11,8 @@ export type CurrentUser = {
   email?: string;
   role?: string;
   branch?: string | null;
+  branchName?: string | null;
+  dataScope?: "ALL" | "BRANCH";
   permissions?: string[];
 };
 
@@ -24,31 +23,22 @@ export function getRoleDashboardPath(role?: string | null) {
     : "/dashboard";
 }
 
-export const USER_KEYS = [
-  "user",
-  "dojoUser",
-  "currentUser",
-] as const;
-
 export const USER_UPDATED_EVENT =
   "forcstrike:user-updated";
 
 export const AUTH_CHANGED_EVENT =
   "forcstrike:auth-changed";
+export const SESSION_EXPIRED_EVENT = "forcestrike:session-expired";
 
 /**
  * Clear all client-side authentication state.
  */
-export function clearAuthSession() {
+export function clearAuthSession(emitAuthEvent = true) {
   if (typeof window === "undefined") {
     return;
   }
 
-  USER_KEYS.forEach((key) => {
-    localStorage.removeItem(key);
-  });
-
-  localStorage.removeItem("token");
+  currentUserSnapshot = null;
 
   sessionStorage.removeItem(
     "dojoflow.allowed-pages",
@@ -58,9 +48,7 @@ export function clearAuthSession() {
     new Event(USER_UPDATED_EVENT),
   );
 
-  window.dispatchEvent(
-    new Event(AUTH_CHANGED_EVENT),
-  );
+  if (emitAuthEvent) window.dispatchEvent(new Event(AUTH_CHANGED_EVENT));
 }
 
 /**
@@ -73,10 +61,7 @@ export function setCurrentUser(
     return;
   }
 
-  localStorage.setItem(
-    "user",
-    JSON.stringify(user),
-  );
+  currentUserSnapshot = JSON.stringify(user);
 
   window.dispatchEvent(
     new Event(USER_UPDATED_EVENT),
@@ -115,22 +100,9 @@ function subscribe(
   };
 }
 
-function getSnapshot(): string | null {
-  if (typeof window === "undefined") {
-    return null;
-  }
+let currentUserSnapshot: string | null = null;
 
-  for (const key of USER_KEYS) {
-    const value =
-      localStorage.getItem(key);
-
-    if (value) {
-      return value;
-    }
-  }
-
-  return null;
-}
+function getSnapshot(): string | null { return currentUserSnapshot; }
 
 function getServerSnapshot(): string | null {
   return null;
@@ -207,4 +179,15 @@ export function useCurrentUser(
       return null;
     }
   }, [raw]);
+}
+
+export async function logoutSession() {
+  const apiUrl = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api").replace(/\/+$/, "");
+  try {
+    await fetchWithSession(`${apiUrl}/auth/logout`, { method: "POST" });
+  } catch {
+    // Clear the local UI session even if the server is temporarily unreachable.
+  } finally {
+    clearAuthSession();
+  }
 }

@@ -7,7 +7,6 @@ import { useParams, useSearchParams } from "next/navigation";
 import {
   ArrowLeft,
   CalendarClock,
-  Check,
   Clock3,
   Copy,
   Plus,
@@ -19,12 +18,24 @@ import {
 } from "lucide-react";
 
 import {
+  Badge,
   Button,
   Card,
+  Checkbox,
+  ConfirmationDialog,
   ErrorState,
+  IconButton,
+  Input,
   LoadingSpinner,
+  Modal,
   PageHeader,
+  Select,
 } from "@/components/ui";
+
+import { useCan } from "@/lib/permissions";
+import { toast } from "@/lib/toast";
+import { getApiErrorMessage } from "@/lib/apiError";
+import { getTrainingSessionTypes, type TrainingSessionTypeRecord } from "@/lib/trainingSessionTypeApi";
 
 import {
   deleteBranchSchedule,
@@ -58,6 +69,19 @@ const DEFAULT_SLOT: TrainingSlot = {
   endTime: "07:00",
   isActive: true,
 };
+
+type SessionDraft = {
+  sessionTypeId: string;
+  sessionName: string;
+  startTime: string;
+  endTime: string;
+  isActive: boolean;
+};
+
+type ConfirmationAction =
+  | { type: "delete-session"; slotId: string }
+  | { type: "reset-branch" }
+  | { type: "reset-day" };
 
 /* =========================================================
    HELPERS
@@ -95,6 +119,8 @@ function normalizeWeeklySchedule(weeklySchedule?: WeeklyScheduleDay[] | null) {
           ? day.slots.map((slot) => ({
               _id: slot._id,
               sessionName: slot.sessionName || "Training Session",
+              sessionTypeId: slot.sessionTypeId,
+              sessionType: slot.sessionType,
               startTime: slot.startTime || DEFAULT_SLOT.startTime,
               endTime: slot.endTime || DEFAULT_SLOT.endTime,
               isActive: slot.isActive !== false,
@@ -186,6 +212,8 @@ export default function BranchSchedulePage() {
         ? params.id[0]
         : "";
 
+  const canManageSchedule = useCan("branch_schedule.manage");
+
   const requestedDay = Number(searchParams.get("day"));
 
   const initialDay =
@@ -217,7 +245,29 @@ export default function BranchSchedulePage() {
   const [refreshing, setRefreshing] = useState(false);
 
   const [error, setError] = useState("");
-  const [success, setSuccess] = useState("");
+  const [copyTargetsOpen, setCopyTargetsOpen] = useState(false);
+  const [copyTargetDays, setCopyTargetDays] = useState<number[]>([]);
+  const [sessionModalOpen, setSessionModalOpen] = useState(false);
+  const [sessionFormError, setSessionFormError] = useState("");
+  const [sessionTypes, setSessionTypes] = useState<TrainingSessionTypeRecord[]>([]);
+  const [sessionTypesLoading, setSessionTypesLoading] = useState(true);
+  const [sessionTypesError, setSessionTypesError] = useState("");
+  const [sessionDraft, setSessionDraft] = useState<SessionDraft>({
+    sessionTypeId: "",
+    sessionName: "",
+    startTime: DEFAULT_SLOT.startTime,
+    endTime: DEFAULT_SLOT.endTime,
+    isActive: true,
+  });
+
+  useEffect(() => {
+    let cancelled = false;
+    getTrainingSessionTypes().then((types) => { if (!cancelled) setSessionTypes(types); })
+      .catch((caught) => { if (!cancelled) setSessionTypesError(caught instanceof Error ? caught.message : "Unable to load training session types."); })
+      .finally(() => { if (!cancelled) setSessionTypesLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
+  const [confirmationAction, setConfirmationAction] = useState<ConfirmationAction | null>(null);
 
   /* =======================================================
      SELECTED DAY
@@ -265,7 +315,6 @@ export default function BranchSchedulePage() {
         }
 
         setError("");
-        setSuccess("");
 
         const response = await getBranchSchedule(branchId);
 
@@ -297,26 +346,10 @@ export default function BranchSchedulePage() {
   );
 
   useEffect(() => {
+    // The loader owns the async loading/error state for this request.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadSchedule();
   }, [loadSchedule]);
-
-  /* =======================================================
-     SUCCESS MESSAGE
-  ======================================================= */
-
-  useEffect(() => {
-    if (!success) {
-      return;
-    }
-
-    const timer = window.setTimeout(() => {
-      setSuccess("");
-    }, 4000);
-
-    return () => {
-      window.clearTimeout(timer);
-    };
-  }, [success]);
 
   /* =======================================================
      UPDATE DAY
@@ -326,11 +359,11 @@ export default function BranchSchedulePage() {
     dayOfWeek: number,
     updater: (day: WeeklyScheduleDay) => WeeklyScheduleDay,
   ) {
+    if (!canManageSchedule) return;
     setWeeklySchedule((current) =>
       current.map((day) => (day.dayOfWeek === dayOfWeek ? updater(day) : day)),
     );
 
-    setSuccess("");
     setError("");
   }
 
@@ -350,9 +383,46 @@ export default function BranchSchedulePage() {
   ======================================================= */
 
   function addTrainingSession() {
-    const newSlot = {
+    if (!canManageSchedule) return;
+    setError("");
+    setSessionFormError("");
+    setSessionDraft({
+      sessionTypeId: "",
+      sessionName: "",
+      startTime: DEFAULT_SLOT.startTime,
+      endTime: DEFAULT_SLOT.endTime,
+      isActive: true,
+    });
+    setSessionModalOpen(true);
+  }
+
+  function createTrainingSession() {
+    if (!canManageSchedule) return;
+    const sessionName = sessionDraft.sessionName.trim();
+    const start = timeToMinutes(sessionDraft.startTime);
+    const end = timeToMinutes(sessionDraft.endTime);
+
+    if (!sessionName) {
+      setSessionFormError("Enter a name for the training session.");
+      return;
+    }
+    if (!sessionDraft.sessionTypeId) {
+      setSessionFormError("Select a program.");
+      return;
+    }
+    if (start === null || end === null || start >= end) {
+      setSessionFormError("The session end time must be later than its start time.");
+      return;
+    }
+
+    const newSlot: TrainingSlot = {
       ...createLocalSlot(),
       _id: createTemporaryId(),
+      sessionTypeId: sessionDraft.sessionTypeId,
+      sessionName,
+      startTime: sessionDraft.startTime,
+      endTime: sessionDraft.endTime,
+      isActive: sessionDraft.isActive,
     };
 
     updateDay(selectedDay, (day) => ({
@@ -366,6 +436,8 @@ export default function BranchSchedulePage() {
 
       slots: [...day.slots, newSlot],
     }));
+    setSessionModalOpen(false);
+    setSessionFormError("");
   }
 
   /* =======================================================
@@ -374,7 +446,7 @@ export default function BranchSchedulePage() {
 
   function updateTrainingSession(
     slotId: string,
-    field: "sessionName" | "startTime" | "endTime",
+    field: "sessionName" | "sessionTypeId" | "startTime" | "endTime",
     value: string,
   ) {
     updateDay(selectedDay, (day) => ({
@@ -384,7 +456,8 @@ export default function BranchSchedulePage() {
         slot._id === slotId
           ? {
               ...slot,
-              [field]: value,
+              [field]: field === "sessionTypeId" ? value || undefined : value,
+              ...(field === "sessionTypeId" ? { sessionType: undefined } : {}),
             }
           : slot,
       ),
@@ -419,17 +492,25 @@ export default function BranchSchedulePage() {
       return;
     }
 
-    const confirmed = window.confirm("Delete this training session?");
-
-    if (!confirmed) {
-      return;
-    }
-
     updateDay(selectedDay, (day) => ({
       ...day,
 
       slots: day.slots.filter((slot) => slot._id !== slotId),
     }));
+  }
+
+  function confirmDestructiveAction() {
+    const action = confirmationAction;
+    setConfirmationAction(null);
+    if (!action) return;
+
+    if (action.type === "delete-session") {
+      deleteTrainingSession(action.slotId);
+    } else if (action.type === "reset-day") {
+      resetSelectedDay();
+    } else {
+      void handleReset();
+    }
   }
 
   /* =======================================================
@@ -454,6 +535,7 @@ export default function BranchSchedulePage() {
   ======================================================= */
 
   function copySelectedDayToOtherDays() {
+    if (!canManageSchedule) return;
     const selected = weeklySchedule.find(
       (day) => day.dayOfWeek === selectedDay,
     );
@@ -466,21 +548,17 @@ export default function BranchSchedulePage() {
       (index) => index !== selectedDay,
     );
 
-    const selectedTargets = window.prompt(
-      `Enter day numbers to copy ${selectedDayName} to.\n\n0 = Sunday\n1 = Monday\n2 = Tuesday\n3 = Wednesday\n4 = Thursday\n5 = Friday\n6 = Saturday\n\nExample: 2,3,4`,
-    );
+    setCopyTargetDays(targetDays);
+    setCopyTargetsOpen(true);
+  }
 
-    if (!selectedTargets) {
-      return;
-    }
-
-    const indexes = selectedTargets
-      .split(",")
-      .map((value) => Number(value.trim()))
-      .filter((value) => Number.isInteger(value) && targetDays.includes(value));
+  function applyCopySelectedDayToOtherDays() {
+    const selected = weeklySchedule.find((day) => day.dayOfWeek === selectedDay);
+    if (!selected) return;
+    const indexes = copyTargetDays;
 
     if (indexes.length === 0) {
-      setError("No valid target days were selected.");
+      toast.warning("Choose at least one target day.");
       return;
     }
 
@@ -501,7 +579,8 @@ export default function BranchSchedulePage() {
       }),
     );
 
-    setSuccess(`${selectedDayName} schedule copied successfully.`);
+    setCopyTargetsOpen(false);
+    toast.success(`${selectedDayName} schedule copied successfully.`);
   }
 
   /* =======================================================
@@ -522,11 +601,17 @@ export default function BranchSchedulePage() {
     }
 
     for (const day of weeklySchedule) {
-      if (day.isClosed) {
-        continue;
+      const activeSlots = day.slots.filter((slot) => slot.isActive !== false);
+
+      const validTimeSlots = activeSlots.filter((slot) => /^\d{2}:\d{2}$/.test(slot.startTime) && /^\d{2}:\d{2}$/.test(slot.endTime));
+      const sortedForOverlap = [...validTimeSlots].sort((a, b) => (timeToMinutes(a.startTime) || 0) - (timeToMinutes(b.startTime) || 0));
+      for (let index = 1; index < sortedForOverlap.length; index += 1) {
+        const previous = sortedForOverlap[index - 1], current = sortedForOverlap[index];
+        const previousEnd = timeToMinutes(previous.endTime), currentStart = timeToMinutes(current.startTime);
+        if (previousEnd !== null && currentStart !== null && currentStart < previousEnd) return `${DAY_NAMES[day.dayOfWeek]} already has a session scheduled from ${formatTime(previous.startTime)} to ${formatTime(previous.endTime)}. The requested time ${formatTime(current.startTime)} to ${formatTime(current.endTime)} overlaps with it.`;
       }
 
-      const activeSlots = day.slots.filter((slot) => slot.isActive !== false);
+      if (day.isClosed) continue;
 
       for (const slot of activeSlots) {
         if (!slot.sessionName.trim()) {
@@ -581,10 +666,7 @@ export default function BranchSchedulePage() {
           currentStart !== null &&
           currentStart < previousEnd
         ) {
-          return (
-            `${DAY_NAMES[day.dayOfWeek]} has overlapping sessions: ` +
-            `"${previous.sessionName}" and "${current.sessionName}".`
-          );
+          return `${DAY_NAMES[day.dayOfWeek]} already has a session scheduled from ${formatTime(previous.startTime)} to ${formatTime(previous.endTime)}. The requested time ${formatTime(current.startTime)} to ${formatTime(current.endTime)} overlaps with it.`;
         }
       }
     }
@@ -597,21 +679,20 @@ export default function BranchSchedulePage() {
   ======================================================= */
 
   async function handleSave() {
-    if (!branchId) {
+    if (!branchId || !canManageSchedule) {
       return;
     }
 
     const validationError = validateBeforeSave();
 
     if (validationError) {
-      setError(validationError);
+      toast.error(validationError, validationError.includes("overlaps") ? "Schedule conflict" : "Check schedule details");
       return;
     }
 
     try {
       setSaving(true);
       setError("");
-      setSuccess("");
 
       const cleanedSchedule = weeklySchedule.map((day) => ({
         dayOfWeek: day.dayOfWeek,
@@ -625,6 +706,8 @@ export default function BranchSchedulePage() {
             : {}),
 
           sessionName: slot.sessionName.trim() || "Training Session",
+          ...(slot.sessionTypeId ? { sessionTypeId: slot.sessionTypeId } : {}),
+          sessionType: slot.sessionType,
 
           startTime: slot.startTime,
           endTime: slot.endTime,
@@ -646,15 +729,12 @@ export default function BranchSchedulePage() {
 
       setClosingTime(response.schedule?.closingTime || closingTime);
 
-      setSuccess("Branch training schedule saved successfully.");
+      toast.success("Branch training schedule saved successfully.");
     } catch (caughtError) {
       console.error("Save branch schedule error:", caughtError);
 
-      setError(
-        caughtError instanceof Error
-          ? caughtError.message
-          : "Failed to save branch training schedule.",
-      );
+      const message = getApiErrorMessage(caughtError, "Failed to save branch training schedule.");
+      toast.error(message, message.toLowerCase().includes("overlap") ? "Schedule conflict" : "Unable to save schedule");
     } finally {
       setSaving(false);
     }
@@ -665,22 +745,13 @@ export default function BranchSchedulePage() {
   ======================================================= */
 
   async function handleReset() {
-    if (!branchId) {
-      return;
-    }
-
-    const confirmed = window.confirm(
-      "Reset this branch schedule?\n\nThis will remove the configured schedule and restore the default editor state.",
-    );
-
-    if (!confirmed) {
+    if (!branchId || !canManageSchedule) {
       return;
     }
 
     try {
       setResetting(true);
       setError("");
-      setSuccess("");
 
       await deleteBranchSchedule(branchId);
 
@@ -690,15 +761,11 @@ export default function BranchSchedulePage() {
 
       setWeeklySchedule(createEmptyWeeklySchedule());
 
-      setSuccess("Branch schedule reset successfully.");
+      toast.success("Branch schedule reset successfully.");
     } catch (caughtError) {
       console.error("Reset branch schedule error:", caughtError);
 
-      setError(
-        caughtError instanceof Error
-          ? caughtError.message
-          : "Failed to reset branch schedule.",
-      );
+      toast.error(getApiErrorMessage(caughtError, "Failed to reset branch schedule."));
     } finally {
       setResetting(false);
     }
@@ -709,23 +776,13 @@ export default function BranchSchedulePage() {
   ======================================================= */
 
   function resetSelectedDay() {
-    const confirmed = window.confirm(
-      `Reset ${selectedDayName}'s training sessions?`,
-    );
-
-    if (!confirmed) {
-      return;
-    }
-
     updateDay(selectedDay, (day) => ({
       ...day,
       isClosed: true,
       slots: [],
     }));
 
-    setSuccess(
-      `${selectedDayName} schedule reset locally. Click Save Schedule to apply it.`,
-    );
+    toast.info(`${selectedDayName} schedule reset locally. Click Save Schedule to apply it.`);
   }
 
   /* =======================================================
@@ -798,7 +855,7 @@ export default function BranchSchedulePage() {
                 variant="primary"
                 onClick={() => void handleSave()}
                 loading={saving}
-                disabled={resetting}
+                disabled={resetting || !canManageSchedule}
               >
                 <Save size={16} />
                 Save Schedule
@@ -807,39 +864,7 @@ export default function BranchSchedulePage() {
           }
         />
 
-        {error && (
-          <div className="mb-5">
-            <ErrorState
-              title="Unable to update training schedule"
-              message={error}
-              action={
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setError("")}
-                >
-                  Dismiss
-                </Button>
-              }
-            />
-          </div>
-        )}
-
-        {success && (
-          <div
-            className="
-              mb-5 flex items-center gap-3
-              rounded-xl border
-              border-(--success)/20
-              bg-(--success-soft)
-              px-4 py-3
-            "
-          >
-            <Check size={18} className="text-(--success)" />
-
-            <p className="text-sm font-semibold text-(--success)">{success}</p>
-          </div>
-        )}
+        {error && <div className="mb-5"><ErrorState title="Unable to load branch schedule" message={error} action={<Button type="button" variant="outline" onClick={() => void loadSchedule(true)}>Retry</Button>} /></div>}
 
         {/* =================================================
             BRANCH INFORMATION
@@ -989,6 +1014,7 @@ export default function BranchSchedulePage() {
                   type="button"
                   variant="outline"
                   onClick={copySelectedDayToOtherDays}
+                  disabled={!canManageSchedule}
                 >
                   <Copy size={16} />
                   Copy Day
@@ -997,7 +1023,8 @@ export default function BranchSchedulePage() {
                 <Button
                   type="button"
                   variant="outline"
-                  onClick={resetSelectedDay}
+                  onClick={() => setConfirmationAction({ type: "reset-day" })}
+                  disabled={!canManageSchedule}
                 >
                   <RotateCcw size={16} />
                   Reset Day
@@ -1119,6 +1146,7 @@ export default function BranchSchedulePage() {
               <button
                 type="button"
                 onClick={toggleDayClosed}
+                disabled={!canManageSchedule}
                 className="
                   inline-flex
                   items-center
@@ -1243,6 +1271,7 @@ export default function BranchSchedulePage() {
                   variant="outline"
                   className="mt-5"
                   onClick={toggleDayClosed}
+                  disabled={!canManageSchedule}
                 >
                   Open {selectedDayName}
                 </Button>
@@ -1284,13 +1313,34 @@ export default function BranchSchedulePage() {
                           {/* SESSION NAME */}
 
                           <div>
-                            <label className="mb-1.5 block text-xs font-semibold text-(--ink-muted) lg:hidden">
-                              Training Session
-                            </label>
+                            <div className="mb-1.5 flex flex-wrap items-center gap-2">
+                              <label className="text-xs font-semibold text-(--ink-muted) lg:hidden">
+                                Training Session
+                              </label>
+                              <Badge variant={slot.sessionTypeId || slot.sessionType ? "accent" : "neutral"}>
+                                {sessionTypes.find((type) => type._id === slot.sessionTypeId)?.name || slot.sessionType?.replaceAll("_", " ") || "General (legacy)"}
+                              </Badge>
+                            </div>
 
-                            <input
+                            <Select
+                              aria-label="Program"
+                              value={slot.sessionTypeId || ""}
+                              disabled={!canManageSchedule}
+                              onChange={(event) =>
+                                updateTrainingSession(slotId, "sessionTypeId", event.target.value)
+                              }
+                              className="mb-2 h-9 text-xs"
+                            >
+                              <option value="">Select a type</option>
+                              {sessionTypes.filter((type) => type.isActive || type._id === slot.sessionTypeId).map((type) => (
+                                <option key={type._id} value={type._id} disabled={!type.isActive}>{type.name}{!type.isActive ? " (inactive)" : ""}</option>
+                              ))}
+                            </Select>
+
+                            <Input
                               type="text"
                               value={slot.sessionName}
+                              disabled={!canManageSchedule}
                               onChange={(event) =>
                                 updateTrainingSession(
                                   slotId,
@@ -1299,17 +1349,7 @@ export default function BranchSchedulePage() {
                                 )
                               }
                               placeholder="Training Session"
-                              className="
-                                  h-12 w-full
-                                  rounded-xl
-                                  border border-(--line)
-                                  bg-(--surface)
-                                  px-4
-                                  text-sm font-semibold
-                                  text-(--foreground)
-                                  outline-none
-                                  focus:border-(--accent)
-                                "
+                              className="h-12 font-semibold"
                             />
                           </div>
 
@@ -1332,9 +1372,10 @@ export default function BranchSchedulePage() {
                                   "
                               />
 
-                              <input
+                              <Input
                                 type="time"
                                 value={slot.startTime}
+                                disabled={!canManageSchedule}
                                 onChange={(event) =>
                                   updateTrainingSession(
                                     slotId,
@@ -1342,17 +1383,7 @@ export default function BranchSchedulePage() {
                                     event.target.value,
                                   )
                                 }
-                                className="
-                                    h-12 w-full
-                                    rounded-xl
-                                    border border-(--line)
-                                    bg-(--surface)
-                                    pl-10 pr-3
-                                    text-sm font-semibold
-                                    text-(--foreground)
-                                    outline-none
-                                    focus:border-(--accent)
-                                  "
+                                className="h-12 pl-10 pr-3 font-semibold"
                               />
                             </div>
                           </div>
@@ -1376,9 +1407,10 @@ export default function BranchSchedulePage() {
                                   "
                               />
 
-                              <input
+                              <Input
                                 type="time"
                                 value={slot.endTime}
+                                disabled={!canManageSchedule}
                                 onChange={(event) =>
                                   updateTrainingSession(
                                     slotId,
@@ -1386,17 +1418,7 @@ export default function BranchSchedulePage() {
                                     event.target.value,
                                   )
                                 }
-                                className="
-                                    h-12 w-full
-                                    rounded-xl
-                                    border border-(--line)
-                                    bg-(--surface)
-                                    pl-10 pr-3
-                                    text-sm font-semibold
-                                    text-(--foreground)
-                                    outline-none
-                                    focus:border-(--accent)
-                                  "
+                                className="h-12 pl-10 pr-3 font-semibold"
                               />
                             </div>
                           </div>
@@ -1411,6 +1433,7 @@ export default function BranchSchedulePage() {
                             <button
                               type="button"
                               onClick={() => toggleTrainingSession(slotId)}
+                              disabled={!canManageSchedule}
                               className="
                                   inline-flex
                                   items-center
@@ -1455,46 +1478,22 @@ export default function BranchSchedulePage() {
 
                           {/* ACTIONS */}
 
-                          <div className="flex items-center justify-end gap-2 lg:justify-center">
-                            <button
-                              type="button"
-                              title="Duplicate session"
-                              aria-label="Duplicate session"
+                          {canManageSchedule && <div className="flex items-center justify-end gap-2 lg:justify-center">
+                            <IconButton
+                              label="Duplicate session"
                               onClick={() => duplicateTrainingSession(slot)}
-                              className="
-                                  flex h-10 w-10
-                                  items-center justify-center
-                                  rounded-xl
-                                  border border-(--line)
-                                  bg-(--surface)
-                                  text-(--ink-muted)
-                                  transition
-                                  hover:border-(--accent)
-                                  hover:text-(--accent)
-                                "
                             >
                               <Copy size={16} />
-                            </button>
+                            </IconButton>
 
-                            <button
-                              type="button"
-                              title="Delete session"
-                              aria-label="Delete session"
-                              onClick={() => deleteTrainingSession(slot._id)}
-                              className="
-                                  flex h-10 w-10
-                                  items-center justify-center
-                                  rounded-xl
-                                  border border-red-200
-                                  bg-red-50
-                                  text-red-600
-                                  transition
-                                  hover:bg-red-100
-                                "
+                            <IconButton
+                              variant="danger"
+                              label="Delete session"
+                              onClick={() => slot._id && setConfirmationAction({ type: "delete-session", slotId: slot._id })}
                             >
                               <Trash2 size={16} />
-                            </button>
-                          </div>
+                            </IconButton>
+                          </div>}
                         </div>
 
                         <div
@@ -1540,32 +1539,17 @@ export default function BranchSchedulePage() {
                 ADD SESSION
             ================================================= */}
 
-            {!selectedDaySchedule.isClosed && (
-              <button
+            {!selectedDaySchedule.isClosed && canManageSchedule && (
+              <Button
                 type="button"
                 onClick={addTrainingSession}
-                className="
-                  mt-5 flex w-full
-                  items-center
-                  justify-center
-                  gap-2
-                  rounded-2xl
-                  border
-                  border-dashed
-                  border-(--accent)
-                  bg-(--accent-soft)
-                  px-5 py-4
-                  text-sm
-                  font-bold
-                  text-(--accent)
-                  transition
-                  hover:bg-(--accent)
-                  hover:text-white
-                "
+                variant="outline"
+                fullWidth
+                className="mt-5 h-12 border-dashed border-(--accent) bg-(--accent-soft) font-bold text-(--accent) hover:bg-(--accent) hover:text-black"
               >
                 <Plus size={18} />
                 Add Training Session
-              </button>
+              </Button>
             )}
 
             {/* =================================================
@@ -1597,8 +1581,8 @@ export default function BranchSchedulePage() {
                 <Button
                   type="button"
                   variant="outline"
-                  onClick={handleReset}
-                  disabled={saving || resetting}
+                  onClick={() => setConfirmationAction({ type: "reset-branch" })}
+                  disabled={saving || resetting || !canManageSchedule}
                 >
                   <RotateCcw size={16} />
                   Reset Branch
@@ -1609,7 +1593,7 @@ export default function BranchSchedulePage() {
                   variant="primary"
                   onClick={() => void handleSave()}
                   loading={saving}
-                  disabled={resetting}
+                  disabled={resetting || !canManageSchedule}
                 >
                   <Save size={16} />
                   Save Schedule
@@ -1655,6 +1639,118 @@ export default function BranchSchedulePage() {
             </div>
           </div>
         </div>
+
+        <Modal
+          open={sessionModalOpen}
+          onClose={() => setSessionModalOpen(false)}
+          title="Add Training Session"
+          description="Choose a program, then set the session details for this day."
+          size="lg"
+          footer={
+            <>
+              <Button variant="outline" onClick={() => setSessionModalOpen(false)}>
+                Cancel
+              </Button>
+              <Button variant="primary" onClick={createTrainingSession} disabled={!canManageSchedule}>
+                <Plus size={16} />
+                Add Training Session
+              </Button>
+            </>
+          }
+        >
+          <div className="space-y-5">
+            <section aria-labelledby="training-type-label">
+              <h3 id="training-type-label" className="mb-2 text-sm font-bold text-(--foreground)">
+                Training Type
+              </h3>
+              {sessionTypesLoading ? <p className="text-sm text-(--ink-muted)">Loading programs…</p> : sessionTypesError ? <p role="alert" className="text-sm text-(--danger)">{sessionTypesError}</p> : sessionTypes.filter((type) => type.isActive).length === 0 ? <div className="rounded-lg border border-(--line) p-3 text-sm text-(--ink-muted)">No programs have been created yet. <Link className="font-semibold text-(--accent) underline" href="/training-session-types">Manage programs</Link></div> : <Select aria-label="Program" value={sessionDraft.sessionTypeId} disabled={!canManageSchedule} onChange={(event) => setSessionDraft((current) => ({ ...current, sessionTypeId: event.target.value }))}>
+                <option value="">Select a program</option>
+                {sessionTypes.filter((type) => type.isActive).map((type) => <option key={type._id} value={type._id}>{type.name}</option>)}
+              </Select>}
+            </section>
+
+            <div>
+              <label htmlFor="new-session-name" className="mb-1.5 block text-sm font-semibold text-(--foreground)">
+                Session Name
+              </label>
+              <Input
+                id="new-session-name"
+                autoFocus
+                value={sessionDraft.sessionName}
+                onChange={(event) => setSessionDraft((current) => ({ ...current, sessionName: event.target.value }))}
+                placeholder="e.g. Beginner Karate"
+                disabled={!canManageSchedule}
+              />
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div>
+                <label htmlFor="new-session-start" className="mb-1.5 block text-sm font-semibold text-(--foreground)">
+                  Start Time
+                </label>
+                <Input
+                  id="new-session-start"
+                  type="time"
+                  value={sessionDraft.startTime}
+                  onChange={(event) => setSessionDraft((current) => ({ ...current, startTime: event.target.value }))}
+                  disabled={!canManageSchedule}
+                />
+              </div>
+              <div>
+                <label htmlFor="new-session-end" className="mb-1.5 block text-sm font-semibold text-(--foreground)">
+                  End Time
+                </label>
+                <Input
+                  id="new-session-end"
+                  type="time"
+                  value={sessionDraft.endTime}
+                  onChange={(event) => setSessionDraft((current) => ({ ...current, endTime: event.target.value }))}
+                  disabled={!canManageSchedule}
+                />
+              </div>
+            </div>
+
+            <label className="flex items-center gap-2 text-sm font-semibold text-(--foreground)">
+              <Checkbox
+                checked={sessionDraft.isActive}
+                onChange={(event) => setSessionDraft((current) => ({ ...current, isActive: event.target.checked }))}
+                disabled={!canManageSchedule}
+              />
+              Session is active
+            </label>
+
+            {sessionFormError && (
+              <p role="alert" className="rounded-lg border border-(--danger)/20 bg-(--danger-soft) px-3 py-2 text-sm text-(--danger)">
+                {sessionFormError}
+              </p>
+            )}
+          </div>
+        </Modal>
+
+        <Modal
+          open={copyTargetsOpen}
+          onClose={() => setCopyTargetsOpen(false)}
+          title={`Copy ${selectedDayName} schedule`}
+          description="Choose the weekdays that should receive a copy of this day’s sessions."
+          footer={<><Button variant="outline" onClick={() => setCopyTargetsOpen(false)}>Cancel</Button><Button onClick={applyCopySelectedDayToOtherDays}>Copy schedule</Button></>}
+        >
+          <div className="grid gap-2 sm:grid-cols-2">
+            {DAY_NAMES.map((name, index) => index !== selectedDay && <label key={name} className="flex items-center gap-2 rounded-lg border border-(--line) p-3 text-sm"><Checkbox checked={copyTargetDays.includes(index)} onChange={(event) => setCopyTargetDays((current) => event.target.checked ? [...current, index] : current.filter((day) => day !== index))} />{name}</label>)}
+          </div>
+        </Modal>
+
+        <ConfirmationDialog
+          open={Boolean(confirmationAction)}
+          title={confirmationAction?.type === "delete-session" ? "Delete training session?" : confirmationAction?.type === "reset-day" ? `Reset ${selectedDayName}?` : "Reset branch schedule?"}
+          description={confirmationAction?.type === "delete-session"
+            ? "This session will be removed from the unsaved weekly schedule. Save the schedule to apply the change."
+            : confirmationAction?.type === "reset-day"
+              ? `All sessions for ${selectedDayName} will be removed from the unsaved weekly schedule.`
+              : "This removes the configured recurring schedule for this branch and restores the default editor state."}
+          confirmLabel={confirmationAction?.type === "delete-session" ? "Delete Session" : "Reset Schedule"}
+          onConfirm={confirmDestructiveAction}
+          onClose={() => setConfirmationAction(null)}
+        />
       </div>
     </main>
   );

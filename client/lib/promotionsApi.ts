@@ -1,6 +1,5 @@
-const API_URL =
-  process.env.NEXT_PUBLIC_API_URL ||
-  "http://localhost:5000/api";
+import { fetchWithSession } from "@/lib/sessionFetch";
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api";
 
 /* ======================================================
    TYPES
@@ -26,6 +25,11 @@ export interface PromotionPlan {
   name: string;
 }
 
+export interface PromotionProgram {
+  _id: string;
+  name: string;
+}
+
 export interface PromotionMilestone {
   day: number;
   belt: string;
@@ -37,37 +41,23 @@ export interface EligiblePromotion {
   student: PromotionStudent;
   branch: PromotionBranch;
   plan: PromotionPlan;
+  program: PromotionProgram;
   trainingDay: number;
   milestone: PromotionMilestone;
 }
 
 export interface BeltHistory {
   _id: string;
-
-  student:
-    | string
-    | PromotionStudent;
-
-  branch:
-    | string
-    | PromotionBranch;
-
-  plan:
-    | string
-    | PromotionPlan;
-
+  student: string | PromotionStudent;
+  branch: string | PromotionBranch;
+  plan: string | PromotionPlan;
+  sessionTypeId?: string | PromotionProgram | null;
   fromBelt: string;
-
   toBelt: string;
-
   milestoneDay: number;
-
   skill?: string;
-
   description?: string;
-
   promotedAt: string;
-
   approvedBy?: {
     _id: string;
     name: string;
@@ -76,7 +66,6 @@ export interface BeltHistory {
   };
 
   createdAt?: string;
-
   updatedAt?: string;
 }
 
@@ -84,142 +73,139 @@ export interface BeltHistory {
    AUTH
 ====================================================== */
 
-function getToken() {
-  if (
-    typeof window ===
-    "undefined"
-  ) {
-    return null;
+/**
+ * Build authenticated request headers.
+ *
+ * The server session cookie is only an authentication credential.
+ *
+ * Permissions are resolved by the backend from the
+ * current database role. No frontend/localStorage
+ * permission value is sent as an authorization source.
+ */
+function getAuthHeaders(): HeadersInit {
+  return {
+    "Content-Type": "application/json",
+
+  };
+}
+
+/**
+ * Handle a JSON API response consistently.
+ */
+async function parseResponse<T>(response: Response): Promise<T> {
+  let data: unknown = null;
+
+  try {
+    data = await response.json();
+  } catch {
+    data = null;
   }
 
-  return localStorage.getItem(
-    "token",
-  );
+  if (response.status === 401) {
+    if (typeof window !== "undefined") {
+    }
+
+    throw new Error("Your session has expired. Please log in again.");
+  }
+
+  if (!response.ok) {
+    const message =
+      data &&
+      typeof data === "object" &&
+      "message" in data &&
+      typeof (
+        data as {
+          message?: unknown;
+        }
+      ).message === "string"
+        ? (
+            data as {
+              message: string;
+            }
+          ).message
+        : "Request failed";
+
+    throw new Error(message);
+  }
+
+  return data as T;
 }
 
 /* ======================================================
    GET ELIGIBLE PROMOTIONS
+   GET /api/promotions/eligible
 ====================================================== */
 
-export async function getEligiblePromotions() {
-  const token = getToken();
+export async function getEligiblePromotions(): Promise<{
+  success: boolean;
+  count: number;
+  eligible: EligiblePromotion[];
+}> {
+  const response = await fetchWithSession(`${API_URL}/promotions/eligible`, {
+    method: "GET",
+    headers: getAuthHeaders(),
+    cache: "no-store",
+  });
 
-  const response =
-    await fetch(
-      `${API_URL}/promotions/eligible`,
-      {
-        method: "GET",
-
-        headers: {
-          "Content-Type":
-            "application/json",
-
-          Authorization: `Bearer ${token}`,
-        },
-
-        cache: "no-store",
-      },
-    );
-
-  const data =
-    await response.json();
-
-  if (!response.ok) {
-    throw new Error(
-      data.message ||
-        "Failed to fetch eligible promotions",
-    );
-  }
-
-  return data as {
+  return parseResponse<{
     success: boolean;
     count: number;
     eligible: EligiblePromotion[];
-  };
+  }>(response);
 }
 
 /* ======================================================
    PROMOTE STUDENT
+   POST /api/promotions
 ====================================================== */
 
-export async function promoteStudent(
-  studentId: string,
-) {
-  const token = getToken();
+export async function promoteStudent(studentId: string, programId: string): Promise<{
+  success: boolean;
+  message: string;
+  promotion: BeltHistory;
+}> {
+  const response = await fetchWithSession(`${API_URL}/promotions`, {
+    method: "POST",
+    headers: getAuthHeaders(),
 
-  const response =
-    await fetch(
-      `${API_URL}/promotions`,
-      {
-        method: "POST",
+    body: JSON.stringify({
+      student: studentId,
+      programId,
+    }),
+  });
 
-        headers: {
-          "Content-Type":
-            "application/json",
-
-          Authorization: `Bearer ${token}`,
-        },
-
-        body: JSON.stringify({
-          student: studentId,
-        }),
-      },
-    );
-
-  const data =
-    await response.json();
-
-  if (!response.ok) {
-    throw new Error(
-      data.message ||
-        "Failed to promote student",
-    );
-  }
-
-  return data as {
+  return parseResponse<{
     success: boolean;
     message: string;
     promotion: BeltHistory;
-  };
+  }>(response);
 }
 
 /* ======================================================
    GET BELT HISTORY
+   GET /api/promotions/history/:studentId
 ====================================================== */
 
-export async function getStudentBeltHistory(
-  studentId: string,
-) {
-  const token = getToken();
+export async function getStudentBeltHistory(studentId: string): Promise<{
+  success: boolean;
 
-  const response =
-    await fetch(
-      `${API_URL}/promotions/history/${studentId}`,
-      {
-        method: "GET",
+  student: {
+    _id: string;
+    name: string;
+    currentBelt: string;
+    branch?: PromotionBranch;
+    plan?: PromotionPlan;
+  };
 
-        headers: {
-          "Content-Type":
-            "application/json",
+  history: BeltHistory[];
+}> {
+  const response = await fetchWithSession(`${API_URL}/promotions/history/${studentId}`, {
+    method: "GET",
+    headers: getAuthHeaders(),
+    cache: "no-store",
+  });
 
-          Authorization: `Bearer ${token}`,
-        },
-
-        cache: "no-store",
-      },
-    );
-
-  const data =
-    await response.json();
-
-  if (!response.ok) {
-    throw new Error(
-      data.message ||
-        "Failed to fetch belt history",
-    );
-  }
-
-  return data as {
+  return parseResponse<{
     success: boolean;
 
     student: {
@@ -231,5 +217,5 @@ export async function getStudentBeltHistory(
     };
 
     history: BeltHistory[];
-  };
+  }>(response);
 }

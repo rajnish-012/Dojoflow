@@ -33,6 +33,27 @@ function normalizeString(value) {
   return value.trim();
 }
 
+function enrollmentEndDate(plan, startDate) {
+  const end = new Date(startDate);
+  if (plan.durationUnit === "DAYS") end.setDate(end.getDate() + Number(plan.duration));
+  else end.setMonth(end.getMonth() + Number(plan.duration));
+  return end;
+}
+
+function enrollmentSnapshot(plan) {
+  return {
+    classesPerWeek: Number(plan.classesPerWeek || 0),
+    startingBelt: plan.startingBelt || "White",
+    programs: (plan.programs || []).map((item) => ({
+      program: item.program?._id || item.program,
+      weeklyLimit: item.weeklyLimit ?? null,
+      curriculum: ((Array.isArray(item.curriculum) && item.curriculum.length ? item.curriculum : plan.curriculum || [])).map((lesson) => ({
+        day: lesson.day, title: lesson.title, description: lesson.description || "", skill: lesson.skill || "",
+      })),
+    })),
+  };
+}
+
 function normalizeEmail(value) {
   const normalized = normalizeString(value).toLowerCase();
 
@@ -99,10 +120,6 @@ function startOfToday() {
   date.setHours(0, 0, 0, 0);
 
   return date;
-}
-
-function isBranchAdmin(req) {
-  return req.user?.role === "BRANCH_ADMIN";
 }
 
 function isSuperAdmin(req) {
@@ -184,6 +201,19 @@ async function checkStudentAccess(req, student) {
 const getStudents = async (req, res) => {
   try {
     const filter = {};
+    const {
+      search,
+      branch,
+      plan,
+      status,
+      belt,
+      joinFrom,
+      joinTo,
+      page,
+      limit,
+      sortBy,
+      sortOrder,
+    } = req.query;
 
     /*
      * Coach:
@@ -199,11 +229,10 @@ const getStudents = async (req, res) => {
         $in: assignments.map((item) => item.student),
       };
     } else if (isBranchScoped(req.user)) {
-
-    /*
-     * Branch scoped:
-     * only students from assigned branch.
-     */
+      /*
+       * Branch scoped:
+       * only students from assigned branch.
+       */
       if (!req.user.branch) {
         return res.status(403).json({
           success: false,
@@ -214,17 +243,94 @@ const getStudents = async (req, res) => {
       filter.branch = req.user.branch;
     }
 
-    const students = await Student.find(filter)
+    if (!isBranchScoped(req.user) && branch) {
+      if (!isValidObjectId(branch)) {
+        return res.status(400).json({ success: false, message: "Invalid branch ID" });
+      }
+      filter.branch = branch;
+    }
+
+    if (plan) {
+      if (!isValidObjectId(plan)) {
+        return res.status(400).json({ success: false, message: "Invalid plan ID" });
+      }
+      filter.plan = plan;
+    }
+
+    if (status) {
+      const normalizedStatus = String(status).toUpperCase();
+      if (!STUDENT_STATUSES.includes(normalizedStatus)) {
+        return res.status(400).json({ success: false, message: "Invalid student status" });
+      }
+      filter.status = normalizedStatus;
+    }
+
+    if (belt) {
+      filter.currentBelt = String(belt);
+    }
+
+    if (joinFrom || joinTo) {
+      filter.joinDate = {};
+      if (joinFrom) {
+        const date = parseDateOnly(joinFrom);
+        if (!date) return res.status(400).json({ success: false, message: "Invalid joinFrom date" });
+        filter.joinDate.$gte = date;
+      }
+      if (joinTo) {
+        const date = parseDateOnly(joinTo);
+        if (!date) return res.status(400).json({ success: false, message: "Invalid joinTo date" });
+        date.setHours(23, 59, 59, 999);
+        filter.joinDate.$lte = date;
+      }
+    }
+
+    if (search) {
+      const safeSearch = String(search).trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const expression = new RegExp(safeSearch, "i");
+      const [matchingPlans, matchingBranches] = await Promise.all([
+        Plan.find({ name: expression }).select("_id").lean(),
+        Branch.find({ name: expression }).select("_id").lean(),
+      ]);
+      filter.$or = [
+        { name: expression },
+        { phone: expression },
+        { email: expression },
+        { currentBelt: expression },
+        { plan: { $in: matchingPlans.map((item) => item._id) } },
+        { branch: { $in: matchingBranches.map((item) => item._id) } },
+      ];
+    }
+
+    const shouldPaginate = page !== undefined || limit !== undefined;
+    const pageNumber = Math.max(Number(page) || 1, 1);
+    const pageSize = Math.min(Math.max(Number(limit) || 25, 1), 100);
+    const skip = (pageNumber - 1) * pageSize;
+    const allowedSortFields = ["name", "joinDate", "createdAt", "updatedAt", "currentBelt", "status"];
+    const sortField = allowedSortFields.includes(String(sortBy)) ? String(sortBy) : "createdAt";
+    const sortDirection = String(sortOrder).toLowerCase() === "asc" ? 1 : -1;
+
+    const studentQuery = Student.find(filter)
       .populate("branch", "name address")
-      .populate("plan", "name price duration startingBelt isActive")
-      .sort({
-        createdAt: -1,
-      });
+      .populate("plan", "name price duration startingBelt isActive programs")
+      .populate("plan.programs.program", "name slug")
+      .sort({ [sortField]: sortDirection, _id: -1 });
+
+    if (shouldPaginate) {
+      studentQuery.skip(skip).limit(pageSize);
+    }
+
+    const [students, total] = await Promise.all([studentQuery, Student.countDocuments(filter)]);
 
     return res.status(200).json({
       success: true,
       count: students.length,
       students,
+      pagination: {
+        page: pageNumber,
+        limit: shouldPaginate ? pageSize : total,
+        total,
+        pages: shouldPaginate ? Math.max(1, Math.ceil(total / pageSize)) : 1,
+      },
     });
   } catch (error) {
     console.error("Get students error:", error);
@@ -253,7 +359,8 @@ const getStudentById = async (req, res) => {
 
     const student = await Student.findById(id)
       .populate("branch", "name address")
-      .populate("plan");
+      .populate("plan")
+      .populate("plan.programs.program", "name slug");
 
     if (!student) {
       return res.status(404).json({
@@ -365,27 +472,45 @@ const createStudent = async (req, res) => {
     }
 
     if (age === undefined || age === null || String(age).trim() === "") {
-      return res.status(400).json({ success: false, message: "Age is required." });
+      return res.status(400).json({
+        success: false,
+        message: "Age is required.",
+      });
     }
 
     if (!normalizedPhone) {
-      return res.status(400).json({ success: false, message: "Phone number is required." });
+      return res.status(400).json({
+        success: false,
+        message: "Phone number is required.",
+      });
     }
 
     if (!normalizedLoginEmail) {
-      return res.status(400).json({ success: false, message: "Login email is required." });
+      return res.status(400).json({
+        success: false,
+        message: "Login email is required.",
+      });
     }
 
     if (typeof loginPassword !== "string" || !loginPassword) {
-      return res.status(400).json({ success: false, message: "Login password is required." });
+      return res.status(400).json({
+        success: false,
+        message: "Login password is required.",
+      });
     }
 
     if (!branch) {
-      return res.status(400).json({ success: false, message: "Branch is required." });
+      return res.status(400).json({
+        success: false,
+        message: "Branch is required.",
+      });
     }
 
     if (!plan) {
-      return res.status(400).json({ success: false, message: "Training plan is required." });
+      return res.status(400).json({
+        success: false,
+        message: "Training plan is required.",
+      });
     }
 
     /*
@@ -470,10 +595,10 @@ const createStudent = async (req, res) => {
     }
 
     /*
-     * Branch Admin can only create students
+     * Branch-scoped users can only create students
      * in their own branch.
      */
-    if (isBranchAdmin(req) && !hasSameId(req.user.branch, branch)) {
+    if (isBranchScoped(req.user) && !hasSameId(req.user.branch, branch)) {
       return res.status(403).json({
         success: false,
         message: "You can only add students to your branch",
@@ -518,87 +643,93 @@ const createStudent = async (req, res) => {
     if (selectedPlan.isActive === false) {
       return res.status(400).json({
         success: false,
-        message: "Selected plan is inactive",
+        message: "Selected training plan is inactive",
       });
     }
 
     /*
      * Join date.
      */
-    const admissionDate = joinDate;
+    let parsedJoinDate = startOfToday();
 
-    if (!isValidDateOnly(admissionDate)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid join date. Use YYYY-MM-DD.",
-      });
-    }
-
-    const parsedJoinDate = parseDateOnly(admissionDate);
-
-    if (!parsedJoinDate) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid join date.",
-      });
-    }
-
-    /*
-     * Future admission dates are not allowed.
-     */
-    if (parsedJoinDate.getTime() > startOfToday().getTime()) {
-      return res.status(400).json({
-        success: false,
-        message: "Join date cannot be in the future",
-      });
-    }
-
-    /*
-     * Login email must be unique.
-     */
-    const existingUser = await User.findOne({
-      email: normalizedLoginEmail,
-    });
-
-    if (existingUser) {
-      return res.status(409).json({
-        success: false,
-        message: "A user with this login email already exists.",
-      });
-    }
-
-    /*
-     * Student contact email should not belong
-     * to another student.
-     */
-    if (normalizedStudentEmail) {
-      const existingStudent = await Student.findOne({
-        email: normalizedStudentEmail,
-      });
-
-      if (existingStudent) {
-        return res.status(409).json({
+    if (joinDate !== undefined) {
+      if (!isValidDateOnly(joinDate)) {
+        return res.status(400).json({
           success: false,
-          message: "A student already exists with this email",
+          message: "Join date must be a valid YYYY-MM-DD date",
+        });
+      }
+
+      parsedJoinDate = parseDateOnly(joinDate);
+
+      if (parsedJoinDate.getTime() > startOfToday().getTime()) {
+        return res.status(400).json({
+          success: false,
+          message: "Join date cannot be in the future",
         });
       }
     }
 
     /*
-     * Create login account.
+     * Duplicate student phone.
      */
-    const hashedPassword = await bcrypt.hash(loginPassword, 10);
+    const existingPhone = await Student.findOne({
+      phone: normalizedPhone,
+    }).select("_id");
 
+    if (existingPhone) {
+      return res.status(409).json({
+        success: false,
+        message: "A student with this phone number already exists.",
+      });
+    }
+
+    /*
+     * Duplicate student email.
+     */
+    if (normalizedStudentEmail) {
+      const existingStudentEmail = await Student.findOne({
+        email: normalizedStudentEmail,
+      }).select("_id");
+
+      if (existingStudentEmail) {
+        return res.status(409).json({
+          success: false,
+          message: "A student with this email already exists.",
+        });
+      }
+    }
+
+    /*
+     * Login account email must be unique.
+     */
+    const existingUser = await User.findOne({
+      email: normalizedLoginEmail,
+    }).select("_id");
+
+    if (existingUser) {
+      return res.status(409).json({
+        success: false,
+        message: "A user account with this login email already exists.",
+      });
+    }
+
+    /*
+     * Create login account.
+     *
+     * Students intentionally use the existing STUDENT role.
+     */
     createdUser = await User.create({
       name: normalizedName,
       email: normalizedLoginEmail,
-      password: hashedPassword,
+      password: loginPassword,
       role: "STUDENT",
-      branch,
+      branch: selectedBranch._id,
+      isActive: true,
     });
 
     /*
-     * Create student profile.
+     * Create student.
      */
     createdStudent = await Student.create({
       user: createdUser._id,
@@ -606,66 +737,67 @@ const createStudent = async (req, res) => {
       age: numericAge,
       phone: normalizedPhone,
       email: normalizedStudentEmail || undefined,
-      branch,
-      plan,
+      branch: selectedBranch._id,
+      plan: selectedPlan._id,
+      planEnrollments: [{ plan: selectedPlan._id, startDate: parsedJoinDate, endDate: enrollmentEndDate(selectedPlan, parsedJoinDate), status: "ACTIVE", ...enrollmentSnapshot(selectedPlan) }],
       joinDate: parsedJoinDate,
-      currentBelt: "White",
       status: "ACTIVE",
+      currentBelt:
+        selectedPlan.startingBelt || selectedPlan.belt || "White Belt",
     });
 
+    /*
+     * Return populated student.
+     */
     const populatedStudent = await Student.findById(createdStudent._id)
       .populate("branch", "name address")
-      .populate("plan", "name price duration startingBelt isActive");
+      .populate("plan", "name price duration startingBelt isActive programs")
+      .populate("plan.programs.program", "name slug");
 
     return res.status(201).json({
       success: true,
-      message: "Student admitted and login account created successfully",
+      message: "Student created successfully",
       student: populatedStudent,
     });
   } catch (error) {
     console.error("Create student error:", error);
 
     /*
-     * If student creation fails after the
-     * login account was created, remove the
-     * partially-created account.
+     * Roll back the linked User if Student creation failed.
+     *
+     * This preserves the user/student synchronization
+     * requirement.
      */
-    let studentCleanupSucceeded = !createdStudent;
-
     if (createdStudent) {
       try {
         await Student.findByIdAndDelete(createdStudent._id);
-        studentCleanupSucceeded = true;
-      } catch (cleanupError) {
-        console.error("Failed to cleanup student profile:", cleanupError);
+      } catch (rollbackError) {
+        console.error("Student rollback error:", rollbackError);
       }
     }
 
-    if (createdUser && studentCleanupSucceeded) {
+    if (createdUser) {
       try {
         await User.findByIdAndDelete(createdUser._id);
-      } catch (cleanupError) {
-        console.error("Failed to cleanup student user:", cleanupError);
+      } catch (rollbackError) {
+        console.error("User rollback error:", rollbackError);
       }
     }
 
     if (error.code === 11000) {
       return res.status(409).json({
         success: false,
-        message: "A user with this login email already exists.",
-      });
-    }
-
-    if (error.name === "ValidationError" || error.name === "CastError") {
-      return res.status(400).json({
-        success: false,
-        message: error.message || "Student information is invalid.",
+        message:
+          "A student or user with the same unique information already exists",
       });
     }
 
     return res.status(500).json({
       success: false,
-      message: "Failed to create student",
+      message:
+        process.env.NODE_ENV === "production"
+          ? "Failed to create student"
+          : error.message || "Failed to create student",
     });
   }
 };
@@ -677,6 +809,19 @@ const createStudent = async (req, res) => {
 const updateStudent = async (req, res) => {
   try {
     const { id } = req.params;
+
+    const {
+      name,
+      age,
+      phone,
+      email,
+      branch,
+      plan,
+      currentBelt,
+      status,
+      password,
+      joinDate,
+    } = req.body;
 
     if (!isValidObjectId(id)) {
       return res.status(400).json({
@@ -695,7 +840,10 @@ const updateStudent = async (req, res) => {
     }
 
     /*
-     * Verify access before allowing changes.
+     * Branch and coach access.
+     *
+     * This protects update operations before any
+     * mutable field is changed.
      */
     const accessError = await checkStudentAccess(req, student);
 
@@ -706,61 +854,23 @@ const updateStudent = async (req, res) => {
       });
     }
 
-    const {
-      name,
-      age,
-      phone,
-      email,
-      branch,
-      plan,
-      currentBelt,
-      status,
-      joinDate,
-      password,
-    } = req.body;
-
-    /*
-     * Coaches should only be allowed to edit
-     * basic student profile information.
-     *
-     * They cannot change:
-     * - branch
-     * - plan
-     * - status
-     * - belt
-     * - join date
-     */
-    if (isCoach(req)) {
-      const forbiddenFields = [
-        "branch",
-        "plan",
-        "currentBelt",
-        "status",
-        "joinDate",
-      ];
-
-      const attemptedForbiddenField = forbiddenFields.find(
-        (field) => req.body[field] !== undefined,
-      );
-
-      if (attemptedForbiddenField) {
-        return res.status(403).json({
-          success: false,
-          message: `Coaches cannot change student ${attemptedForbiddenField}`,
-        });
-      }
-    }
-
     /*
      * NAME
      */
     if (name !== undefined) {
       const normalizedName = normalizeString(name);
 
-      if (normalizedName.length < 2 || normalizedName.length > 100) {
+      if (normalizedName.length < 2) {
         return res.status(400).json({
           success: false,
-          message: "Student name must contain between 2 and 100 characters",
+          message: "Student name must contain at least 2 characters",
+        });
+      }
+
+      if (normalizedName.length > 100) {
+        return res.status(400).json({
+          success: false,
+          message: "Student name cannot exceed 100 characters",
         });
       }
 
@@ -838,14 +948,15 @@ const updateStudent = async (req, res) => {
     /*
      * BRANCH CHANGE
      *
-     * Only Super Admin can transfer a student
-     * between branches.
+     * All-scope users with student.update may transfer a student
+     * between branches. Branch-scoped users may only retain their
+     * assigned branch, even when they submit a different branch ID.
      */
     if (branch !== undefined) {
-      if (!isSuperAdmin(req)) {
+      if (isBranchScoped(req.user) && !hasSameId(req.user.branch, branch)) {
         return res.status(403).json({
           success: false,
-          message: "Only Super Admin can transfer a student between branches",
+          message: "You can only keep students in your assigned branch",
         });
       }
 
@@ -888,14 +999,15 @@ const updateStudent = async (req, res) => {
     /*
      * PLAN CHANGE
      *
-     * Branch Admin and Super Admin can change
-     * the student's plan.
+     * The route requires student.update permission.
      *
-     * We intentionally DO NOT automatically
-     * change the student's current belt.
+     * Coaches remain unable to change the plan because
+     * this is a business/data-integrity restriction.
+     *
+     * Custom roles with student.update can change the plan.
      */
     if (plan !== undefined) {
-      if (!isSuperAdmin(req) && !isBranchAdmin(req)) {
+      if (isCoach(req)) {
         return res.status(403).json({
           success: false,
           message: "You do not have permission to change the student's plan",
@@ -925,17 +1037,28 @@ const updateStudent = async (req, res) => {
         });
       }
 
-      student.plan = selectedPlan._id;
+      if (String(student.plan) !== String(selectedPlan._id)) {
+        const enrollmentStart = new Date();
+        enrollmentStart.setHours(0, 0, 0, 0);
+        const currentEnrollment = [...(student.planEnrollments || [])].reverse().find((item) => item.status === "ACTIVE");
+        if (currentEnrollment) {
+          currentEnrollment.status = "ENDED";
+          currentEnrollment.endDate = enrollmentStart;
+        }
+        student.planEnrollments.push({ plan: selectedPlan._id, startDate: enrollmentStart, endDate: enrollmentEndDate(selectedPlan, enrollmentStart), status: "ACTIVE", ...enrollmentSnapshot(selectedPlan) });
+        student.plan = selectedPlan._id;
+      }
     }
 
     /*
      * BELT
      *
-     * Only Super Admin and Branch Admin
-     * can directly update belt.
+     * The route requires student.update permission.
+     *
+     * Coaches remain unable to directly update belt.
      */
     if (currentBelt !== undefined) {
-      if (!isSuperAdmin(req) && !isBranchAdmin(req)) {
+      if (isCoach(req)) {
         return res.status(403).json({
           success: false,
           message: "You do not have permission to change the student's belt",
@@ -963,9 +1086,13 @@ const updateStudent = async (req, res) => {
 
     /*
      * STATUS
+     *
+     * The route requires student.update permission.
+     *
+     * Coaches cannot directly change student status.
      */
     if (status !== undefined) {
-      if (!isSuperAdmin(req) && !isBranchAdmin(req)) {
+      if (isCoach(req)) {
         return res.status(403).json({
           success: false,
           message: "You do not have permission to change student status",
@@ -984,6 +1111,9 @@ const updateStudent = async (req, res) => {
 
     const previousStatus = student.status;
 
+    /*
+     * PASSWORD
+     */
     if (password !== undefined && password !== "") {
       if (typeof password !== "string" || password.length < 6) {
         return res.status(400).json({
@@ -1036,9 +1166,16 @@ const updateStudent = async (req, res) => {
       student.joinDate = parsedJoinDate;
     }
 
+    /*
+     * Linked user synchronization.
+     */
     let linkedUser = null;
+
     const passwordChanged = typeof password === "string" && password.length > 0;
-    const statusChanged = status !== undefined && student.status !== previousStatus;
+
+    const statusChanged =
+      status !== undefined && student.status !== previousStatus;
+
     const nameChanged = name !== undefined;
 
     if (student.user && (passwordChanged || statusChanged || nameChanged)) {
@@ -1054,8 +1191,14 @@ const updateStudent = async (req, res) => {
       }
 
       if (linkedUser) {
-        if (nameChanged) linkedUser.name = student.name;
-        if (statusChanged) linkedUser.isActive = student.status !== "INACTIVE";
+        if (nameChanged) {
+          linkedUser.name = student.name;
+        }
+
+        if (statusChanged) {
+          linkedUser.isActive = student.status !== "INACTIVE";
+        }
+
         if (passwordChanged) {
           linkedUser.password = await bcrypt.hash(password, 10);
           linkedUser.passwordChangedAt = new Date();
@@ -1064,11 +1207,15 @@ const updateStudent = async (req, res) => {
     }
 
     await student.save();
-    if (linkedUser) await linkedUser.save();
+
+    if (linkedUser) {
+      await linkedUser.save();
+    }
 
     const updatedStudent = await Student.findById(id)
       .populate("branch", "name address")
-      .populate("plan", "name price duration startingBelt isActive");
+      .populate("plan", "name price duration startingBelt isActive programs")
+      .populate("plan.programs.program", "name slug");
 
     return res.status(200).json({
       success: true,
@@ -1108,16 +1255,18 @@ const deleteStudent = async (req, res) => {
     }
 
     /*
-     * Keep historical attendance, makeup and progress references intact.
-     * DELETE therefore deactivates the student instead of removing records.
+     * Keep historical attendance, makeup and progress
+     * references intact.
+     *
+     * DELETE therefore deactivates the student instead
+     * of removing records.
+     *
+     * The route already requires student.delete permission.
+     *
+     * The controller additionally enforces database-driven
+     * branch scope so a custom branch-scoped role cannot
+     * deactivate students from another branch.
      */
-    if (!isSuperAdmin(req)) {
-      return res.status(403).json({
-        success: false,
-        message: "Only Super Admin can delete students",
-      });
-    }
-
     const student = await Student.findById(id);
 
     if (!student) {
@@ -1127,18 +1276,47 @@ const deleteStudent = async (req, res) => {
       });
     }
 
+    const accessError = await checkStudentAccess(req, student);
+
+    if (accessError) {
+      return res.status(accessError.status).json({
+        success: false,
+        message: accessError.message,
+      });
+    }
+
+    /*
+     * Deactivate linked login account.
+     */
     if (student.user) {
       await User.findByIdAndUpdate(student.user, {
         isActive: false,
       });
     }
 
+    /*
+     * Preserve the student document and all historical
+     * attendance/makeup/progress references.
+     */
     student.status = "INACTIVE";
+
     await student.save();
 
+    /*
+     * Remove active coach assignments without deleting
+     * historical assignment information.
+     */
     await CoachStudentAssignment.updateMany(
-      { student: student._id, status: "ACTIVE" },
-      { $set: { status: "INACTIVE", unassignedAt: new Date() } },
+      {
+        student: student._id,
+        status: "ACTIVE",
+      },
+      {
+        $set: {
+          status: "INACTIVE",
+          unassignedAt: new Date(),
+        },
+      },
     );
 
     return res.status(200).json({

@@ -12,39 +12,103 @@ import {
   Sun,
 } from "lucide-react";
 
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 
 import { useTheme } from "@/components/theme/ThemeProvider";
 
 import {
-  useAcademyBrand,
-} from "@/components/settings/AcademyBrandProvider";
-
-import {
   useCurrentUser,
+  logoutSession,
 } from "@/lib/current-user";
 
-import { getBranches } from "@/lib/api";
+import { getBranches, getStudentById } from "@/lib/api";
+import { getBranchSchedule } from "@/lib/branchScheduleApi";
+import Breadcrumb, { type BreadcrumbItem } from "@/components/ui/Breadcrumb";
 
 type HeaderProps = {
   onMenuClick?: () => void;
   onProfileClick?: () => void;
 };
 
+const ROUTE_LABELS: Record<string, { section: string; page: string }> = {
+  dashboard: { section: "Academy", page: "Dashboard" },
+  students: { section: "Academy", page: "Students" },
+  plans: { section: "Academy", page: "Plans" },
+  curriculum: { section: "Academy", page: "Curriculum" },
+  attendance: { section: "Academy", page: "Attendance" },
+  performance: { section: "Academy", page: "Performance" },
+  promotions: { section: "Academy", page: "Promotions" },
+  "coach-assignments": { section: "Staff Management", page: "Coach Assignments" },
+  inquiries: { section: "Operations", page: "Inquiries" },
+  makeups: { section: "Operations", page: "Makeups" },
+  holidays: { section: "Operations", page: "Holidays" },
+  "branch-schedules": { section: "Operations", page: "Branch Schedule" },
+  branches: { section: "Branch Management", page: "Branches" },
+  roles: { section: "Administration", page: "Roles" },
+  modules: { section: "Administration", page: "Modules" },
+  users: { section: "Administration", page: "Users" },
+  staff: { section: "Administration", page: "Staff" },
+  reports: { section: "Insights", page: "Reports" },
+  analytics: { section: "Insights", page: "Analytics" },
+  settings: { section: "Settings", page: "Settings" },
+};
+
+function readableLabel(segment: string) {
+  return segment
+    .split("-")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function getBreadcrumbItems(pathname: string, entityName: string): BreadcrumbItem[] {
+  const segments = pathname.split("/").filter(Boolean);
+  const routeKey = segments[0] || "dashboard";
+  if (routeKey === "settings" && segments[1]) {
+    const settingsPages: Record<string, string> = {
+      branding: "Academy Branding",
+      staff: "Staff Management",
+      maintenance: "Maintenance",
+    };
+    const page = settingsPages[segments[1]] || readableLabel(segments[1]);
+    return [
+      { label: "Settings", href: "/settings" },
+      { label: page },
+    ];
+  }
+  const route = ROUTE_LABELS[routeKey] || { section: "Workspace", page: readableLabel(routeKey) };
+  const items: BreadcrumbItem[] = [
+    { label: route.section },
+    { label: route.page, href: `/${routeKey}` },
+  ];
+
+  if (routeKey === "students" && segments[1]) {
+    items.push({ label: entityName || "Student details" });
+    if (segments[2] === "progress") items.push({ label: "Progress" });
+    if (segments[2] === "timeline") items.push({ label: "Training Timeline" });
+  } else if (routeKey === "branches" && segments[1] && segments[2] === "schedule") {
+    items.push({ label: entityName || "Branch details" });
+    items.push({ label: "Weekly Schedule" });
+  }
+
+  return items;
+}
+
 export default function Header({
   onMenuClick,
   onProfileClick,
 }: HeaderProps) {
   const router = useRouter();
+  const pathname = usePathname();
+  const [breadcrumbEntity, setBreadcrumbEntity] = useState<{ key: string; name: string } | null>(null);
+  const routeSegments = pathname.split("/").filter(Boolean);
+  const dynamicKey = `${routeSegments[0] || ""}:${routeSegments[1] || ""}`;
+  const breadcrumbEntityName = breadcrumbEntity?.key === dynamicKey ? breadcrumbEntity.name : "";
+  const breadcrumbItems = getBreadcrumbItems(pathname, breadcrumbEntityName);
 
   const {
     theme,
     toggleTheme,
   } = useTheme();
-
-  const {
-    settings: academySettings,
-  } = useAcademyBrand();
 
   // Real data of the logged-in user.
   const user =
@@ -62,50 +126,49 @@ export default function Header({
     setBranchName,
   ] = useState("");
 
+  const branchValue = user?.branch as unknown as
+    | string
+    | { _id?: string; name?: string }
+    | null
+    | undefined;
+  const branchId = typeof branchValue === "string" ? branchValue : branchValue?._id;
+  const directBranchName = user?.branchName ||
+    (branchValue && typeof branchValue === "object" ? branchValue.name : "");
+  const visibleBranchName = directBranchName ||
+    (branchId ? branchName || "Assigned Branch" : "All Branches");
+
+  useEffect(() => {
+    const [routeKey, entityId, routeDetail] = pathname.split("/").filter(Boolean);
+    if (!entityId || entityId === "new") return;
+
+    let cancelled = false;
+    const key = `${routeKey}:${entityId}`;
+    if (routeKey === "students") {
+      getStudentById(entityId)
+        .then((result) => {
+          const name = result?.student?.name || result?.name;
+          if (!cancelled && name) setBreadcrumbEntity({ key, name });
+        })
+        .catch(() => undefined);
+    } else if (routeKey === "branches" && routeDetail === "schedule") {
+      getBranchSchedule(entityId)
+        .then((result) => {
+          const name = result?.branch?.name;
+          if (!cancelled && name) setBreadcrumbEntity({ key, name });
+        })
+        .catch(() => undefined);
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [pathname]);
+
   useEffect(() => {
     let cancelled = false;
+    if (directBranchName || !branchValue) return;
 
-    if (!user?.branch) {
-      setBranchName(
-        "All Branches",
-      );
-      return;
-    }
-
-    const branchValue =
-      user.branch as unknown as
-        | string
-        | {
-            _id?: string;
-            name?: string;
-          }
-        | null
-        | undefined;
-
-    if (
-      branchValue &&
-      typeof branchValue ===
-        "object" &&
-      branchValue.name
-    ) {
-      setBranchName(
-        branchValue.name,
-      );
-      return;
-    }
-
-    const branchId =
-      typeof branchValue ===
-      "string"
-        ? branchValue
-        : branchValue?._id;
-
-    if (!branchId) {
-      setBranchName(
-        "All Branches",
-      );
-      return;
-    }
+    if (!branchId) return;
 
     getBranches()
       .then((result) => {
@@ -145,7 +208,7 @@ export default function Header({
     return () => {
       cancelled = true;
     };
-  }, [user?.branch]);
+  }, [branchId, branchValue, directBranchName]);
 
   const profileRef =
     useRef<HTMLDivElement>(
@@ -270,25 +333,8 @@ export default function Header({
   ===================================================== */
 
   const handleLogout = () => {
-    localStorage.removeItem(
-      "token",
-    );
-
-    localStorage.removeItem(
-      "user",
-    );
-
-    localStorage.removeItem(
-      "dojoUser",
-    );
-
-    localStorage.removeItem(
-      "currentUser",
-    );
-
+    void logoutSession().finally(() => router.replace("/login"));
     setShowProfileMenu(false);
-
-    router.replace("/login");
   };
 
   /* =====================================================
@@ -331,7 +377,7 @@ export default function Header({
         px-4
         backdrop-blur-xl
         sm:px-6
-        lg:px-8
+        lg:px-7
       "
     >
       {/* =================================================
@@ -376,162 +422,8 @@ export default function Header({
           />
         </button>
 
-        {/* -----------------------------------------------
-            DESKTOP WORKSPACE TITLE
-        ----------------------------------------------- */}
-
-        <div className="hidden min-w-0 sm:block">
-          <div className="flex min-w-0 items-center gap-2">
-            <div
-              className="
-                flex
-                h-8
-                w-8
-                shrink-0
-                items-center
-                justify-center
-                overflow-hidden
-                rounded-lg
-                border
-                border-(--line)
-                bg-(--card)
-              "
-            >
-              {academySettings.logoUrl ? (
-                <img
-                  src={
-                    academySettings.logoUrl
-                  }
-                  alt={
-                    academySettings.academyName
-                  }
-                  className="
-                    h-full
-                    w-full
-                    object-contain
-                    p-1
-                  "
-                />
-              ) : (
-                <span
-                  className="
-                    text-xs
-                    font-black
-                    text-(--accent)
-                  "
-                >
-                  {academySettings.academyName
-                    ?.charAt(0)
-                    ?.toUpperCase() ||
-                    "D"}
-                </span>
-              )}
-            </div>
-
-            <p
-              className="
-                truncate
-                text-[10px]
-                font-bold
-                uppercase
-                tracking-[0.18em]
-                text-(--accent)
-              "
-            >
-              {academySettings.academyName}
-            </p>
-          </div>
-
-          <p
-            className="
-              mt-1
-              truncate
-              text-[13px]
-              font-semibold
-              text-(--foreground)
-            "
-          >
-            {academySettings.tagline ||
-              "Manage your academy with clarity"}
-          </p>
-        </div>
-
-        {/* -----------------------------------------------
-            MOBILE BRAND
-        ----------------------------------------------- */}
-
-        <div className="flex min-w-0 items-center gap-2 sm:hidden">
-          <div
-            className="
-              flex
-              h-9
-              w-9
-              shrink-0
-              items-center
-              justify-center
-              overflow-hidden
-              rounded-lg
-              border
-              border-(--line)
-              bg-(--card)
-            "
-          >
-            {academySettings.logoUrl ? (
-              <img
-                src={
-                  academySettings.logoUrl
-                }
-                alt={
-                  academySettings.academyName
-                }
-                className="
-                  h-full
-                  w-full
-                  object-contain
-                  p-1
-                "
-              />
-            ) : (
-              <span
-                className="
-                  text-sm
-                  font-black
-                  text-(--accent)
-                "
-              >
-                {academySettings.academyName
-                  ?.charAt(0)
-                  ?.toUpperCase() ||
-                  "D"}
-              </span>
-            )}
-          </div>
-
-          <div className="min-w-0">
-            <p
-              className="
-                truncate
-                text-[15px]
-                font-extrabold
-                tracking-tight
-                text-(--foreground)
-              "
-            >
-              {academySettings.academyName}
-            </p>
-
-            <p
-              className="
-                mt-0.5
-                truncate
-                text-[10px]
-                font-medium
-                text-(--ink-muted)
-              "
-            >
-              Academy workspace
-            </p>
-          </div>
+        <div className="min-w-0 flex-1">
+          <Breadcrumb items={breadcrumbItems} />
         </div>
       </div>
 
@@ -756,7 +648,7 @@ export default function Header({
                     {getRoleLabel()}
                   </p>
 
-                  {branchName && (
+                  {visibleBranchName && (
                     <p
                       className="
                         mt-0.5
@@ -766,7 +658,7 @@ export default function Header({
                         text-(--accent)
                       "
                     >
-                      {branchName}
+                      {visibleBranchName}
                     </p>
                   )}
                 </>
@@ -898,7 +790,7 @@ export default function Header({
                       </span>
                     )}
 
-                    {branchName && (
+                  {visibleBranchName && (
                       <p
                         className="
                           mt-1.5
@@ -908,7 +800,7 @@ export default function Header({
                           text-(--accent)
                         "
                       >
-                        {branchName}
+                      {visibleBranchName}
                       </p>
                     )}
                   </div>

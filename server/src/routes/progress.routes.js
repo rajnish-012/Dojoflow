@@ -1,20 +1,23 @@
 const express = require("express");
 
-const {
-  getStudentProgress,
-} = require("../controllers/progress.controller");
+const { getStudentProgress } = require("../controllers/progress.controller");
 
 const protect = require("../middleware/auth.middleware");
-const authorize = require("../middleware/role.middleware");
+const { authorizePermission } = require("../middleware/permission.middleware");
 
 const router = express.Router();
 
-// Get progress of a student
+/*
+ * Student progress is protected by student.view.
+ *
+ * The controller still performs student/data-scope checks
+ * before returning progress information.
+ */
 router.get(
   "/student/:studentId",
   protect,
-  authorize("SUPER_ADMIN", "BRANCH_ADMIN", "COACH"),
-  getStudentProgress
+  authorizePermission("student.view"),
+  getStudentProgress,
 );
 
 module.exports = router;

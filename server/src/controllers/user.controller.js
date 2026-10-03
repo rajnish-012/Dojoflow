@@ -1,24 +1,218 @@
 const bcrypt = require("bcryptjs");
+const mongoose = require("mongoose");
 
 const User = require("../models/User");
 const Branch = require("../models/Branch");
+const Role = require("../models/Role");
 
-const STAFF_ROLES = ["SUPER_ADMIN", "BRANCH_ADMIN", "COACH"];
+const SUPER_ADMIN_ROLE = "SUPER_ADMIN";
+
+const STUDENT_ROLE = "STUDENT";
+
+const sendError = (res, status, message) =>
+  res.status(status).json({
+    success: false,
+    message,
+  });
+
+const getRole = async (roleKey) => {
+  return Role.findOne({
+    key: String(roleKey || "")
+      .trim()
+      .toUpperCase(),
+  });
+};
+
+const isStaffRole = (role) => Boolean(role && role.key !== STUDENT_ROLE);
+
+const hasAllDataScope = (user) =>
+  String(user?.role || "").toUpperCase() === SUPER_ADMIN_ROLE ||
+  String(user?.dataScope || "BRANCH").toUpperCase() === "ALL";
+
+const getUserBranchId = (user) => {
+  if (!user?.branch) {
+    return null;
+  }
+
+  return String(user.branch._id || user.branch);
+};
+
+const canManageUser = (actor, target) => {
+  if (hasAllDataScope(actor)) {
+    return true;
+  }
+
+  const actorBranchId = getUserBranchId(actor);
+  const targetBranchId = getUserBranchId(target);
+
+  return Boolean(actorBranchId && actorBranchId === targetBranchId);
+};
+
+const canAssignRoleAndBranch = (actor, role, branch) => {
+  const isSuperAdmin =
+    String(actor?.role || "").toUpperCase() === SUPER_ADMIN_ROLE;
+  const actorPermissions = new Set(
+    Array.isArray(actor?.permissions) ? actor.permissions : [],
+  );
+  const targetPermissions = Array.isArray(role?.permissions)
+    ? role.permissions
+    : [];
+
+  if (
+    !isSuperAdmin &&
+    !targetPermissions.every((permission) => actorPermissions.has(permission))
+  ) {
+    return "You cannot assign a role with permissions your role does not have";
+  }
+
+  // The route already requires user.create or user.update. This helper
+  // additionally enforces data-scope and permission-grant boundaries.
+  if (hasAllDataScope(actor)) {
+    return null;
+  }
+
+  const actorBranchId = getUserBranchId(actor);
+
+  if (!actorBranchId) {
+    return "Your account must be assigned to a branch to manage staff";
+  }
+
+  if (String(role.dataScope || "BRANCH").toUpperCase() !== "BRANCH") {
+    return "Branch-scoped administrators can only assign branch-scoped roles";
+  }
+
+  if (!branch || String(branch._id || branch) !== actorBranchId) {
+    return "You can only assign staff to your own branch";
+  }
+
+  return null;
+};
 
 /**
- * Get all staff users
- * Only SUPER_ADMIN can access this.
+ * Validate a role assignment.
+ *
+ * SUPER_ADMIN can never be assigned through
+ * Staff Management.
+ */
+const validateStaffRole = async (roleKey) => {
+  const normalized = String(roleKey || "")
+    .trim()
+    .toUpperCase();
+
+  const role = await getRole(normalized);
+
+  if (!role) {
+    return {
+      error: "Selected role does not exist",
+    };
+  }
+
+  if (normalized === SUPER_ADMIN_ROLE) {
+    return {
+      error: "A Super Admin cannot be assigned from Staff Management",
+    };
+  }
+
+  if (normalized === STUDENT_ROLE) {
+    return {
+      error: "Student role cannot be assigned as a staff role",
+    };
+  }
+
+  return {
+    role,
+  };
+};
+
+/**
+ * Validate branch assignment against
+ * the role's database data scope.
+ */
+const validateBranchForRole = async (role, branchId) => {
+  if (role.dataScope === "BRANCH") {
+    if (!branchId) {
+      return {
+        error: "A branch is required for this role",
+      };
+    }
+  }
+
+  if (!branchId) {
+    return {
+      branch: null,
+    };
+  }
+
+  if (!mongoose.Types.ObjectId.isValid(branchId)) {
+    return {
+      error: "Selected branch ID is invalid",
+    };
+  }
+
+  const branch = await Branch.findById(branchId);
+
+  if (!branch) {
+    return {
+      error: "Selected branch not found",
+    };
+  }
+
+  if (branch.isActive === false) {
+    return {
+      error: "Selected branch is inactive",
+    };
+  }
+
+  return {
+    branch,
+  };
+};
+
+/**
+ * Get all staff users.
+ *
+ * Any database role except STUDENT is considered
+ * a staff role.
  */
 const getStaffUsers = async (req, res) => {
   try {
-    const users = await User.find({
-      role: {
-        $in: STAFF_ROLES,
+    const roles = await Role.find({
+      key: {
+        $ne: STUDENT_ROLE,
       },
-    })
-      .populate("branch", "name address phone")
-      .select("-password")
-      .sort({ createdAt: -1 });
+    }).select("key");
+
+    const roleKeys = roles.map((role) => role.key);
+
+    const userFilter = {
+      role: {
+        $in: roleKeys,
+      },
+    };
+
+    if (!hasAllDataScope(req.user)) {
+      const branchId = getUserBranchId(req.user);
+
+      if (!branchId) {
+        return sendError(
+          res,
+          403,
+          "Your account must be assigned to a branch to view staff",
+        );
+      }
+
+      userFilter.branch = branchId;
+    }
+
+    const users =
+      roleKeys.length > 0
+        ? await User.find(userFilter)
+            .populate("branch", "name address phone")
+            .select("-password")
+            .sort({
+              createdAt: -1,
+            })
+        : [];
 
     res.status(200).json({
       success: true,
@@ -28,99 +222,74 @@ const getStaffUsers = async (req, res) => {
   } catch (error) {
     console.error("Get staff users error:", error);
 
-    res.status(500).json({
-      success: false,
-      message: "Server error",
-    });
+    sendError(res, 500, "Server error");
   }
 };
 
 /**
- * Create staff user
- * Only SUPER_ADMIN is allowed to create staff.
+ * Create staff user.
  */
 const createStaffUser = async (req, res) => {
   try {
     const { name, email, password, role, branch } = req.body;
 
     if (!name || !email || !password || !role) {
-      return res.status(400).json({
-        success: false,
-        message: "Name, email, password and role are required",
-      });
+      return sendError(res, 400, "Name, email, password and role are required");
     }
 
-    if (!STAFF_ROLES.includes(role)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid staff role",
-      });
+    if (String(password).length < 6) {
+      return sendError(res, 400, "Password must contain at least 6 characters");
     }
 
-    if (role === "SUPER_ADMIN") {
-      return res.status(400).json({
-        success: false,
-        message: "A Super Admin cannot be created from Staff Management",
-      });
+    const roleResult = await validateStaffRole(role);
+
+    if (roleResult.error) {
+      return sendError(res, 400, roleResult.error);
     }
 
-    if ((role === "BRANCH_ADMIN" || role === "COACH") && !branch) {
-      return res.status(400).json({
-        success: false,
-        message: "Branch is required for Branch Admin and Coach",
-      });
+    const selectedRole = roleResult.role;
+
+    const branchResult = await validateBranchForRole(selectedRole, branch);
+
+    if (branchResult.error) {
+      return sendError(res, 400, branchResult.error);
     }
 
-    const normalizedEmail = email.trim().toLowerCase();
+    const assignmentError = canAssignRoleAndBranch(
+      req.user,
+      selectedRole,
+      branchResult.branch,
+    );
+
+    if (assignmentError) {
+      return sendError(res, 403, assignmentError);
+    }
+
+    const normalizedEmail = String(email).trim().toLowerCase();
 
     const existingUser = await User.findOne({
       email: normalizedEmail,
     });
 
     if (existingUser) {
-      return res.status(409).json({
-        success: false,
-        message: "A user with this email already exists",
-      });
+      return sendError(res, 409, "A user with this email already exists");
     }
 
-    let branchId = null;
-
-    if (branch) {
-      const branchExists = await Branch.findById(branch);
-
-      if (!branchExists) {
-        return res.status(404).json({
-          success: false,
-          message: "Selected branch not found",
-        });
-      }
-
-      if (!branchExists.isActive) {
-        return res.status(400).json({
-          success: false,
-          message: "Selected branch is inactive",
-        });
-      }
-
-      branchId = branchExists._id;
-    }
-
-    const hashedPassword = await bcrypt.hash(password, 10);
+    const hashedPassword = await bcrypt.hash(String(password), 10);
 
     const user = await User.create({
-      name: name.trim(),
+      name: String(name).trim(),
       email: normalizedEmail,
       password: hashedPassword,
-      role,
-      branch: branchId,
+      role: selectedRole.key,
+      branch: branchResult.branch ? branchResult.branch._id : null,
     });
 
     const populatedUser = await User.findById(user._id)
       .populate("branch", "name address phone")
       .select("-password");
 
-    res.status(201).json({
+    return res.status(201).json({
       success: true,
       message: "Staff user created successfully",
       user: populatedUser,
@@ -128,19 +297,12 @@ const createStaffUser = async (req, res) => {
   } catch (error) {
     console.error("Create staff user error:", error);
 
-    res.status(500).json({
-      success: false,
-      message: "Server error",
-    });
+    sendError(res, 500, "Server error");
   }
 };
 
 /**
- * Update staff user
- * Only SUPER_ADMIN can access this.
- *
- * Password is optional.
- * If password is empty, old password remains unchanged.
+ * Update staff user.
  */
 const updateStaffUser = async (req, res) => {
   try {
@@ -148,95 +310,98 @@ const updateStaffUser = async (req, res) => {
 
     const { name, email, password, role, branch } = req.body;
 
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return sendError(res, 400, "Invalid staff user ID");
+    }
+
     const user = await User.findById(id);
 
     if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: "Staff user not found",
-      });
+      return sendError(res, 404, "Staff user not found");
     }
 
-    if (!STAFF_ROLES.includes(user.role)) {
-      return res.status(400).json({
-        success: false,
-        message: "This account is not a staff account",
-      });
+    /*
+     * Existing SUPER_ADMIN accounts cannot be
+     * edited through Staff Management.
+     */
+    if (user.role === SUPER_ADMIN_ROLE) {
+      return sendError(res, 400, "Super Admin account cannot be edited here");
     }
 
-    if (user.role === "SUPER_ADMIN") {
-      return res.status(400).json({
-        success: false,
-        message: "Super Admin account cannot be edited here",
-      });
+    if (!canManageUser(req.user, user)) {
+      return sendError(res, 403, "You can only manage staff in your own branch");
     }
 
     if (!name || !email || !role) {
-      return res.status(400).json({
-        success: false,
-        message: "Name, email and role are required",
-      });
+      return sendError(res, 400, "Name, email and role are required");
     }
 
-    if (!["BRANCH_ADMIN", "COACH"].includes(role)) {
-      return res.status(400).json({
-        success: false,
-        message: "Only Branch Admin and Coach roles are allowed",
-      });
+    const roleResult = await validateStaffRole(role);
+
+    if (roleResult.error) {
+      return sendError(res, 400, roleResult.error);
     }
 
-    if ((role === "BRANCH_ADMIN" || role === "COACH") && !branch) {
-      return res.status(400).json({
-        success: false,
-        message: "Branch is required for Branch Admin and Coach",
-      });
+    const selectedRole = roleResult.role;
+
+    const branchResult = await validateBranchForRole(selectedRole, branch);
+
+    if (branchResult.error) {
+      return sendError(res, 400, branchResult.error);
     }
 
-    const normalizedEmail = email.trim().toLowerCase();
+    const assignmentError = canAssignRoleAndBranch(
+      req.user,
+      selectedRole,
+      branchResult.branch,
+    );
+
+    if (assignmentError) {
+      return sendError(res, 403, assignmentError);
+    }
+
+    const normalizedEmail = String(email).trim().toLowerCase();
 
     const existingUser = await User.findOne({
       email: normalizedEmail,
-      _id: { $ne: id },
+      _id: {
+        $ne: id,
+      },
     });
 
     if (existingUser) {
-      return res.status(409).json({
-        success: false,
-        message: "A user with this email already exists",
-      });
+      return sendError(res, 409, "A user with this email already exists");
     }
 
-    const branchExists = await Branch.findById(branch);
+    user.name = String(name).trim();
 
-    if (!branchExists) {
-      return res.status(404).json({
-        success: false,
-        message: "Selected branch not found",
-      });
-    }
-
-    if (!branchExists.isActive) {
-      return res.status(400).json({
-        success: false,
-        message: "Selected branch is inactive",
-      });
-    }
-
-    user.name = name.trim();
     user.email = normalizedEmail;
-    user.role = role;
-    user.branch = branchExists._id;
 
-    // Update password only when a new password is provided.
-    if (password && password.trim().length > 0) {
-      if (password.trim().length < 6) {
-        return res.status(400).json({
-          success: false,
-          message: "Password must contain at least 6 characters",
-        });
+    user.role = selectedRole.key;
+
+    user.branch = branchResult.branch ? branchResult.branch._id : null;
+
+    /*
+     * Password is optional during edit.
+     */
+    if (password && String(password).trim().length > 0) {
+      const nextPassword = String(password).trim();
+
+      if (nextPassword.length < 6) {
+        return sendError(
+          res,
+          400,
+          "Password must contain at least 6 characters",
+        );
       }
 
-      user.password = await bcrypt.hash(password.trim(), 10);
+      user.password = await bcrypt.hash(nextPassword, 10);
+
+      /*
+       * Existing password-session invalidation
+       * remains intact.
+       */
+      user.passwordChangedAt = new Date();
     }
 
     await user.save();
@@ -245,7 +410,7 @@ const updateStaffUser = async (req, res) => {
       .populate("branch", "name address phone")
       .select("-password");
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       message: "Staff user updated successfully",
       user: updatedUser,
@@ -253,50 +418,63 @@ const updateStaffUser = async (req, res) => {
   } catch (error) {
     console.error("Update staff user error:", error);
 
-    res.status(500).json({
-      success: false,
-      message: "Server error",
-    });
+    sendError(res, 500, "Server error");
   }
 };
 
 /**
- * Delete staff user
- * Only SUPER_ADMIN can delete staff.
+ * Deactivate staff user.
+ *
+ * Historical data is preserved.
  */
 const deleteStaffUser = async (req, res) => {
   try {
     const { id } = req.params;
 
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return sendError(res, 400, "Invalid staff user ID");
+    }
+
     if (req.user._id.toString() === id) {
-      return res.status(400).json({
-        success: false,
-        message: "You cannot delete your own account",
-      });
+      return sendError(res, 400, "You cannot deactivate your own account");
     }
 
     const user = await User.findById(id);
 
     if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: "User not found",
-      });
+      return sendError(res, 404, "User not found");
     }
 
-    if (!STAFF_ROLES.includes(user.role)) {
-      return res.status(400).json({
-        success: false,
-        message: "This account is not a staff account",
-      });
+    if (user.role === SUPER_ADMIN_ROLE) {
+      return sendError(
+        res,
+        400,
+        "A Super Admin account cannot be deactivated here",
+      );
     }
 
-    // Preserve historical references (attendance, promotions, and audit
-    // records) while immediately revoking this user's ability to sign in.
+    if (!canManageUser(req.user, user)) {
+      return sendError(res, 403, "You can only manage staff in your own branch");
+    }
+
+    const role = await getRole(user.role);
+
+    if (!isStaffRole(role)) {
+      return sendError(res, 400, "This account is not a staff account");
+    }
+
+    /*
+     * Soft deactivation.
+     *
+     * Do NOT delete the user because historical
+     * attendance, promotion, audit and other records
+     * may reference this account.
+     */
     user.isActive = false;
+
     await user.save();
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       message: "Staff user deactivated successfully",
       user: {
@@ -307,10 +485,7 @@ const deleteStaffUser = async (req, res) => {
   } catch (error) {
     console.error("Delete staff user error:", error);
 
-    res.status(500).json({
-      success: false,
-      message: "Server error",
-    });
+    sendError(res, 500, "Server error");
   }
 };
 

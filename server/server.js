@@ -38,6 +38,7 @@ const holidayRoutes = require("./src/routes/holiday.routes");
 const academySettingRoutes = require("./src/routes/academySettings.routes");
 const websiteRoutes = require("./src/routes/website.routes");
 const publicWebsiteRoutes = require("./src/routes/publicWebsite.routes");
+const maintenanceRoutes = require("./src/routes/maintenance.routes");
 
 /*
  * Branch Schedule
@@ -52,6 +53,7 @@ const publicWebsiteRoutes = require("./src/routes/publicWebsite.routes");
 const branchScheduleRoutes = require(
   "./src/routes/branchSchedule.routes",
 );
+const trainingSessionTypeRoutes = require("./src/routes/trainingSessionType.routes");
 
 /* =========================================================
    CONFIG / SEEDERS
@@ -70,6 +72,12 @@ const {
 ========================================================= */
 
 const app = express();
+const getClientOrigins = () => (process.env.CLIENT_URL || "http://localhost:3000")
+  .split(",")
+  .map((value) => value.trim())
+  .map((value) => {
+    try { return new URL(value).origin; } catch { return value; }
+  });
 
 /* =========================================================
    SECURITY MIDDLEWARE
@@ -135,10 +143,21 @@ app.use("/api/", apiLimiter);
 
 app.use(
   cors({
-    origin: process.env.CLIENT_URL,
+    origin: getClientOrigins(),
     credentials: true,
   }),
 );
+
+// SameSite=Lax blocks cross-site cookies; enforce the configured app origin
+// on cookie-authenticated unsafe browser requests as an additional CSRF guard.
+app.use("/api", (req, res, next) => {
+  if (["GET", "HEAD", "OPTIONS"].includes(req.method) || !req.headers.origin) return next();
+  const allowedOrigins = getClientOrigins();
+  if (!allowedOrigins.includes(req.headers.origin)) {
+    return res.status(403).json({ success: false, message: "Request origin is not allowed" });
+  }
+  return next();
+});
 
 /* =========================================================
    BODY PARSING
@@ -162,7 +181,8 @@ app.use(
    Login gets a stricter rate limiter.
 ------------------------- */
 
-app.use("/api/auth", loginLimiter, authRoutes);
+app.use("/api/auth/login", loginLimiter);
+app.use("/api/auth", authRoutes);
 
 /* -------------------------
    Students
@@ -193,6 +213,11 @@ app.use("/api/makeups", makeupRoutes);
 ------------------------- */
 
 app.use("/api/performance", performanceRoutes);
+
+/* -------------------------
+   Maintenance
+------------------------- */
+app.use("/api/maintenance", maintenanceRoutes);
 
 /* -------------------------
    Student Progress
@@ -295,6 +320,7 @@ app.use(
   "/api/branch-schedules",
   branchScheduleRoutes,
 );
+app.use("/api/training-session-types", trainingSessionTypeRoutes);
 
 /* =========================================================
    HEALTH CHECK
@@ -372,7 +398,7 @@ const startServer = async () => {
       "0.0.0.0",
       () => {
         console.log(
-          `DojoFlow server running on port ${PORT}`,
+          `ForceStrike server running on port ${PORT}`,
         );
 
         console.log(
@@ -382,7 +408,7 @@ const startServer = async () => {
     );
   } catch (error) {
     console.error(
-      "Failed to start DojoFlow server:",
+      "Failed to start ForceStrike server:",
       error,
     );
 

@@ -22,7 +22,7 @@ The system provides dedicated dashboards and permissions for **Super Admins, Bra
 - Role-based access control
 - Protected frontend routes
 - Protected backend APIs
-- Persistent authentication using local storage
+- Persistent authentication using a server-managed HttpOnly cookie
 - Secure logout
 
 ### 👥 Role-Based Access
@@ -332,11 +332,10 @@ DojoFlow uses multiple layers of security.
 
 ### Backend authentication
 
-Protected APIs require a valid JWT:
+Protected APIs require the server-managed HttpOnly session cookie. The browser
+does not expose or persist the JWT in localStorage or sessionStorage. The current
+user and permissions are loaded from `/api/auth/me`.
 
- http
-Authorization: Bearer <token>
- 
 
 ### Role-based authorization
 

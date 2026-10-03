@@ -4,6 +4,9 @@ const Student = require("../models/Student");
 const Attendance = require("../models/Attendance");
 const Makeup = require("../models/Makeup");
 const CoachStudentAssignment = require("../models/CoachStudentAssignment");
+const { isBranchScoped } = require("../utils/access");
+const { getProgramLearningProgress } = require("../services/programProgress.service");
+const { resolveProgramCurriculum } = require("../services/curriculumResolver.service");
 
 /* ============================================================
    DATE HELPERS
@@ -160,6 +163,12 @@ function getTimelineType(item, milestoneDays) {
 ============================================================ */
 
 async function checkCoachStudentAccess(req, studentId) {
+  /*
+   * Coach assignment is a business-level restriction.
+   *
+   * It intentionally remains based on the actual COACH role.
+   * This is separate from branch/data-scope authorization.
+   */
   if (req.user.role !== "COACH") {
     return true;
   }
@@ -199,7 +208,9 @@ const getStudentTimeline = async (req, res) => {
 
     const student = await Student.findById(id)
       .populate("branch", "name address")
-      .populate("plan");
+      .populate("plan")
+      .populate("plan.programs.program", "name")
+      .populate("planEnrollments.programs.program", "name");
 
     if (!student) {
       return res.status(404).json({
@@ -212,7 +223,10 @@ const getStudentTimeline = async (req, res) => {
        Coach assignment access
     -------------------------------------------------------- */
 
-    const hasCoachAccess = await checkCoachStudentAccess(req, student._id);
+    const hasCoachAccess = await checkCoachStudentAccess(
+      req,
+      student._id,
+    );
 
     if (!hasCoachAccess) {
       return res.status(403).json({
@@ -222,18 +236,41 @@ const getStudentTimeline = async (req, res) => {
     }
 
     /* --------------------------------------------------------
-       Branch-level access
+       Database-backed branch/data-scope access
     -------------------------------------------------------- */
 
-    if (
-      req.user.role !== "SUPER_ADMIN" &&
-      req.user.role !== "COACH" &&
-      student.branch?._id?.toString() !== req.user.branch?.toString()
-    ) {
-      return res.status(403).json({
-        success: false,
-        message: "You do not have access to this student",
-      });
+    /*
+     * ALL-scope roles can access students across branches.
+     *
+     * BRANCH-scope roles can access only students belonging
+     * to their assigned branch.
+     *
+     * This deliberately does NOT check:
+     *
+     *   SUPER_ADMIN
+     *   BRANCH_ADMIN
+     *   COACH
+     *
+     * because data scope belongs to the database Role record.
+     */
+    if (isBranchScoped(req.user)) {
+      if (!req.user.branch) {
+        return res.status(403).json({
+          success: false,
+          message: "No branch is assigned to this account",
+        });
+      }
+
+      if (
+        !student.branch?._id ||
+        student.branch._id.toString() !==
+          req.user.branch.toString()
+      ) {
+        return res.status(403).json({
+          success: false,
+          message: "You do not have access to this student",
+        });
+      }
     }
 
     /* --------------------------------------------------------
@@ -248,13 +285,27 @@ const getStudentTimeline = async (req, res) => {
     }
 
     const plan = student.plan;
+    const today = startOfDay(new Date());
+    const enrollment = (student.planEnrollments || []).find((item) => item.status === "ACTIVE" && new Date(item.startDate) <= today && (!item.endDate || today < new Date(item.endDate)));
+    const programs = enrollment?.programs?.length ? enrollment.programs : (plan.programs || []);
+    const requestedProgramId = req.query.programId;
+    const selectedEntitlement = requestedProgramId
+      ? programs.find((item) => String(item.program?._id || item.program) === String(requestedProgramId))
+      : programs[0];
+    if (requestedProgramId && !selectedEntitlement) return res.status(404).json({ success: false, message: "Program is not included in the student's active plan." });
+    if (!selectedEntitlement?.program) return res.status(409).json({ success: false, message: "Assign at least one training program to the student's plan before viewing a program timeline." });
+    const selectedProgramId = selectedEntitlement.program?._id || selectedEntitlement.program;
+    const configuredProgram = (plan.programs || []).find((item) => String(item.program?._id || item.program) === String(selectedProgramId));
 
     /* --------------------------------------------------------
        Curriculum
     -------------------------------------------------------- */
 
-    const curriculum = Array.isArray(plan.curriculum)
-      ? [...plan.curriculum].sort((a, b) => Number(a.day) - Number(b.day))
+    const sourceCurriculum = resolveProgramCurriculum(selectedEntitlement, configuredProgram, plan.curriculum);
+    const curriculum = Array.isArray(sourceCurriculum)
+      ? [...sourceCurriculum].sort(
+          (a, b) => Number(a.day) - Number(b.day),
+        )
       : [];
 
     /* --------------------------------------------------------
@@ -262,7 +313,9 @@ const getStudentTimeline = async (req, res) => {
     -------------------------------------------------------- */
 
     const milestones = Array.isArray(plan.milestones)
-      ? [...plan.milestones].sort((a, b) => Number(a.day) - Number(b.day))
+      ? [...plan.milestones].sort(
+          (a, b) => Number(a.day) - Number(b.day),
+        )
       : [];
 
     /* --------------------------------------------------------
@@ -270,7 +323,7 @@ const getStudentTimeline = async (req, res) => {
        
        IMPORTANT:
        Day 1 = student's actual join date.
-       -------------------------------------------------------- */
+    -------------------------------------------------------- */
 
     const joinDate = startOfDay(student.joinDate);
 
@@ -286,15 +339,16 @@ const getStudentTimeline = async (req, res) => {
 
        Only attendance on or after the student's join date
        should participate in progress calculation.
+    -------------------------------------------------------- */
 
-       This protects us from old/incorrect records such as:
-
-       15 Sep → planDay 6
-       16 Sep → join date
-       -------------------------------------------------------- */
-
+    const dateRange = { ...(enrollment?.startDate ? { $gte: enrollment.startDate } : {}), ...(enrollment?.endDate ? { $lt: enrollment.endDate } : {}), $lte: new Date() };
+    const enrollmentScope = enrollment?._id
+      ? { $or: [{ enrollment: enrollment._id, date: dateRange }, { enrollment: null, date: dateRange }] }
+      : { date: { $lte: new Date() } };
     const allAttendance = await Attendance.find({
       student: student._id,
+      sessionTypeId: selectedProgramId,
+      ...enrollmentScope,
     }).sort({
       date: 1,
       planDay: 1,
@@ -323,8 +377,6 @@ const getStudentTimeline = async (req, res) => {
 
       /*
        * Keep the latest record for a plan day.
-       * This avoids an older incorrect record replacing
-       * the current attendance state.
        */
       attendanceByDay.set(day, record);
     });
@@ -335,8 +387,12 @@ const getStudentTimeline = async (req, res) => {
 
     const makeupRecords = await Makeup.find({
       student: student._id,
+      sessionTypeId: selectedProgramId,
+      ...(enrollment?._id ? { $or: [{ enrollment: enrollment._id, originalDate: dateRange }, { enrollment: null, originalDate: dateRange }] } : {}),
     })
-      .select("planDay originalDate makeupDate status curriculumTitle")
+      .select(
+        "planDay originalDate makeupDate status curriculumTitle",
+      )
       .sort({
         originalDate: 1,
       });
@@ -368,66 +424,105 @@ const getStudentTimeline = async (req, res) => {
     const timeline = curriculum.map((item) => {
       const day = Number(item.day);
 
-      const attendanceRecord = attendanceByDay.get(day) || null;
+      const attendanceRecord =
+        attendanceByDay.get(day) || null;
 
-      const makeupRecord = makeupByDay.get(day) || null;
+      const makeupRecord =
+        makeupByDay.get(day) || null;
 
-      const status = getAttendanceState(attendanceRecord);
+      const status =
+        getAttendanceState(attendanceRecord);
 
       /*
-       * CORRECT DATE CALCULATION:
-       *
        * Day 1 = join date
        * Day 2 = join date + 1
        * Day 3 = join date + 2
        */
+      const date = attendanceRecord?.date || makeupRecord?.makeupDate || makeupRecord?.originalDate || null;
 
-      const date = addDays(joinDate, day - 1);
-
-      const milestone = milestones.find((entry) => Number(entry.day) === day);
+      const milestone = milestones.find(
+        (entry) => Number(entry.day) === day,
+      );
 
       return {
         day,
 
-        date: formatDate(date),
+        date: date ? formatDate(date) : null,
 
-        type: getTimelineType(item, milestoneDays),
+        type: getTimelineType(
+          item,
+          milestoneDays,
+        ),
 
-        title: item.title || `Training Day ${day}`,
+        title:
+          item.title ||
+          `Training Day ${day}`,
 
-        description: item.description || "",
+        description:
+          item.description || "",
 
-        skill: item.skill || "",
+        skill:
+          item.skill || "",
 
         status,
 
-        statusLabel: getStatusLabel(status),
+        statusLabel:
+          getStatusLabel(status),
 
         attendance: attendanceRecord
           ? {
               _id: attendanceRecord._id,
-              date: formatDate(attendanceRecord.date),
-              status: attendanceRecord.status,
-              makeupRequired: Boolean(attendanceRecord.makeupRequired),
-              makeupCompleted: Boolean(attendanceRecord.makeupCompleted),
+
+              date: formatDate(
+                attendanceRecord.date,
+              ),
+
+              status:
+                attendanceRecord.status,
+
+              makeupRequired:
+                Boolean(
+                  attendanceRecord.makeupRequired,
+                ),
+
+              makeupCompleted:
+                Boolean(
+                  attendanceRecord.makeupCompleted,
+                ),
             }
           : null,
 
         makeup: makeupRecord
           ? {
               _id: makeupRecord._id,
-              status: makeupRecord.status,
-              originalDate: formatDate(makeupRecord.originalDate),
-              makeupDate: formatDate(makeupRecord.makeupDate),
+
+              status:
+                makeupRecord.status,
+
+              originalDate:
+                formatDate(
+                  makeupRecord.originalDate,
+                ),
+
+              makeupDate:
+                formatDate(
+                  makeupRecord.makeupDate,
+                ),
             }
           : null,
 
         milestone: milestone
           ? {
               day: Number(milestone.day),
-              belt: milestone.belt || "",
-              skill: milestone.skill || "",
-              description: milestone.description || "",
+
+              belt:
+                milestone.belt || "",
+
+              skill:
+                milestone.skill || "",
+
+              description:
+                milestone.description || "",
             }
           : null,
       };
@@ -440,24 +535,31 @@ const getStudentTimeline = async (req, res) => {
     milestones.forEach((milestone) => {
       const day = Number(milestone.day);
 
-      const exists = timeline.some((item) => item.day === day);
+      const exists = timeline.some(
+        (item) => item.day === day,
+      );
 
       if (exists) {
         return;
       }
 
-      const attendanceRecord = attendanceByDay.get(day) || null;
+      const attendanceRecord =
+        attendanceByDay.get(day) || null;
 
-      const makeupRecord = makeupByDay.get(day) || null;
+      const makeupRecord =
+        makeupByDay.get(day) || null;
 
-      const status = getAttendanceState(attendanceRecord);
+      const status =
+        getAttendanceState(
+          attendanceRecord,
+        );
 
-      const date = addDays(joinDate, day - 1);
+      const date = attendanceRecord?.date || makeupRecord?.makeupDate || makeupRecord?.originalDate || null;
 
       timeline.push({
         day,
 
-        date: formatDate(date),
+        date: date ? formatDate(date) : null,
 
         type: "MILESTONE",
 
@@ -465,41 +567,70 @@ const getStudentTimeline = async (req, res) => {
           ? `${milestone.belt} Belt Milestone`
           : `Milestone Day ${day}`,
 
-        description: milestone.description || "",
+        description:
+          milestone.description || "",
 
-        skill: milestone.skill || "",
+        skill:
+          milestone.skill || "",
 
         status,
 
-        statusLabel: getStatusLabel(status),
+        statusLabel:
+          getStatusLabel(status),
 
         attendance: attendanceRecord
           ? {
               _id: attendanceRecord._id,
-              date: formatDate(attendanceRecord.date),
-              status: attendanceRecord.status,
-              makeupRequired: Boolean(attendanceRecord.makeupRequired),
-              makeupCompleted: Boolean(attendanceRecord.makeupCompleted),
+
+              date: formatDate(
+                attendanceRecord.date,
+              ),
+
+              status:
+                attendanceRecord.status,
+
+              makeupRequired:
+                Boolean(
+                  attendanceRecord.makeupRequired,
+                ),
+
+              makeupCompleted:
+                Boolean(
+                  attendanceRecord.makeupCompleted,
+                ),
             }
           : null,
 
         makeup: makeupRecord
           ? {
               _id: makeupRecord._id,
-              status: makeupRecord.status,
-              originalDate: formatDate(makeupRecord.originalDate),
-              makeupDate: formatDate(makeupRecord.makeupDate),
+
+              status:
+                makeupRecord.status,
+
+              originalDate:
+                formatDate(
+                  makeupRecord.originalDate,
+                ),
+
+              makeupDate:
+                formatDate(
+                  makeupRecord.makeupDate,
+                ),
             }
           : null,
 
         milestone: {
           day,
 
-          belt: milestone.belt || "",
+          belt:
+            milestone.belt || "",
 
-          skill: milestone.skill || "",
+          skill:
+            milestone.skill || "",
 
-          description: milestone.description || "",
+          description:
+            milestone.description || "",
         },
       });
     });
@@ -508,42 +639,17 @@ const getStudentTimeline = async (req, res) => {
        Sort timeline
     -------------------------------------------------------- */
 
-    timeline.sort((a, b) => a.day - b.day);
+    timeline.sort(
+      (a, b) => a.day - b.day,
+    );
 
     /* ========================================================
        CURRENT TRAINING DAY
-       
-       IMPORTANT:
-       Do not use an attendance record before joinDate.
-       
-       Also do not allow a future attendance record to make
-       the student appear to have completed that training day.
-       ======================================================== */
+    ======================================================== */
 
-    const today = startOfDay(new Date());
-
-    const completedDays = timeline
-      .filter((item) => {
-        if (item.status !== "COMPLETED" && item.status !== "MAKEUP_COMPLETED") {
-          return false;
-        }
-
-        /*
-         * A training day can only be completed if its
-         * scheduled calendar date has arrived.
-         */
-        const itemDate = startOfDay(item.date);
-
-        if (!itemDate || !today) {
-          return false;
-        }
-
-        return itemDate.getTime() <= today.getTime();
-      })
-      .map((item) => item.day);
-
-    const currentTrainingDay =
-      completedDays.length > 0 ? Math.max(...completedDays) : 0;
+    const learning = await getProgramLearningProgress({ studentId: student._id, programId: selectedProgramId, enrollmentId: enrollment?._id, enrollmentStartDate: enrollment?.startDate, enrollmentEndDate: enrollment?.endDate, curriculum, asOfDate: today });
+    const currentTrainingDay = learning.currentTrainingDay;
+    const currentBelt = student.programBelts?.find((item) => String(item.program) === String(selectedProgramId))?.belt || (programs.length === 1 ? student.currentBelt : enrollment?.startingBelt) || plan.startingBelt || "White";
 
     /* --------------------------------------------------------
        Current milestone
@@ -551,8 +657,16 @@ const getStudentTimeline = async (req, res) => {
 
     const currentMilestone =
       milestones
-        .filter((milestone) => Number(milestone.day) <= currentTrainingDay)
-        .sort((a, b) => Number(b.day) - Number(a.day))[0] || null;
+        .filter(
+          (milestone) =>
+            Number(milestone.day) <=
+            currentTrainingDay,
+        )
+        .sort(
+          (a, b) =>
+            Number(b.day) -
+            Number(a.day),
+        )[0] || null;
 
     /* --------------------------------------------------------
        Next milestone
@@ -561,18 +675,19 @@ const getStudentTimeline = async (req, res) => {
     const nextMilestone =
       milestones.find(
         (milestone) =>
-          Number(milestone.day) > currentTrainingDay &&
+          Number(milestone.day) >
+            currentTrainingDay &&
           String(milestone.belt || "")
             .trim()
             .toLowerCase() !==
-            String(student.currentBelt || "")
+            String(currentBelt || "")
               .trim()
               .toLowerCase(),
       ) || null;
 
-    const nextMilestoneDate = nextMilestone
-      ? addDays(joinDate, Number(nextMilestone.day) - 1)
-      : null;
+    // Milestones are measured in attended program sessions; without
+    // a scheduled class forecast, an exact calendar date is not known.
+    const nextMilestoneDate = null;
 
     /* ========================================================
        RESPONSE
@@ -586,19 +701,27 @@ const getStudentTimeline = async (req, res) => {
 
         name: student.name,
 
-        currentBelt: student.currentBelt || "White",
+        currentBelt:
+          currentBelt,
 
-        joinDate: formatDate(student.joinDate),
+        joinDate:
+          formatDate(
+            student.joinDate,
+          ),
 
-        status: student.status,
+        status:
+          student.status,
 
         branch: student.branch
           ? {
-              _id: student.branch._id,
+              _id:
+                student.branch._id,
 
-              name: student.branch.name,
+              name:
+                student.branch.name,
 
-              address: student.branch.address,
+              address:
+                student.branch.address,
             }
           : null,
 
@@ -607,63 +730,104 @@ const getStudentTimeline = async (req, res) => {
 
           name: plan.name,
 
-          startingBelt: plan.startingBelt || "",
+          startingBelt:
+            plan.startingBelt || "",
 
-          duration: plan.duration || null,
+          duration:
+            plan.duration || null,
 
-          durationUnit: plan.durationUnit || "",
+          durationUnit:
+            plan.durationUnit || "",
 
-          classesPerWeek: plan.classesPerWeek || null,
+          classesPerWeek:
+            plan.classesPerWeek ||
+            null,
         },
+        program: selectedEntitlement.program,
+        programs: programs.map((item) => item.program),
       },
 
       summary: {
-        totalTrainingDays: curriculum.length,
+        totalTrainingDays:
+          curriculum.length,
 
-        totalMilestones: milestones.length,
+        program: selectedEntitlement.program,
 
-        completedTrainingDay: currentTrainingDay,
+        totalMilestones:
+          milestones.length,
 
-        currentBelt: student.currentBelt || "White",
+        completedTrainingDay:
+          currentTrainingDay,
 
-        currentMilestone: currentMilestone
-          ? {
-              day: Number(currentMilestone.day),
+        currentBelt:
+          currentBelt,
 
-              belt: currentMilestone.belt || "",
+        currentMilestone:
+          currentMilestone
+            ? {
+                day: Number(
+                  currentMilestone.day,
+                ),
 
-              skill: currentMilestone.skill || "",
+                belt:
+                  currentMilestone.belt ||
+                  "",
 
-              description: currentMilestone.description || "",
-            }
-          : null,
+                skill:
+                  currentMilestone.skill ||
+                  "",
 
-        nextMilestone: nextMilestone
-          ? {
-              day: Number(nextMilestone.day),
+                description:
+                  currentMilestone.description ||
+                  "",
+              }
+            : null,
 
-              belt: nextMilestone.belt || "",
+        nextMilestone:
+          nextMilestone
+            ? {
+                day: Number(
+                  nextMilestone.day,
+                ),
 
-              skill: nextMilestone.skill || "",
+                belt:
+                  nextMilestone.belt ||
+                  "",
 
-              description: nextMilestone.description || "",
+                skill:
+                  nextMilestone.skill ||
+                  "",
 
-              date: nextMilestoneDate ? formatDate(nextMilestoneDate) : null,
-            }
-          : null,
+                description:
+                  nextMilestone.description ||
+                  "",
 
-        today: formatDate(today),
+                date:
+                  nextMilestoneDate
+                    ? formatDate(
+                        nextMilestoneDate,
+                      )
+                    : null,
+              }
+            : null,
+
+        today:
+          formatDate(today),
       },
 
       timeline,
     });
   } catch (error) {
-    console.error("Get student timeline error:", error);
+    console.error(
+      "Get student timeline error:",
+      error,
+    );
 
     return res.status(500).json({
       success: false,
 
-      message: "Failed to generate student timeline",
+      message:
+        "Failed to generate student timeline",
     });
   }
 };

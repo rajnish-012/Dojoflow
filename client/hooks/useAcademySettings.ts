@@ -1,5 +1,7 @@
 "use client";
 
+
+import { fetchWithSession } from "@/lib/sessionFetch";
 import { useCallback, useEffect, useState } from "react";
 
 const API_URL =
@@ -55,22 +57,12 @@ export function useAcademySettings() {
       setLoading(true);
       setError("");
 
-      const token =
-        typeof window !== "undefined"
-          ? localStorage.getItem("token")
-          : null;
-
-      const response = await fetch(
+      const response = await fetchWithSession(
         `${API_URL}/settings/academy`,
         {
           method: "GET",
           headers: {
             "Content-Type": "application/json",
-            ...(token
-              ? {
-                  Authorization: `Bearer ${token}`,
-                }
-              : {}),
           },
           cache: "no-store",
         },

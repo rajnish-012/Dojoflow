@@ -14,6 +14,12 @@ const performanceSchema = new mongoose.Schema(
       required: true,
     },
 
+    attendance: { type: mongoose.Schema.Types.ObjectId, ref: "Attendance", required: true, index: true },
+    enrollment: { type: mongoose.Schema.Types.ObjectId, default: null },
+    plan: { type: mongoose.Schema.Types.ObjectId, ref: "Plan", default: null },
+    sessionTypeId: { type: mongoose.Schema.Types.ObjectId, ref: "TrainingSessionType", required: true, index: true },
+    sessionSlotId: { type: mongoose.Schema.Types.ObjectId, default: null },
+
     planDay: {
       type: Number,
       required: true,
@@ -59,5 +65,7 @@ const performanceSchema = new mongoose.Schema(
     timestamps: true,
   }
 );
+
+performanceSchema.index({ attendance: 1, skill: 1 }, { unique: true, partialFilterExpression: { attendance: { $type: "objectId" } } });
 
 module.exports = mongoose.model("Performance", performanceSchema);

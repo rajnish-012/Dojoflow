@@ -8,6 +8,8 @@ const Plan = require("../models/Plan");
 const Attendance = require("../models/Attendance");
 const Performance = require("../models/Performance");
 const CoachStudentAssignment = require("../models/CoachStudentAssignment");
+const { getProgramLearningProgress } = require("../services/programProgress.service");
+const { resolveProgramCurriculum } = require("../services/curriculumResolver.service");
 
 // =========================================================
 // SHARED BRANCH ACCESS HELPER
@@ -613,7 +615,9 @@ const getStudentProgress = async (req, res) => {
 
     const student = await Student.findById(studentId)
       .populate("branch", "name address")
-      .populate("plan");
+      .populate("plan")
+      .populate("plan.programs.program", "name slug")
+      .populate("planEnrollments.programs.program", "name slug");
 
     if (!student) {
       return res.status(404).json({
@@ -666,87 +670,56 @@ const getStudentProgress = async (req, res) => {
       });
     }
 
-    const attendance = await Attendance.find({
-      student: studentId,
-    }).sort({ date: 1 });
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const currentEnrollment = (student.planEnrollments || []).find((item) => {
+      const start = new Date(item.startDate); const end = item.endDate ? new Date(item.endDate) : null;
+      return start <= today && (!end || today < end);
+    });
+    const entitlements = currentEnrollment?.programs?.length
+      ? currentEnrollment.programs
+      : student.plan.programs || [];
+    const tracks = await Promise.all(entitlements.map(async (entitlement) => {
+      const programId = String(entitlement.program?._id || entitlement.program);
+      const configuredPlanProgram = (student.plan.programs || []).find((item) => String(item.program?._id || item.program) === programId);
+      const curriculum = resolveProgramCurriculum(entitlement, configuredPlanProgram, student.plan.curriculum);
+      const milestones = student.plan.milestones || [];
+      const [learning, attendance, performance] = await Promise.all([
+        getProgramLearningProgress({ studentId, programId, enrollmentId: currentEnrollment?._id, enrollmentStartDate: currentEnrollment?.startDate, enrollmentEndDate: currentEnrollment?.endDate, curriculum, asOfDate: today }),
+        Attendance.find({ student: studentId, sessionTypeId: programId, ...(currentEnrollment?._id ? { $or: [{ enrollment: currentEnrollment._id }, { enrollment: null, date: { $gte: currentEnrollment.startDate, ...(currentEnrollment.endDate ? { $lt: currentEnrollment.endDate } : {}), $lte: new Date() } }] } : { date: { $lte: new Date() } }) }).sort({ date: 1 }).lean(),
+        Performance.find({ student: studentId, sessionTypeId: programId, ...(currentEnrollment?._id ? { $or: [{ enrollment: currentEnrollment._id }, { enrollment: null, evaluationDate: { $gte: currentEnrollment.startDate, ...(currentEnrollment.endDate ? { $lt: currentEnrollment.endDate } : {}), $lte: new Date() } }] } : { evaluationDate: { $lte: new Date() } }) }).sort({ evaluationDate: -1 }).lean(),
+      ]);
+      const currentTrainingDay = learning.currentTrainingDay;
+      const nextMilestone = milestones.filter((item) => Number(item.day) > currentTrainingDay).sort((a, b) => a.day - b.day)[0] || null;
+      const achievedMilestone = milestones.filter((item) => Number(item.day) <= currentTrainingDay).sort((a, b) => b.day - a.day)[0] || null;
+      const averageRating = performance.length ? Number((performance.reduce((sum, item) => sum + Number(item.rating), 0) / performance.length).toFixed(2)) : null;
+      return {
+        program: entitlement.program,
+        currentBelt: student.programBelts?.find((item) => String(item.program) === programId)?.belt || (entitlements.length === 1 ? student.currentBelt : currentEnrollment?.startingBelt) || student.plan.startingBelt || "White",
+        training: {
+          currentTrainingDay,
+          completedDays: learning.completedDays.length,
+          totalCurriculumDays: curriculum.length,
+          presentClasses: attendance.filter((item) => item.status === "PRESENT").length,
+          absentClasses: attendance.filter((item) => item.status === "ABSENT").length,
+          pendingMakeups: attendance.filter((item) => item.makeupRequired && !item.makeupCompleted).length,
+          completedMakeups: attendance.filter((item) => item.makeupRequired && item.makeupCompleted).length,
+        },
+        currentCurriculum: curriculum.find((item) => Number(item.day) === Number(learning.nextDay)) || null,
+        curriculum,
+        milestone: { achieved: achievedMilestone, next: nextMilestone },
+        performance: { totalEvaluations: performance.length, averageRating, latest: performance[0] || null },
+      };
+    }));
 
-    const performance = await Performance.find({
-      student: studentId,
-    }).sort({ evaluationDate: -1 });
-
-    const presentClasses = attendance.filter(
-      (record) => record.status === "PRESENT",
-    );
-
-    const absentClasses = attendance.filter(
-      (record) => record.status === "ABSENT",
-    );
-
-    const pendingMakeups = attendance.filter(
-      (record) =>
-        record.makeupRequired === true && record.makeupCompleted === false,
-    );
-
-    const completedMakeups = attendance.filter(
-      (record) =>
-        record.makeupRequired === true && record.makeupCompleted === true,
-    );
-
-    /*
-      A training day is considered completed when:
-      - Attendance is PRESENT
-      - OR an ABSENT class has its makeup completed
-    */
-
-    const completedTrainingDays = attendance
-      .filter(
-        (record) =>
-          record.status === "PRESENT" ||
-          (record.makeupRequired === true && record.makeupCompleted === true),
-      )
-      .map((record) => record.planDay)
-      .filter(
-        (planDay) => typeof planDay === "number" && Number.isFinite(planDay),
-      );
-
-    const uniqueCompletedDays = [...new Set(completedTrainingDays)];
-
-    const currentTrainingDay =
-      uniqueCompletedDays.length > 0 ? Math.max(...uniqueCompletedDays) : 0;
-
-    const milestones = Array.isArray(student.plan.milestones)
-      ? student.plan.milestones
-      : [];
-
-    const curriculum = Array.isArray(student.plan.curriculum)
-      ? student.plan.curriculum
-      : [];
-
-    // Find the next milestone.
-    const nextMilestone =
-      milestones
-        .filter((milestone) => milestone.day > currentTrainingDay)
-        .sort((a, b) => a.day - b.day)[0] || null;
-
-    // Find the last achieved milestone.
-    const achievedMilestone =
-      milestones
-        .filter((milestone) => milestone.day <= currentTrainingDay)
-        .sort((a, b) => b.day - a.day)[0] || null;
-
-    const averageRating =
-      performance.length > 0
-        ? Number(
-            (
-              performance.reduce((sum, record) => sum + record.rating, 0) /
-              performance.length
-            ).toFixed(2),
-          )
-        : null;
-
-    const currentCurriculum =
-      curriculum.find((lesson) => lesson.day === currentTrainingDay + 1) ||
-      null;
+    const requestedProgramId = req.query.programId;
+    const selectedTrack = requestedProgramId
+      ? tracks.find((item) => String(item.program?._id || item.program) === String(requestedProgramId))
+      : tracks[0];
+    if (requestedProgramId && !selectedTrack) return res.status(404).json({ success: false, message: "Program is not included in the student's active plan." });
+    const activeTrack = selectedTrack || {
+      training: { currentTrainingDay: 0, completedDays: 0, totalCurriculumDays: 0, presentClasses: 0, absentClasses: 0, pendingMakeups: 0, completedMakeups: 0 },
+      currentCurriculum: null, milestone: { achieved: null, next: null }, performance: { totalEvaluations: 0, averageRating: null, latest: null },
+    };
 
     return res.status(200).json({
       success: true,
@@ -762,26 +735,16 @@ const getStudentProgress = async (req, res) => {
           name: student.plan.name,
           duration: student.plan.duration,
           durationUnit: student.plan.durationUnit,
+          programs: entitlements.map((item) => item.program),
         },
-        training: {
-          currentTrainingDay,
-          completedDays: uniqueCompletedDays.length,
-          totalCurriculumDays: curriculum.length,
-          presentClasses: presentClasses.length,
-          absentClasses: absentClasses.length,
-          pendingMakeups: pendingMakeups.length,
-          completedMakeups: completedMakeups.length,
-        },
-        currentCurriculum,
-        milestone: {
-          achieved: achievedMilestone,
-          next: nextMilestone,
-        },
-        performance: {
-          totalEvaluations: performance.length,
-          averageRating,
-          latest: performance[0] || null,
-        },
+        selectedProgram: activeTrack.program || null,
+        currentBelt: activeTrack.currentBelt || student.currentBelt || "White",
+        tracks,
+        curriculum: activeTrack.curriculum || [],
+        training: activeTrack.training,
+        currentCurriculum: activeTrack.currentCurriculum,
+        milestone: activeTrack.milestone,
+        performance: activeTrack.performance,
       },
     });
   } catch (error) {

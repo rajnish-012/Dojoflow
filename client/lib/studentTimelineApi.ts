@@ -1,3 +1,4 @@
+import { fetchWithSession } from "@/lib/sessionFetch";
 const API_URL =
   process.env.NEXT_PUBLIC_API_URL ||
   "http://localhost:5000/api";
@@ -39,7 +40,7 @@ export interface TimelineMilestone {
 
 export interface TrainingTimelineItem {
   day: number;
-  date: string;
+  date: string | null;
   type: TimelineType;
 
   title: string;
@@ -115,33 +116,21 @@ export interface StudentTimelineResponse {
   summary: StudentTimelineSummary;
 
   timeline: TrainingTimelineItem[];
+  program?: { _id: string; name?: string } | string;
+  programs?: ({ _id: string; name?: string } | string)[];
 }
 
-function getToken() {
-  if (typeof window === "undefined") {
-    return null;
-  }
-
-  return localStorage.getItem("token");
-}
 
 async function request<T>(
   endpoint: string,
   options: RequestInit = {}
 ): Promise<T> {
-  const token = getToken();
-
-  if (!token) {
-    throw new Error("Authentication required.");
-  }
-
-  const response = await fetch(
+  const response = await fetchWithSession(
     `${API_URL}${endpoint}`,
     {
       ...options,
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
         ...(options.headers || {}),
       },
       cache: "no-store",
@@ -161,9 +150,11 @@ async function request<T>(
 }
 
 export async function getStudentTimeline(
-  studentId: string
+  studentId: string,
+  programId?: string,
 ) {
+  const query = programId ? `?programId=${encodeURIComponent(programId)}` : "";
   return request<StudentTimelineResponse>(
-    `/students/${studentId}/timeline`
+    `/students/${studentId}/timeline${query}`
   );
 }

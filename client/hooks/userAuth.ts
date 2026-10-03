@@ -8,12 +8,14 @@ import {
 
 import {
   clearAuthSession,
+  logoutSession,
   setCurrentUser,
   type CurrentUser,
   AUTH_CHANGED_EVENT,
+  SESSION_EXPIRED_EVENT,
 } from "@/lib/current-user";
 
-import { getCurrentUser } from "@/lib/api";
+import { getCurrentUser, migrateLegacySession } from "@/lib/api";
 
 type AuthStatus =
   | "loading"
@@ -47,18 +49,9 @@ export function useAuth(): UseAuthResult {
    */
   const refreshUser =
     useCallback(async () => {
-      const token =
-        localStorage.getItem("token");
-
-      if (!token) {
-        setUser(null);
-        setStatus("unauthenticated");
-
-        return null;
-      }
-
       try {
         setStatus("loading");
+        await migrateLegacySession();
 
         const currentUser =
           await getCurrentUser();
@@ -76,6 +69,7 @@ export function useAuth(): UseAuthResult {
          * Other errors are treated as an
          * unauthenticated client state.
          */
+        clearAuthSession(false);
         setUser(null);
         setStatus("unauthenticated");
 
@@ -90,19 +84,8 @@ export function useAuth(): UseAuthResult {
     let cancelled = false;
 
     async function loadUser() {
-      const token =
-        localStorage.getItem("token");
-
-      if (!token) {
-        if (!cancelled) {
-          setUser(null);
-          setStatus("unauthenticated");
-        }
-
-        return;
-      }
-
       try {
+        await migrateLegacySession();
         setStatus("loading");
 
         const currentUser =
@@ -121,6 +104,7 @@ export function useAuth(): UseAuthResult {
           return;
         }
 
+        clearAuthSession(false);
         setUser(null);
         setStatus("unauthenticated");
       }
@@ -136,31 +120,13 @@ export function useAuth(): UseAuthResult {
   /**
    * IMPORTANT:
    *
-   * Login and logout both modify localStorage.
-   * localStorage changes in the same browser tab do NOT
-   * trigger the normal "storage" event.
+   * Login and logout update the in-memory auth snapshot.
    *
    * Therefore we listen to our custom auth event.
    */
   useEffect(() => {
     const handleAuthChange =
       () => {
-        const token =
-          localStorage.getItem("token");
-
-        if (!token) {
-          setUser(null);
-          setStatus("unauthenticated");
-
-          return;
-        }
-
-        /*
-         * A token has appeared or changed.
-         *
-         * Re-check /auth/me instead of trusting
-         * localStorage alone.
-         */
         refreshUser();
       };
 
@@ -177,13 +143,23 @@ export function useAuth(): UseAuthResult {
     };
   }, [refreshUser]);
 
+  useEffect(() => {
+    const handleSessionExpired = () => {
+      clearAuthSession(false);
+      setUser(null);
+      setStatus("unauthenticated");
+      if (window.location.pathname !== "/login") window.location.assign("/login");
+    };
+    window.addEventListener(SESSION_EXPIRED_EVENT, handleSessionExpired);
+    return () => window.removeEventListener(SESSION_EXPIRED_EVENT, handleSessionExpired);
+  }, []);
+
   /**
    * Logout.
    */
   const logout =
     useCallback(() => {
-      clearAuthSession();
-
+      void logoutSession();
       setUser(null);
       setStatus("unauthenticated");
 

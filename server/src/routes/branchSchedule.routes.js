@@ -2,6 +2,8 @@ const express = require("express");
 
 const protect = require("../middleware/auth.middleware");
 
+const { authorizePermission } = require("../middleware/permission.middleware");
+
 const {
   getPublicBranchSchedules,
   getPublicBranchMonthCalendar,
@@ -13,79 +15,71 @@ const {
   deleteBranchSchedule,
 } = require("../controllers/branchSchedule.controller");
 
+const {
+  getBranchDateSchedule,
+  upsertBranchDateSchedule,
+  deleteBranchDateSchedule,
+} = require("../controllers/branchDateSchedule.controller");
+
 const router = express.Router();
 
 /* =========================================================
    PUBLIC ROUTES
-   ========================================================= */
+========================================================= */
 
-/*
- * IMPORTANT:
- *
- * These routes MUST be declared BEFORE:
- *
- * router.use(protect)
- *
- * Otherwise the public inquiry page would require login.
- *
- * Express processes router middleware/routes in order.
- */
-
-/*
- * GET /api/branch-schedules/public
- *
- * Returns active branches with their public
- * weekly training schedule.
- */
 router.get("/public", getPublicBranchSchedules);
 
-/*
- * GET /api/branch-schedules/public/:branchId/calendar
- *
- * Public monthly availability.
- *
- * Example:
- *
- * /api/branch-schedules/public/68abc123/calendar
- * ?year=2026&month=9
- */
 router.get("/public/:branchId/calendar", getPublicBranchMonthCalendar);
 
 /* =========================================================
    AUTHENTICATED ADMIN ROUTES
-   ========================================================= */
+========================================================= */
 
 router.use(protect);
 
+/* Date-specific overrides belong to the schedule resource. */
+router.get(
+  "/:branchId/date/:date",
+  authorizePermission("branch_schedule.view"),
+  getBranchDateSchedule,
+);
+
+router.put(
+  "/:branchId/date/:date",
+  authorizePermission("branch_schedule.manage"),
+  upsertBranchDateSchedule,
+);
+
+router.delete(
+  "/:branchId/date/:date",
+  authorizePermission("branch_schedule.manage"),
+  deleteBranchDateSchedule,
+);
+
 /* =========================================================
-   BRANCH SCHEDULES
-   ========================================================= */
+   WEEKLY BRANCH SCHEDULES
+========================================================= */
 
-/*
- * GET /api/branch-schedules
- */
-router.get("/", getBranchSchedules);
+router.get("/", authorizePermission("branch_schedule.view"), getBranchSchedules);
 
-/*
- * GET /api/branch-schedules/:branchId/calendar
- *
- * Admin monthly calendar.
- */
-router.get("/:branchId/calendar", getBranchMonthCalendar);
+router.get(
+  "/:branchId/calendar",
+  authorizePermission("branch_schedule.view"),
+  getBranchMonthCalendar,
+);
 
-/*
- * GET /api/branch-schedules/:branchId
- */
-router.get("/:branchId", getBranchSchedule);
+router.get("/:branchId", authorizePermission("branch_schedule.view"), getBranchSchedule);
 
-/*
- * PUT /api/branch-schedules/:branchId
- */
-router.put("/:branchId", upsertBranchSchedule);
+router.put(
+  "/:branchId",
+  authorizePermission("branch_schedule.manage"),
+  upsertBranchSchedule,
+);
 
-/*
- * DELETE /api/branch-schedules/:branchId
- */
-router.delete("/:branchId", deleteBranchSchedule);
+router.delete(
+  "/:branchId",
+  authorizePermission("branch_schedule.manage"),
+  deleteBranchSchedule,
+);
 
 module.exports = router;

@@ -30,7 +30,7 @@ const {
 } = require("../controllers/faq.controller");
 
 const protect = require("../middleware/auth.middleware");
-const authorize = require("../middleware/role.middleware");
+const { authorizePermission } = require("../middleware/permission.middleware");
 
 const router = express.Router();
 
@@ -59,7 +59,6 @@ router.get(
    ========================================================= */
 
 router.use(protect);
-router.use(authorize("SUPER_ADMIN"));
 
 
 /* =========================================================
@@ -68,21 +67,25 @@ router.use(authorize("SUPER_ADMIN"));
 
 router.get(
   "/heroes",
+  authorizePermission("website.view"),
   getAdminHeroes,
 );
 
 router.post(
   "/heroes",
+  authorizePermission("website.manage"),
   createHero,
 );
 
 router.put(
   "/heroes/:id",
+  authorizePermission("website.manage"),
   updateHero,
 );
 
 router.delete(
   "/heroes/:id",
+  authorizePermission("website.manage"),
   deleteHero,
 );
 
@@ -93,11 +96,13 @@ router.delete(
 
 router.get(
   "/sections",
+  authorizePermission("website.view"),
   getAdminSections,
 );
 
 router.put(
   "/sections",
+  authorizePermission("website.manage"),
   upsertSection,
 );
 
@@ -108,21 +113,25 @@ router.put(
 
 router.get(
   "/statistics",
+  authorizePermission("website.view"),
   getAdminStatistics,
 );
 
 router.post(
   "/statistics",
+  authorizePermission("website.manage"),
   createStatistic,
 );
 
 router.put(
   "/statistics/:id",
+  authorizePermission("website.manage"),
   updateStatistic,
 );
 
 router.delete(
   "/statistics/:id",
+  authorizePermission("website.manage"),
   deleteStatistic,
 );
 
@@ -133,21 +142,25 @@ router.delete(
 
 router.get(
   "/features",
+  authorizePermission("website.view"),
   getAdminFeatures,
 );
 
 router.post(
   "/features",
+  authorizePermission("website.manage"),
   createFeature,
 );
 
 router.put(
   "/features/:id",
+  authorizePermission("website.manage"),
   updateFeature,
 );
 
 router.delete(
   "/features/:id",
+  authorizePermission("website.manage"),
   deleteFeature,
 );
 
@@ -158,21 +171,25 @@ router.delete(
 
 router.get(
   "/faqs",
+  authorizePermission("website.view"),
   getFAQs,
 );
 
 router.post(
   "/faqs",
+  authorizePermission("website.manage"),
   createFAQ,
 );
 
 router.put(
   "/faqs/:id",
+  authorizePermission("website.manage"),
   updateFAQ,
 );
 
 router.delete(
   "/faqs/:id",
+  authorizePermission("website.manage"),
   deleteFAQ,
 );
 

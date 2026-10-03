@@ -1,4 +1,5 @@
 "use client";
+import { toast } from "@/lib/toast";
 
 import {
   useEffect,
@@ -17,6 +18,7 @@ import {
   saveWebsiteSection,
   type WebsiteSection,
 } from "@/lib/websiteApi";
+import { PERMISSIONS, useCan } from "@/lib/permissions";
 
 
 type SectionForm = {
@@ -78,6 +80,7 @@ function toForm(
 
 
 export default function SectionsManager() {
+  const canManage = useCan(PERMISSIONS.WEBSITE_MANAGE);
   const [sections, setSections] =
     useState<WebsiteSection[]>([]);
 
@@ -128,6 +131,7 @@ export default function SectionsManager() {
 
 
   function openCreate() {
+    if (!canManage) return;
     setEditing(null);
     setForm(emptyForm);
     setError("");
@@ -157,6 +161,7 @@ export default function SectionsManager() {
     event: React.FormEvent,
   ) {
     event.preventDefault();
+    if (!canManage) return;
 
     if (!form.key.trim()) {
       setError(
@@ -201,8 +206,9 @@ export default function SectionsManager() {
 
       await loadSections();
       closeModal();
+      toast.success("Homepage section saved.");
     } catch (caughtError) {
-      setError(
+      toast.error(
         caughtError instanceof Error
           ? caughtError.message
           : "Failed to save section.",
@@ -250,14 +256,14 @@ export default function SectionsManager() {
             Refresh
           </button>
 
-          <button
+          {canManage && <button
             type="button"
             onClick={openCreate}
             className="inline-flex h-10 items-center gap-2 rounded-xl bg-(--accent) px-4 text-sm font-bold text-(--accent-contrast)"
           >
             <Plus size={16} />
             Add Section
-          </button>
+          </button>}
         </div>
       </div>
 
@@ -284,13 +290,13 @@ export default function SectionsManager() {
             No homepage sections yet.
           </p>
 
-          <button
+          {canManage && <button
             type="button"
             onClick={openCreate}
             className="mt-4 rounded-xl bg-(--accent) px-4 py-2 text-sm font-bold text-(--accent-contrast)"
           >
             Add Section
-          </button>
+          </button>}
         </div>
       ) : (
         <div className="space-y-3">
@@ -346,7 +352,7 @@ export default function SectionsManager() {
                       0}
                   </span>
 
-                  <button
+                  {canManage && <button
                     type="button"
                     onClick={() =>
                       openEdit(section)
@@ -355,7 +361,7 @@ export default function SectionsManager() {
                   >
                     <Edit3 size={13} />
                     Edit
-                  </button>
+                  </button>}
                 </div>
               </div>
             </article>
@@ -363,7 +369,7 @@ export default function SectionsManager() {
         </div>
       )}
 
-      {showModal && (
+      {showModal && canManage && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
           <div className="max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-2xl border border-(--line) bg-(--card) p-5 shadow-2xl">
             <div className="mb-5 flex items-center justify-between">

@@ -1,13 +1,13 @@
 import type { Metadata } from "next";
 import Script from "next/script";
-import "@fontsource-variable/plus-jakarta-sans";
 import "./globals.css";
 import AppShell from "@/components/layout/AppShell";
 import ThemeProvider from "@/components/theme/ThemeProvider";
 import { Inter } from "next/font/google";
 import { cn } from "@/lib/utils";
+import NotificationProvider from "@/components/ui/NotificationProvider";
 
-const inter = Inter({subsets:['latin'],variable:'--font-sans'});
+const inter = Inter({ subsets: ["latin"], variable: "--font-sans" });
 
 export const metadata: Metadata = {
   title: "ForceStrike | Karate Academy Management",
@@ -68,7 +68,9 @@ export default function RootLayout({
 
       <body>
         <ThemeProvider>
-          <AppShell>{children}</AppShell>
+          <NotificationProvider>
+            <AppShell>{children}</AppShell>
+          </NotificationProvider>
         </ThemeProvider>
       </body>
     </html>

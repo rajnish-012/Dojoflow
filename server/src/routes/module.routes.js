@@ -10,29 +10,81 @@ const {
 } = require("../controllers/module.controller");
 
 const protect = require("../middleware/auth.middleware");
-const authorize = require("../middleware/role.middleware");
+const { authorizePermission } = require("../middleware/permission.middleware");
 
 const router = express.Router();
 
-// Sidebar items for the logged-in user (any role).
-// IMPORTANT: must stay above "/:id" routes.
+/*
+ * =========================================================
+ * USER NAVIGATION
+ * =========================================================
+ *
+ * The navigation endpoint is available to authenticated users.
+ *
+ * The controller determines which modules the current user's
+ * database role/permissions allow them to see.
+ *
+ * Frontend navigation is NOT a security boundary.
+ */
 router.get("/navigation", protect, getMyNavigation);
 
-// Everything below is Super Admin only.
-router.get("/", protect, authorize("SUPER_ADMIN"), getModules);
+/*
+ * =========================================================
+ * MODULE MANAGEMENT
+ * =========================================================
+ *
+ * These endpoints are controlled by database permissions.
+ */
 
-router.post("/", protect, authorize("SUPER_ADMIN"), createModule);
+/*
+ * Get all configured modules.
+ *
+ * Requires:
+ *   module.view
+ */
+router.get("/", protect, authorizePermission("module.view"), getModules);
 
-// IMPORTANT: "/reorder" must stay above "/:id"
+/*
+ * Create module.
+ *
+ * Requires:
+ *   module.manage
+ */
+router.post("/", protect, authorizePermission("module.manage"), createModule);
+
+/*
+ * IMPORTANT:
+ * /reorder must remain before /:id.
+ *
+ * Requires:
+ *   module.manage
+ */
 router.put(
   "/reorder",
   protect,
-  authorize("SUPER_ADMIN"),
-  reorderModules
+  authorizePermission("module.manage"),
+  reorderModules,
 );
 
-router.put("/:id", protect, authorize("SUPER_ADMIN"), updateModule);
+/*
+ * Update module.
+ *
+ * Requires:
+ *   module.manage
+ */
+router.put("/:id", protect, authorizePermission("module.manage"), updateModule);
 
-router.delete("/:id", protect, authorize("SUPER_ADMIN"), deleteModule);
+/*
+ * Delete module.
+ *
+ * Requires:
+ *   module.manage
+ */
+router.delete(
+  "/:id",
+  protect,
+  authorizePermission("module.manage"),
+  deleteModule,
+);
 
 module.exports = router;

@@ -9,82 +9,73 @@ const {
 } = require("../controllers/holiday.controller");
 
 const protect = require("../middleware/auth.middleware");
-const authorize = require("../middleware/role.middleware");
+const { authorizePermission } = require("../middleware/permission.middleware");
 
 const router = express.Router();
 
 /* ==========================================
    GET ALL HOLIDAYS
-   SUPER_ADMIN / BRANCH_ADMIN / COACH
-========================================== */
 
-router.get(
-  "/",
-  protect,
-  authorize(
-    "SUPER_ADMIN",
-    "BRANCH_ADMIN",
-    "COACH"
-  ),
-  getHolidays
-);
+   Requires:
+   holiday.view
+
+   Backend permission is the security boundary.
+   ========================================== */
+
+router.get("/", protect, authorizePermission("holiday.view"), getHolidays);
 
 /* ==========================================
    GET HOLIDAY BY DATE
-========================================== */
+
+   Requires:
+   holiday.view
+   ========================================== */
 
 router.get(
   "/by-date",
   protect,
-  authorize(
-    "SUPER_ADMIN",
-    "BRANCH_ADMIN",
-    "COACH"
-  ),
-  getHolidayByDate
+  authorizePermission("holiday.view"),
+  getHolidayByDate,
 );
 
 /* ==========================================
    CREATE HOLIDAY
-   SUPER_ADMIN / BRANCH_ADMIN
-========================================== */
 
-router.post(
-  "/",
-  protect,
-  authorize(
-    "SUPER_ADMIN",
-    "BRANCH_ADMIN"
-  ),
-  createHoliday
-);
+   Requires:
+   holiday.manage
+
+   Branch/global restrictions are still enforced
+   inside holiday.controller.js.
+   ========================================== */
+
+router.post("/", protect, authorizePermission("holiday.manage"), createHoliday);
 
 /* ==========================================
    UPDATE HOLIDAY
-========================================== */
+
+   Requires:
+   holiday.manage
+   ========================================== */
 
 router.put(
   "/:id",
   protect,
-  authorize(
-    "SUPER_ADMIN",
-    "BRANCH_ADMIN"
-  ),
-  updateHoliday
+  authorizePermission("holiday.manage"),
+  updateHoliday,
 );
 
 /* ==========================================
    DELETE HOLIDAY
-========================================== */
+
+   Requires:
+   holiday.manage
+   ========================================== */
 
 router.delete(
   "/:id",
   protect,
-  authorize(
-    "SUPER_ADMIN",
-    "BRANCH_ADMIN"
-  ),
-  deleteHoliday
+  authorizePermission("holiday.manage"),
+  deleteHoliday,
 );
 
 module.exports = router;

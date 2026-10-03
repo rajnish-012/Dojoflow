@@ -7,47 +7,53 @@ const {
 } = require("../controllers/academySettings.controller");
 
 const protect = require("../middleware/auth.middleware");
-const authorize = require("../middleware/role.middleware");
+const { authorizePermission } = require("../middleware/permission.middleware");
 
-const router =
-  express.Router();
-
-/*
-=========================================================
-PUBLIC ACADEMY BRANDING
-=========================================================
-
-Used by:
-- Public landing page
-- Public website
-- Header/branding presentation
-
-Only public branding/contact fields are returned
-by the controller.
-*/
-
-router.get(
-  "/academy/public",
-  getPublicAcademySettings,
-);
+const router = express.Router();
 
 /*
-=========================================================
-ADMIN ACADEMY SETTINGS
-=========================================================
-*/
+ * =========================================================
+ * PUBLIC ACADEMY SETTINGS
+ * =========================================================
+ *
+ * Public branding/contact information.
+ *
+ * No authentication required.
+ */
+router.get("/academy/public", getPublicAcademySettings);
 
+/*
+ * =========================================================
+ * ADMIN ACADEMY SETTINGS
+ * =========================================================
+ *
+ * GET:
+ *   settings.view
+ *
+ * PUT:
+ *   settings.manage
+ *
+ * SUPER_ADMIN continues to have protected system access
+ * through authorizePermission().
+ */
+
+/*
+ * Read academy settings.
+ */
 router.get(
   "/academy",
   protect,
-  authorize("SUPER_ADMIN"),
+  authorizePermission("settings.view"),
   getAcademySettings,
 );
 
+/*
+ * Modify academy settings.
+ */
 router.put(
   "/academy",
   protect,
-  authorize("SUPER_ADMIN"),
+  authorizePermission("settings.manage"),
   updateAcademySettings,
 );
 

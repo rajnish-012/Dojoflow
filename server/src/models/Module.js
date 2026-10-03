@@ -28,7 +28,7 @@ const moduleSchema = new mongoose.Schema(
       trim: true,
     },
 
-    // Name of a lucide-react icon (see client/lib/navigation-icons.ts)
+    // Name of a lucide-react icon
     icon: {
       type: String,
       default: "LayoutDashboard",
@@ -41,7 +41,43 @@ const moduleSchema = new mongoose.Schema(
       default: 0,
     },
 
-    // Role keys that can see this module, e.g. ["SUPER_ADMIN", "COACH"]
+    /*
+     * =========================================================
+     * DATABASE-BACKED PERMISSION
+     * =========================================================
+     *
+     * This is now the primary authorization mapping for a
+     * module.
+     *
+     * Example:
+     *
+     * students -> student.view
+     * attendance -> attendance.view
+     * settings -> settings.view
+     *
+     * The user's effective permissions come from:
+     *
+     * User -> Role -> Role.permissions
+     */
+    requiredPermission: {
+      type: String,
+      trim: true,
+      default: null,
+    },
+
+    /*
+     * =========================================================
+     * LEGACY ROLE VISIBILITY
+     * =========================================================
+     *
+     * Retained for backward compatibility with existing
+     * database records and the Modules management UI.
+     *
+     * This is NOT the primary authorization source anymore.
+     *
+     * Backend navigation authorization uses
+     * requiredPermission + req.user.permissions.
+     */
     allowedRoles: {
       type: [String],
       default: [],
@@ -60,7 +96,7 @@ const moduleSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
-  }
+  },
 );
 
 module.exports = mongoose.model("Module", moduleSchema);

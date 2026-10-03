@@ -9,6 +9,7 @@ import {
   Badge,
   Button,
   Modal,
+  Select,
 } from "@/components/ui";
 
 import type { DailyAttendanceRow } from "./AttendanceRow";
@@ -19,8 +20,11 @@ type AttendanceModalProps = {
   open: boolean;
   saving: boolean;
   error: string;
+  canManage: boolean;
   onClose: () => void;
   onConfirm: () => void;
+  sessionSlotId: string;
+  onSessionChange: (id: string) => void;
 };
 
 export default function AttendanceModal({
@@ -29,14 +33,19 @@ export default function AttendanceModal({
   open,
   saving,
   error,
+  canManage,
   onClose,
   onConfirm,
+  sessionSlotId,
+  onSessionChange,
 }: AttendanceModalProps) {
   if (!row || !status) {
     return null;
   }
 
   const isAbsent = status === "ABSENT";
+  const selectedSlot = (row.branchSchedule?.slots || []).find((slot) => slot._id === sessionSlotId);
+  const selectedCurriculum = selectedSlot?.curriculum || row.curriculum;
 
   return (
     <Modal
@@ -95,7 +104,8 @@ export default function AttendanceModal({
             </div>
 
             <p className="mt-2 text-lg font-bold text-[var(--foreground)]">
-              Day {row.planDay}
+              Day {selectedSlot?.planDay || row.planDay}
+              {selectedSlot?.programName ? ` · ${selectedSlot.programName}` : ""}
             </p>
           </div>
 
@@ -120,25 +130,32 @@ export default function AttendanceModal({
           </div>
         </div>
 
+        {(row.branchSchedule?.slots || []).filter((slot) => slot.entitled && slot.curriculumAvailable && slot.sessionTypeId && slot._id && !slot.attendance).length > 0 && <div>
+          <label className="mb-2 block text-xs font-semibold text-[var(--ink-muted)]">Scheduled session</label>
+          <Select value={sessionSlotId} onChange={(event) => onSessionChange(event.target.value)}>
+            {(row.branchSchedule?.slots || []).filter((slot) => slot.entitled && slot.curriculumAvailable && slot.sessionTypeId && slot._id && !slot.attendance).map((slot) => <option key={slot._id} value={slot._id}>{slot.sessionName} ({slot.startTime}–{slot.endTime})</option>)}
+          </Select>
+        </div>}
+
         <div className="rounded-xl border border-[var(--border)] p-4">
           <p className="text-xs font-bold uppercase tracking-[0.12em] text-[var(--ink-muted)]">
             Curriculum step
           </p>
 
           <p className="mt-2 font-semibold text-[var(--foreground)]">
-            {row.curriculum?.title ||
+            {selectedCurriculum?.title ||
               "No curriculum title configured"}
           </p>
 
-          {row.curriculum?.description && (
+          {selectedCurriculum?.description && (
             <p className="mt-2 text-sm leading-6 text-[var(--ink-muted)]">
-              {row.curriculum.description}
+              {selectedCurriculum.description}
             </p>
           )}
 
-          {row.curriculum?.skill && (
+          {selectedCurriculum?.skill && (
             <p className="mt-2 text-xs font-semibold text-[var(--accent)]">
-              Skill: {row.curriculum.skill}
+              Skill: {selectedCurriculum.skill}
             </p>
           )}
         </div>
@@ -177,7 +194,7 @@ export default function AttendanceModal({
             Cancel
           </Button>
 
-          <Button
+          {canManage && <Button
             type="button"
             variant={
               isAbsent
@@ -197,7 +214,7 @@ export default function AttendanceModal({
             {isAbsent
               ? "Absent"
               : "Present"}
-          </Button>
+          </Button>}
         </div>
       </div>
     </Modal>

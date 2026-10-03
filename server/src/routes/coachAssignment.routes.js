@@ -9,54 +9,37 @@ const {
 } = require("../controllers/coachAssignment.controller");
 
 const protect = require("../middleware/auth.middleware");
-const authorize = require("../middleware/role.middleware");
+const { authorizePermission } = require("../middleware/permission.middleware");
 
 const router = express.Router();
 
 router.get(
   "/my-students",
   protect,
-  authorize("COACH"),
+  authorizePermission("coach_assignment.view"),
   getMyAssignedStudents,
 );
 
 router.get(
   "/coaches",
   protect,
-  authorize(
-    "SUPER_ADMIN",
-    "BRANCH_ADMIN",
-  ),
+  authorizePermission("coach_assignment.view"),
   getCoaches,
 );
 
-router.get(
-  "/",
-  protect,
-  authorize(
-    "SUPER_ADMIN",
-    "BRANCH_ADMIN",
-  ),
-  getAssignments,
-);
+router.get("/", protect, authorizePermission("coach_assignment.view"), getAssignments);
 
 router.post(
   "/",
   protect,
-  authorize(
-    "SUPER_ADMIN",
-    "BRANCH_ADMIN",
-  ),
+  authorizePermission("coach_assignment.manage"),
   createAssignment,
 );
 
 router.delete(
   "/:id",
   protect,
-  authorize(
-    "SUPER_ADMIN",
-    "BRANCH_ADMIN",
-  ),
+  authorizePermission("coach_assignment.manage"),
   deleteAssignment,
 );
 

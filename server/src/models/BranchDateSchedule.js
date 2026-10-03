@@ -12,6 +12,13 @@ const dateTimeSlotSchema = new mongoose.Schema(
       default: "Training Session",
     },
 
+    sessionTypeId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "TrainingSessionType",
+    },
+
+    sessionType: { type: String, trim: true },
+
     startTime: {
       type: String,
       required: true,
@@ -120,5 +127,6 @@ branchDateScheduleSchema.index(
     unique: true,
   },
 );
+branchDateScheduleSchema.index({ "slots.sessionTypeId": 1 });
 
 module.exports = mongoose.model("BranchDateSchedule", branchDateScheduleSchema);

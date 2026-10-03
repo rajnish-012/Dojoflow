@@ -30,8 +30,49 @@ function toObjectId(id) {
   return new mongoose.Types.ObjectId(id);
 }
 
+/*
+|--------------------------------------------------------------------------
+| DATABASE-DRIVEN BRANCH SCOPE
+|--------------------------------------------------------------------------
+|
+| Authorization middleware decides whether the user may access
+| reports at all.
+|
+| These helpers decide WHICH data the authorized user may see.
+|
+| SUPER_ADMIN:
+|   ALL
+|
+| Any database role configured with:
+|   dataScope: "ALL"
+|
+| may access all branches.
+|
+| Any database role configured with:
+|   dataScope: "BRANCH"
+|
+| is restricted to req.user.branch.
+|
+| This deliberately does NOT depend only on role names such as
+| COACH or BRANCH_ADMIN, because custom roles may also be
+| branch-scoped.
+|--------------------------------------------------------------------------
+*/
+
+function isSuperAdmin(req) {
+  return String(req.user?.role || "").toUpperCase() === "SUPER_ADMIN";
+}
+
 function isBranchScopedUser(req) {
-  return req.user?.role === "BRANCH_ADMIN" || req.user?.role === "COACH";
+  if (!req.user) {
+    return true;
+  }
+
+  if (isSuperAdmin(req)) {
+    return false;
+  }
+
+  return String(req.user.dataScope || "BRANCH").toUpperCase() === "BRANCH";
 }
 
 function getUserBranchId(req) {
@@ -48,22 +89,43 @@ function getUserBranchId(req) {
 
 function getRequestedBranchId(req) {
   /*
-   * Branch Admin / Coach must always remain inside
-   * their own branch.
+   * Branch-scoped users can NEVER choose another branch
+   * through the query string.
    */
   if (isBranchScopedUser(req)) {
     return getUserBranchId(req);
   }
 
+  /*
+   * ALL-scope users may optionally filter by branch.
+   */
   return req.query.branch || null;
 }
+
+/*
+|--------------------------------------------------------------------------
+| Branch match helper
+|--------------------------------------------------------------------------
+|
+| IMPORTANT:
+|
+| This helper is used against collections whose documents contain
+| a direct "branch" field.
+|--------------------------------------------------------------------------
+*/
 
 function buildBranchMatch(req) {
   const branchId = getRequestedBranchId(req);
 
   if (!branchId) {
     if (isBranchScopedUser(req)) {
-      return { _id: null };
+      /*
+       * A branch-scoped account without an assigned branch
+       * must not receive global data.
+       */
+      return {
+        branch: null,
+      };
     }
 
     return {};
@@ -84,6 +146,37 @@ function buildStudentMatch(req) {
   return {
     ...buildBranchMatch(req),
   };
+}
+
+/*
+|--------------------------------------------------------------------------
+| Query branch validation
+|--------------------------------------------------------------------------
+*/
+
+function validateRequestedBranch(req, res) {
+  if (!req.query.branch) {
+    return true;
+  }
+
+  if (isBranchScopedUser(req)) {
+    /*
+     * Ignore the requested branch for branch-scoped users.
+     * Their own branch is always enforced by getRequestedBranchId().
+     */
+    return true;
+  }
+
+  if (!isValidObjectId(req.query.branch)) {
+    res.status(400).json({
+      success: false,
+      message: "Invalid branch filter.",
+    });
+
+    return false;
+  }
+
+  return true;
 }
 
 function getYearRange(yearValue) {
@@ -132,14 +225,14 @@ function safePercentage(numerator, denominator) {
 |--------------------------------------------------------------------------
 | Summary / Overview
 |--------------------------------------------------------------------------
-|
-| GET /api/reports/summary?year=2026&branch=<id>
-|
-|--------------------------------------------------------------------------
 */
 
 async function getReportsSummary(req, res) {
   try {
+    if (!validateRequestedBranch(req, res)) {
+      return;
+    }
+
     const { year, from, to } = getYearRange(req.query.year);
 
     const branchMatch = buildBranchMatch(req);
@@ -395,11 +488,6 @@ async function getReportsSummary(req, res) {
       performance.evaluations,
     );
 
-    /*
-     * Cohort retention:
-     * students admitted during the selected year
-     * who are still ACTIVE.
-     */
     const cohortStudents = await Student.find({
       ...studentMatch,
       joinDate: {
@@ -416,9 +504,6 @@ async function getReportsSummary(req, res) {
 
     const retentionRate = safePercentage(cohortActive, cohortStudents.length);
 
-    /*
-     * Monthly attendance.
-     */
     const attendanceTrend = Array.from({ length: 12 }, (_, index) => {
       const month = index + 1;
 
@@ -443,9 +528,6 @@ async function getReportsSummary(req, res) {
       };
     });
 
-    /*
-     * Monthly promotions.
-     */
     const promotionTrend = Array.from({ length: 12 }, (_, index) => {
       const month = index + 1;
 
@@ -533,14 +615,14 @@ async function getReportsSummary(req, res) {
 |--------------------------------------------------------------------------
 | Top Performers
 |--------------------------------------------------------------------------
-|
-| Included in /summary.
-|
-|--------------------------------------------------------------------------
 */
 
 async function getTopPerformers(req, res) {
   try {
+    if (!validateRequestedBranch(req, res)) {
+      return;
+    }
+
     const { from, to } = getYearRange(req.query.year);
 
     const branchMatch = buildBranchMatch(req);
@@ -559,12 +641,15 @@ async function getTopPerformers(req, res) {
       {
         $group: {
           _id: "$student",
+
           averageRating: {
             $avg: "$rating",
           },
+
           evaluations: {
             $sum: 1,
           },
+
           skillsCompleted: {
             $sum: {
               $cond: [
@@ -598,20 +683,28 @@ async function getTopPerformers(req, res) {
             $ne: "INACTIVE",
           },
 
-          ...(req.query.branch && isValidObjectId(req.query.branch)
+          ...(req.query.branch &&
+          !isBranchScopedUser(req) &&
+          isValidObjectId(req.query.branch)
             ? {
                 "student.branch": toObjectId(req.query.branch),
               }
-            : {}),
+            : isBranchScopedUser(req) && isValidObjectId(getUserBranchId(req))
+              ? {
+                  "student.branch": toObjectId(getUserBranchId(req)),
+                }
+              : {}),
         },
       },
 
       {
         $lookup: {
           from: "attendance",
+
           let: {
             studentId: "$_id",
           },
+
           pipeline: [
             {
               $match: {
@@ -620,9 +713,11 @@ async function getTopPerformers(req, res) {
                     {
                       $eq: ["$student", "$$studentId"],
                     },
+
                     {
                       $gte: ["$date", from],
                     },
+
                     {
                       $lt: ["$date", to],
                     },
@@ -630,12 +725,15 @@ async function getTopPerformers(req, res) {
                 },
               },
             },
+
             {
               $group: {
                 _id: null,
+
                 total: {
                   $sum: 1,
                 },
+
                 present: {
                   $sum: {
                     $cond: [
@@ -650,6 +748,7 @@ async function getTopPerformers(req, res) {
               },
             },
           ],
+
           as: "attendance",
         },
       },
@@ -683,6 +782,7 @@ async function getTopPerformers(req, res) {
               {
                 $gt: ["$attendanceTotal", 0],
               },
+
               {
                 $multiply: [
                   {
@@ -691,6 +791,7 @@ async function getTopPerformers(req, res) {
                   100,
                 ],
               },
+
               0,
             ],
           },
@@ -709,6 +810,7 @@ async function getTopPerformers(req, res) {
                   60,
                 ],
               },
+
               {
                 $multiply: [
                   {
@@ -760,6 +862,7 @@ async function getTopPerformers(req, res) {
                   $arrayElemAt: ["$branch", 0],
                 },
               },
+
               in: {
                 _id: "$$branch._id",
                 name: "$$branch.name",
@@ -772,7 +875,6 @@ async function getTopPerformers(req, res) {
           },
 
           evaluations: 1,
-
           skillsCompleted: 1,
 
           attendanceRate: {
@@ -804,14 +906,14 @@ async function getTopPerformers(req, res) {
 |--------------------------------------------------------------------------
 | Skill Completion By Belt
 |--------------------------------------------------------------------------
-|
-| "Completed" = performance rating >= 4.
-|
-|--------------------------------------------------------------------------
 */
 
 async function getSkillCompletionByBelt(req, res) {
   try {
+    if (!validateRequestedBranch(req, res)) {
+      return;
+    }
+
     const { from, to } = getYearRange(req.query.year);
 
     const branchMatch = buildBranchMatch(req);
@@ -892,11 +994,13 @@ async function getSkillCompletionByBelt(req, res) {
               skill: "$_id.skill",
               evaluations: "$evaluations",
               completed: "$completed",
+
               completionRate: {
                 $cond: [
                   {
                     $gt: ["$evaluations", 0],
                   },
+
                   {
                     $multiply: [
                       {
@@ -905,6 +1009,7 @@ async function getSkillCompletionByBelt(req, res) {
                       100,
                     ],
                   },
+
                   0,
                 ],
               },
@@ -920,7 +1025,6 @@ async function getSkillCompletionByBelt(req, res) {
           belt: "$_id",
 
           totalEvaluations: 1,
-
           totalCompleted: 1,
 
           completionRate: {
@@ -928,6 +1032,7 @@ async function getSkillCompletionByBelt(req, res) {
               {
                 $gt: ["$totalEvaluations", 0],
               },
+
               {
                 $multiply: [
                   {
@@ -936,6 +1041,7 @@ async function getSkillCompletionByBelt(req, res) {
                   100,
                 ],
               },
+
               0,
             ],
           },
@@ -977,6 +1083,10 @@ async function getSkillCompletionByBelt(req, res) {
 
 async function getBranchReports(req, res) {
   try {
+    if (!validateRequestedBranch(req, res)) {
+      return;
+    }
+
     const { from, to, year } = getYearRange(req.query.year);
 
     const branchFilter = {};
@@ -1029,6 +1139,7 @@ async function getBranchReports(req, res) {
               },
             },
           },
+
           {
             $group: {
               _id: "$branch",
@@ -1089,18 +1200,21 @@ async function getBranchReports(req, res) {
               branch: {
                 $in: branchIds,
               },
+
               date: {
                 $gte: from,
                 $lt: to,
               },
             },
           },
+
           {
             $group: {
               _id: {
                 branch: "$branch",
                 status: "$status",
               },
+
               count: {
                 $sum: 1,
               },
@@ -1114,18 +1228,22 @@ async function getBranchReports(req, res) {
               branch: {
                 $in: branchIds,
               },
+
               evaluationDate: {
                 $gte: from,
                 $lt: to,
               },
             },
           },
+
           {
             $group: {
               _id: "$branch",
+
               averageRating: {
                 $avg: "$rating",
               },
+
               evaluations: {
                 $sum: 1,
               },
@@ -1139,15 +1257,18 @@ async function getBranchReports(req, res) {
               branch: {
                 $in: branchIds,
               },
+
               promotedAt: {
                 $gte: from,
                 $lt: to,
               },
             },
           },
+
           {
             $group: {
               _id: "$branch",
+
               promotions: {
                 $sum: 1,
               },
@@ -1161,18 +1282,21 @@ async function getBranchReports(req, res) {
               branch: {
                 $in: branchIds,
               },
+
               createdAt: {
                 $gte: from,
                 $lt: to,
               },
             },
           },
+
           {
             $group: {
               _id: {
                 branch: "$branch",
                 status: "$status",
               },
+
               count: {
                 $sum: 1,
               },
@@ -1293,6 +1417,7 @@ async function getBranchReports(req, res) {
           total: attendanceStats.total,
           present: attendanceStats.present,
           absent: attendanceStats.absent,
+
           attendanceRate: safePercentage(
             attendanceStats.present,
             attendanceStats.total,
@@ -1303,6 +1428,7 @@ async function getBranchReports(req, res) {
           averageRating: Number(
             Number(performanceStats.averageRating || 0).toFixed(2),
           ),
+
           evaluations: performanceStats.evaluations,
         },
 
@@ -1331,10 +1457,21 @@ async function getBranchReports(req, res) {
 |--------------------------------------------------------------------------
 | Coach Reports
 |--------------------------------------------------------------------------
+|
+| "COACH" here is a business-data classification:
+| this report lists actual users whose current stored role
+| is COACH.
+|
+| It is NOT used as API authorization.
+|--------------------------------------------------------------------------
 */
 
 async function getCoachReports(req, res) {
   try {
+    if (!validateRequestedBranch(req, res)) {
+      return;
+    }
+
     const { from, to, year } = getYearRange(req.query.year);
 
     const coachFilter = {
@@ -1387,18 +1524,21 @@ async function getCoachReports(req, res) {
             markedBy: {
               $in: coachIds,
             },
+
             date: {
               $gte: from,
               $lt: to,
             },
           },
         },
+
         {
           $group: {
             _id: {
               coach: "$markedBy",
               status: "$status",
             },
+
             count: {
               $sum: 1,
             },
@@ -1412,21 +1552,26 @@ async function getCoachReports(req, res) {
             evaluatedBy: {
               $in: coachIds,
             },
+
             evaluationDate: {
               $gte: from,
               $lt: to,
             },
           },
         },
+
         {
           $group: {
             _id: "$evaluatedBy",
+
             averageRating: {
               $avg: "$rating",
             },
+
             evaluations: {
               $sum: 1,
             },
+
             students: {
               $addToSet: "$student",
             },
@@ -1498,6 +1643,7 @@ async function getCoachReports(req, res) {
           total: attendanceStats.total,
           present: attendanceStats.present,
           absent: attendanceStats.absent,
+
           attendanceRate: safePercentage(
             attendanceStats.present,
             attendanceStats.total,
@@ -1508,6 +1654,7 @@ async function getCoachReports(req, res) {
           averageRating: Number(
             Number(performanceStats.averageRating || 0).toFixed(2),
           ),
+
           evaluations: performanceStats.evaluations,
         },
 
@@ -1538,6 +1685,10 @@ async function getCoachReports(req, res) {
 
 async function getBeltReports(req, res) {
   try {
+    if (!validateRequestedBranch(req, res)) {
+      return;
+    }
+
     const { from, to, year } = getYearRange(req.query.year);
 
     const match = {
@@ -1545,6 +1696,7 @@ async function getBeltReports(req, res) {
         $gte: from,
         $lt: to,
       },
+
       ...buildBranchMatch(req),
     };
 
@@ -1553,14 +1705,17 @@ async function getBeltReports(req, res) {
         {
           $match: match,
         },
+
         {
           $group: {
             _id: "$toBelt",
+
             count: {
               $sum: 1,
             },
           },
         },
+
         {
           $sort: {
             count: -1,
@@ -1572,6 +1727,7 @@ async function getBeltReports(req, res) {
         {
           $match: match,
         },
+
         {
           $group: {
             _id: {
@@ -1579,11 +1735,13 @@ async function getBeltReports(req, res) {
                 $month: "$promotedAt",
               },
             },
+
             count: {
               $sum: 1,
             },
           },
         },
+
         {
           $sort: {
             "_id.month": 1,
@@ -1595,17 +1753,20 @@ async function getBeltReports(req, res) {
         {
           $match: match,
         },
+
         {
           $group: {
             _id: {
               from: "$fromBelt",
               to: "$toBelt",
             },
+
             count: {
               $sum: 1,
             },
           },
         },
+
         {
           $sort: {
             count: -1,
@@ -1632,7 +1793,9 @@ async function getBeltReports(req, res) {
 
     const transitions = byFromTo.map((item) => ({
       from: item._id.from || "Starting",
+
       to: item._id.to || "Unknown",
+
       count: item.count,
     }));
 
@@ -1648,9 +1811,7 @@ async function getBeltReports(req, res) {
         ),
 
         distribution,
-
         monthly,
-
         transitions,
       },
     });
@@ -1714,21 +1875,53 @@ async function getReportBranches(req, res) {
 
 async function getAdmissionReports(req, res) {
   try {
+    if (!validateRequestedBranch(req, res)) {
+      return;
+    }
+
     const { from, to, year } = getYearRange(req.query.year);
 
     const branchMatch = buildBranchMatch(req);
+
+    const inquiryMatch = {
+      createdAt: {
+        $gte: from,
+        $lt: to,
+      },
+    };
+
+    /*
+     * If Inquiry has a branch field, respect the same
+     * branch restriction. MongoDB safely ignores the
+     * additional field for documents without it.
+     */
+    if (isBranchScopedUser(req)) {
+      const branchId = getUserBranchId(req);
+
+      if (isValidObjectId(branchId)) {
+        inquiryMatch.branch = toObjectId(branchId);
+      } else {
+        inquiryMatch.branch = null;
+      }
+    } else if (req.query.branch) {
+      if (isValidObjectId(req.query.branch)) {
+        inquiryMatch.branch = toObjectId(req.query.branch);
+      }
+    }
 
     const [monthlyAdmissions, pipeline] = await Promise.all([
       Student.aggregate([
         {
           $match: {
             ...branchMatch,
+
             joinDate: {
               $gte: from,
               $lt: to,
             },
           },
         },
+
         {
           $group: {
             _id: {
@@ -1736,11 +1929,13 @@ async function getAdmissionReports(req, res) {
                 $month: "$joinDate",
               },
             },
+
             count: {
               $sum: 1,
             },
           },
         },
+
         {
           $sort: {
             "_id.month": 1,
@@ -1751,16 +1946,13 @@ async function getAdmissionReports(req, res) {
       Inquiry
         ? Inquiry.aggregate([
             {
-              $match: {
-                createdAt: {
-                  $gte: from,
-                  $lt: to,
-                },
-              },
+              $match: inquiryMatch,
             },
+
             {
               $group: {
                 _id: "$status",
+
                 count: {
                   $sum: 1,
                 },

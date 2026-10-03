@@ -22,6 +22,7 @@ const beltHistorySchema = new mongoose.Schema(
       required: true,
       index: true,
     },
+    sessionTypeId: { type: mongoose.Schema.Types.ObjectId, ref: "TrainingSessionType", default: null, index: true },
 
     fromBelt: {
       type: String,
@@ -78,6 +79,7 @@ const beltHistorySchema = new mongoose.Schema(
 beltHistorySchema.index(
   {
     student: 1,
+    sessionTypeId: 1,
     toBelt: 1,
   },
   {

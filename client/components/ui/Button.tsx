@@ -115,7 +115,6 @@ export default function Button({
         gap-2
         border
         font-semibold
-        shadow-sm
         transition-all
         duration-200
         active:scale-[0.98]

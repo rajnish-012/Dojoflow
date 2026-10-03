@@ -1,4 +1,5 @@
 "use client";
+import { toast } from "@/lib/toast";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
@@ -25,9 +26,12 @@ import {
   Modal,
   PageHeader,
   SummaryCard,
+  Textarea,
+  TablePagination,
 } from "@/components/ui";
 
 import { createBranch, getBranches } from "@/lib/api";
+import { useCurrentUser } from "@/lib/current-user";
 import { useCan } from "@/lib/permissions";
 
 type Branch = {
@@ -51,7 +55,10 @@ const initialForm: BranchForm = {
 };
 
 export default function BranchesPage() {
+  const currentUser = useCurrentUser();
   const canManageBranches = useCan("branch.manage");
+  const canCreateBranch =
+    canManageBranches && currentUser?.dataScope === "ALL";
   const [branches, setBranches] = useState<Branch[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -135,14 +142,11 @@ export default function BranchesPage() {
       setForm(initialForm);
 
       await loadBranches();
+      toast.success("Branch created successfully.");
     } catch (caughtError) {
       console.error(caughtError);
 
-      setFormError(
-        caughtError instanceof Error
-          ? caughtError.message
-          : "Failed to create branch.",
-      );
+      toast.error(caughtError instanceof Error ? caughtError.message : "Failed to create branch.");
     } finally {
       setSubmitting(false);
     }
@@ -190,7 +194,7 @@ export default function BranchesPage() {
                 Refresh
               </Button>
 
-              {canManageBranches && (
+              {canCreateBranch && (
                 <Button variant="primary" onClick={openForm}>
                   <Plus size={18} />
                   Add Branch
@@ -317,7 +321,7 @@ export default function BranchesPage() {
                     : "Create your first branch using the Add Branch button."
                 }
                 action={
-                  !search && canManageBranches ? (
+                  !search && canCreateBranch ? (
                     <Button variant="primary" onClick={openForm}>
                       <Plus size={17} />
                       Create First Branch
@@ -335,19 +339,11 @@ export default function BranchesPage() {
           </div>
 
           {!loading && filteredBranches.length > 0 && (
-            <div
-              className="
-                border-t
-                border-(--line)
-                px-5
-                py-4
-                sm:px-6
-              "
-            >
-              <p className="text-xs font-medium text-(--ink-faint)">
-                Showing {filteredBranches.length} of {branches.length} branches
-              </p>
-            </div>
+            <TablePagination
+              totalItems={filteredBranches.length}
+              visibleItems={filteredBranches.length}
+              entityLabel="branches"
+            />
           )}
         </Card>
       </div>
@@ -461,7 +457,7 @@ export default function BranchesPage() {
               Complete Address
             </label>
 
-            <textarea
+            <Textarea
               id="branch-address"
               required
               rows={4}
@@ -474,18 +470,7 @@ export default function BranchesPage() {
               }
               placeholder="Enter complete branch address"
               className="
-                block
-                w-full
                 resize-none
-                rounded-xl
-                border
-                border-(--input-border)
-                bg-(--input-bg)
-                px-3.5
-                py-3
-                text-sm
-                text-(--foreground)
-                outline-none
                 transition
                 duration-200
                 placeholder:text-(--input-placeholder)

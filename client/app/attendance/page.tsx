@@ -1,18 +1,29 @@
 "use client";
+import { toast } from "@/lib/toast";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { CalendarDays, RefreshCw } from "lucide-react";
+import { CalendarDays, CheckCheck, RefreshCw } from "lucide-react";
 
-import { Button, Card, ErrorState, PageHeader } from "@/components/ui";
-
+import {
+  Button,
+  Card,
+  ConfirmationDialog,
+  ErrorState,
+  PageHeader,
+} from "@/components/ui";
 import AttendanceStats from "@/components/attendance/AttendanceStats";
 import AttendanceSheet from "@/components/attendance/AttendanceSheet";
 import AttendanceModal from "@/components/attendance/AttendanceModal";
 
 import type { DailyAttendanceRow } from "@/components/attendance/AttendanceRow";
 
-import { getAttendanceDailySheet, markAttendance } from "@/lib/attendanceApi";
+import {
+  getAttendanceDailySheet,
+  markAllAttendancePresent,
+  markAttendance,
+} from "@/lib/attendanceApi";
+import { PERMISSIONS, useCan } from "@/lib/permissions";
 
 /* ==========================================
    LOCAL DATE HELPERS
@@ -24,9 +35,7 @@ function getLocalDate(daysFromToday = 0) {
   date.setDate(date.getDate() + daysFromToday);
 
   const year = date.getFullYear();
-
   const month = String(date.getMonth() + 1).padStart(2, "0");
-
   const day = String(date.getDate()).padStart(2, "0");
 
   return `${year}-${month}-${day}`;
@@ -83,9 +92,7 @@ function formatLocalDateKey(value: string | Date | undefined) {
   }
 
   const year = date.getFullYear();
-
   const month = String(date.getMonth() + 1).padStart(2, "0");
-
   const day = String(date.getDate()).padStart(2, "0");
 
   return `${year}-${month}-${day}`;
@@ -105,17 +112,14 @@ function formatLocalDateKey(value: string | Date | undefined) {
 
 function getDisplayPlanDay(row: DailyAttendanceRow, selectedDate: string) {
   const joinDate = row.student?.joinDate;
-
   if (!joinDate) {
     return Number(row.planDay || 1);
   }
 
   const joinDateKey = formatLocalDateKey(joinDate);
-
   if (joinDateKey === selectedDate) {
     return 1;
   }
-
   return Number(row.planDay || 1);
 }
 
@@ -124,6 +128,9 @@ function getDisplayPlanDay(row: DailyAttendanceRow, selectedDate: string) {
 ========================================== */
 
 export default function AttendancePage() {
+  const canViewAttendance = useCan(PERMISSIONS.ATTENDANCE_VIEW);
+  const canManageAttendance = useCan(PERMISSIONS.ATTENDANCE_MANAGE);
+
   /*
    * Attendance rules:
    *
@@ -132,34 +139,36 @@ export default function AttendancePage() {
    * Tomorrow       → not allowed
    * Future dates   → not allowed
    */
-
   const today = useMemo(() => getLocalDate(0), []);
-
   const [selectedDate, setSelectedDate] = useState(today);
-
   const [rows, setRows] = useState<DailyAttendanceRow[]>([]);
-
   const [loading, setLoading] = useState(true);
-
   const [error, setError] = useState("");
-
   const [selectedRow, setSelectedRow] = useState<DailyAttendanceRow | null>(
     null,
   );
-
   const [selectedStatus, setSelectedStatus] = useState<
     "PRESENT" | "ABSENT" | null
   >(null);
-
+  const [selectedSessionSlotId, setSelectedSessionSlotId] = useState("");
   const [savingStudentId, setSavingStudentId] = useState<string | null>(null);
-
   const [formError, setFormError] = useState("");
+  const [confirmMarkAllOpen, setConfirmMarkAllOpen] = useState(false);
+  const [markingAll, setMarkingAll] = useState(false);
+
 
   /* ==========================================
      LOAD ATTENDANCE SHEET
   ========================================== */
 
   const loadSheet = useCallback(async () => {
+    if (!canViewAttendance) {
+      setRows([]);
+      setLoading(false);
+
+      return;
+    }
+
     try {
       setLoading(true);
       setError("");
@@ -178,7 +187,7 @@ export default function AttendancePage() {
     } finally {
       setLoading(false);
     }
-  }, [selectedDate]);
+  }, [selectedDate, canViewAttendance]);
 
   useEffect(() => {
     loadSheet();
@@ -218,7 +227,7 @@ export default function AttendancePage() {
 
   function handleDateChange(value: string) {
     if (value > today) {
-      setError("Attendance can only be marked for today or previous dates.");
+      toast.warning("Attendance can only be marked for today or previous dates.");
 
       return;
     }
@@ -235,12 +244,24 @@ export default function AttendancePage() {
     row: DailyAttendanceRow,
     status: "PRESENT" | "ABSENT",
   ) {
+    if (!canManageAttendance) {
+      return;
+    }
+
     /*
      * Already marked:
      * no changes from this sheet.
      */
 
-    if (row.attendance) {
+    if (row.attendanceComplete || row.attendance) {
+      return;
+    }
+
+    const availableSlots = (row.branchSchedule?.slots || []).filter((slot) => slot.entitled && slot.curriculumAvailable && !slot.attendance);
+    if (availableSlots.length === 0) {
+      setFormError(row.curriculumComplete
+        ? "This program's curriculum is complete. Add the next curriculum day before recording more attendance."
+        : "This student has no scheduled program session with an available curriculum day on this date.");
       return;
     }
 
@@ -265,11 +286,6 @@ export default function AttendancePage() {
      * If the exact calendar date
      * is closed, do not even open
      * the attendance modal.
-     *
-     * This prevents the user from
-     * reaching the backend error:
-     *
-     * "Monday is closed for this branch..."
      */
 
     if (
@@ -287,6 +303,7 @@ export default function AttendancePage() {
 
     setSelectedRow(row);
     setSelectedStatus(status);
+    setSelectedSessionSlotId(availableSlots[0]?._id || "");
     setFormError("");
   }
 
@@ -301,6 +318,7 @@ export default function AttendancePage() {
 
     setSelectedRow(null);
     setSelectedStatus(null);
+    setSelectedSessionSlotId("");
     setFormError("");
   }
 
@@ -309,6 +327,14 @@ export default function AttendancePage() {
   ========================================== */
 
   async function confirmAttendance() {
+    if (!canManageAttendance) {
+      setFormError(
+        "Your role does not include permission to manage attendance.",
+      );
+
+      return;
+    }
+
     if (!selectedRow || !selectedStatus) {
       return;
     }
@@ -365,15 +391,8 @@ export default function AttendancePage() {
     /*
      * Always send the attendance date
      * as a strict YYYY-MM-DD calendar key.
-     *
-     * This prevents accidental values such as:
-     *
-     * 2026-09-29T00:00:00.000Z
-     * Tue Sep 29 2026
-     * 29/09/2026
-     *
-     * from reaching the API.
      */
+
     const attendanceDate = formatLocalDateKey(selectedDate);
 
     if (!attendanceDate) {
@@ -390,24 +409,20 @@ export default function AttendancePage() {
      * Backend calculates the
      * authoritative training day.
      */
+
     const displayPlanDay = getDisplayPlanDay(selectedRow, attendanceDate);
 
     try {
       setSavingStudentId(studentId);
-
       setFormError("");
 
       await markAttendance({
         student: studentId,
-
+        sessionSlotId: selectedSessionSlotId || undefined,
         date: attendanceDate,
-
         planDay: displayPlanDay,
-
         curriculumTitle: selectedRow.curriculum?.title || "",
-
         status: selectedStatus,
-
         makeupRequired: selectedStatus === "ABSENT",
       });
 
@@ -421,10 +436,6 @@ export default function AttendancePage() {
        * The backend may still reject
        * the request if the schedule was
        * changed after this page loaded.
-       *
-       * Show that response inside the
-       * modal rather than crashing the
-       * page.
        */
 
       if (err && typeof err === "object" && "data" in err) {
@@ -444,7 +455,7 @@ export default function AttendancePage() {
 
         if (
           apiError.data?.branchSchedule?.configured === true &&
-          apiError.data?.branchSchedule?.isOpen === false
+          apiError.data.branchSchedule.isOpen === false
         ) {
           setFormError(
             `${
@@ -466,9 +477,18 @@ export default function AttendancePage() {
         }
       }
 
-      setFormError(
-        err instanceof Error ? err.message : "Failed to mark attendance.",
-      );
+      const message = err instanceof Error ? err.message : "Failed to mark attendance.";
+      if (message.toLowerCase().includes("completed this program curriculum")) {
+        setSelectedRow(null);
+        setSelectedStatus(null);
+        setSelectedSessionSlotId("");
+        setFormError("");
+        await loadSheet();
+        toast.info(message);
+        return;
+      }
+
+      toast.error(message);
     } finally {
       setSavingStudentId(null);
     }
@@ -495,9 +515,6 @@ export default function AttendancePage() {
    * Determine whether the selected
    * date contains at least one
    * closed branch row.
-   *
-   * This is mainly useful for the
-   * date-level notice.
    */
 
   const closedBranches = useMemo(() => {
@@ -525,6 +542,18 @@ export default function AttendancePage() {
     return Array.from(branches.values());
   }, [rows]);
 
+  if (!canViewAttendance) {
+    return (
+      <main className="df-page">
+        <PageHeader
+          eyebrow="Authorization"
+          title="Attendance"
+          description="Your role does not include permission to view attendance."
+        />
+      </main>
+    );
+  }
+
   /* ==========================================
      RENDER
   ========================================== */
@@ -537,15 +566,31 @@ export default function AttendancePage() {
           title="Attendance"
           description="Manage daily attendance, training days and curriculum progress for your academy."
           actions={
-            <Button
-              type="button"
-              variant="outline"
-              onClick={loadSheet}
-              disabled={loading}
-            >
-              <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
-              Refresh
-            </Button>
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={loadSheet}
+                disabled={loading || markingAll}
+              >
+                <RefreshCw
+                  size={16}
+                  className={loading ? "animate-spin" : ""}
+                />
+                Refresh
+              </Button>
+              {canManageAttendance && (
+                <Button
+                  type="button"
+                  variant="primary"
+                  onClick={() => setConfirmMarkAllOpen(true)}
+                  disabled={loading || markingAll || selectedDate > today}
+                >
+                  <CheckCheck size={16} />
+                  Mark All Present
+                </Button>
+              )}
+            </div>
           }
         />
 
@@ -575,116 +620,48 @@ export default function AttendancePage() {
         )}
 
         {/* ==================================
-            DATE SELECTOR
+            SUMMARY
+        ================================== */}
+
+        <AttendanceStats {...stats} />
+
+        {/* ==================================
+            DATE + TRAINING AVAILABILITY
         ================================== */}
 
         <Card padding="md">
           <div
             className="
-              flex flex-col gap-5
-              xl:flex-row
-              xl:items-center
-              xl:justify-between
+              grid
+              gap-0
+              lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]
             "
           >
-            {/* LEFT */}
+            {/* ================================
+                DATE SECTION
+            ================================= */}
 
-            <div className="min-w-0">
-              <div className="mb-2 flex items-center gap-2">
+            <div
+              className="
+                flex
+                min-w-0
+                flex-col
+                gap-4
+                border-b
+                border-(--line)
+                pb-5
+                lg:border-b-0
+                lg:border-r
+                lg:pr-8
+                lg:pb-0
+              "
+            >
+              <div className="flex items-start gap-3">
                 <div
                   className="
-                    flex h-8 w-8
-                    items-center justify-center
-                    rounded-lg
-                    bg-(--accent-soft)
-                    text-(--accent)
-                  "
-                >
-                  <CalendarDays size={16} />
-                </div>
-
-                <p
-                  className="
-                    text-sm font-extrabold
-                    text-(--foreground)
-                  "
-                >
-                  Attendance Date
-                </p>
-              </div>
-
-              <p
-                className="
-                  text-sm font-bold
-                  text-(--foreground-soft)
-                "
-              >
-                {formatDate(selectedDate)}
-              </p>
-
-              <p
-                className="
-                  mt-1 text-xs
-                  text-(--ink-muted)
-                "
-              >
-                You can mark attendance for today or any previous date.
-              </p>
-            </div>
-
-            {/* DATE INPUT */}
-
-            <label className="relative block w-full xl:w-auto">
-              <span className="sr-only">Select attendance date</span>
-
-              <CalendarDays
-                size={17}
-                className="
-                  pointer-events-none
-                  absolute
-                  left-3.5
-                  top-1/2
-                  -translate-y-1/2
-                  text-(--ink-faint)
-                "
-              />
-
-              <input
-                type="date"
-                value={selectedDate}
-                max={today}
-                onChange={(event) => handleDateChange(event.target.value)}
-                className="
-                  df-input
-                  h-11
-                  w-full
-                  pl-10
-                  xl:w-auto
-                "
-              />
-            </label>
-          </div>
-        </Card>
-
-        {/* ==================================
-            DATE-LEVEL SCHEDULE NOTICE
-        ================================== */}
-
-        {!loading && closedBranches.length > 0 && (
-          <div
-            className="
-                mt-5
-                rounded-2xl
-                border
-                border-(--line)
-                bg-(--surface)
-                px-5 py-4
-              "
-          >
-            <div className="flex items-start gap-3">
-              <div
-                className="
-                    flex h-9 w-9
+                    flex
+                    h-9
+                    w-9
                     shrink-0
                     items-center
                     justify-center
@@ -692,66 +669,189 @@ export default function AttendancePage() {
                     bg-(--accent-soft)
                     text-(--accent)
                   "
-              >
-                <CalendarDays size={17} />
-              </div>
+                >
+                  <CalendarDays size={17} />
+                </div>
 
-              <div className="min-w-0">
-                <p
-                  className="
-                      text-sm font-extrabold
+                <div className="min-w-0">
+                  <p
+                    className="
+                      text-sm
+                      font-extrabold
                       text-(--foreground)
                     "
-                >
-                  Training availability
-                </p>
+                  >
+                    Attendance Date
+                  </p>
 
-                <p
-                  className="
-                      mt-1 text-xs leading-5
+                  <p
+                    className="
+                      mt-1
+                      text-sm
+                      font-bold
+                      text-(--foreground-soft)
+                    "
+                  >
+                    {formatDate(selectedDate)}
+                  </p>
+
+                  <p
+                    className="
+                      mt-1
+                      text-xs
+                      leading-5
                       text-(--ink-muted)
                     "
-                >
-                  Some branches are closed on {formatDate(selectedDate)}.
-                  Attendance cannot be marked for those branches.
-                </p>
+                  >
+                    You can mark attendance for today or any previous date.
+                  </p>
+                </div>
+              </div>
 
+              <label className="relative block w-full sm:max-w-[260px]">
+                <span className="sr-only">Select attendance date</span>
+
+                <CalendarDays
+                  size={17}
+                  className="
+                    pointer-events-none
+                    absolute
+                    left-3.5
+                    top-1/2
+                    -translate-y-1/2
+                    text-(--ink-faint)
+                  "
+                />
+
+                <input
+                  type="date"
+                  value={selectedDate}
+                  max={today}
+                  onChange={(event) => handleDateChange(event.target.value)}
+                  className="
+                    df-input
+                    h-11
+                    w-full
+                    pl-10
+                  "
+                />
+              </label>
+            </div>
+
+            {/* ================================
+                TRAINING AVAILABILITY SECTION
+            ================================= */}
+
+            <div
+              className="
+                flex
+                min-w-0
+                flex-col
+                gap-3
+                pt-5
+                lg:pl-8
+                lg:pt-0
+              "
+            >
+              <div className="flex items-start gap-3">
                 <div
                   className="
-                      mt-3 flex flex-wrap
-                      gap-2
+                    flex
+                    h-9
+                    w-9
+                    shrink-0
+                    items-center
+                    justify-center
+                    rounded-xl
+                    bg-(--accent-soft)
+                    text-(--accent)
+                  "
+                >
+                  <CalendarDays size={17} />
+                </div>
+
+                <div className="min-w-0">
+                  <p
+                    className="
+                      text-sm
+                      font-extrabold
+                      text-(--foreground)
                     "
+                  >
+                    Training availability
+                  </p>
+
+                  <p
+                    className="
+                      mt-1
+                      text-xs
+                      leading-5
+                      text-(--ink-muted)
+                    "
+                  >
+                    {closedBranches.length > 0
+                      ? `Some branches are closed on ${formatDate(
+                          selectedDate,
+                        )}. Attendance cannot be marked for those branches.`
+                      : `Training is available for all configured branches on ${formatDate(
+                          selectedDate,
+                        )}.`}
+                  </p>
+                </div>
+              </div>
+
+              {closedBranches.length > 0 ? (
+                <div
+                  className="
+                    flex
+                    flex-wrap
+                    gap-2
+                  "
                 >
                   {closedBranches.map((branchName) => (
                     <span
                       key={branchName}
                       className="
-                            inline-flex
-                            items-center
-                            rounded-full
-                            border
-                            border-(--line)
-                            bg-(--card)
-                            px-3 py-1.5
-                            text-[11px]
-                            font-bold
-                            text-(--ink-muted)
-                          "
+                        inline-flex
+                        items-center
+                        rounded-full
+                        border
+                        border-(--line)
+                        bg-(--card)
+                        px-3
+                        py-1.5
+                        text-[11px]
+                        font-bold
+                        text-(--ink-muted)
+                      "
                     >
                       {branchName} · Closed
                     </span>
                   ))}
                 </div>
-              </div>
+              ) : (
+                <span
+                  className="
+                    inline-flex
+                    w-fit
+                    items-center
+                    rounded-full
+                    border
+                    border-(--line)
+                    bg-(--card)
+                    px-3
+                    py-1.5
+                    text-[11px]
+                    font-bold
+                    text-(--ink-muted)
+                  "
+                >
+                  All branches available
+                </span>
+              )}
             </div>
           </div>
-        )}
-
-        {/* ==================================
-            SUMMARY
-        ================================== */}
-
-        <AttendanceStats {...stats} />
+        </Card>
 
         {/* ==================================
             ATTENDANCE TABLE
@@ -762,6 +862,7 @@ export default function AttendancePage() {
           loading={loading}
           error=""
           savingStudentId={savingStudentId}
+          canManage={canManageAttendance}
           onMark={openMarkModal}
         />
 
@@ -777,8 +878,52 @@ export default function AttendancePage() {
             selectedRow && savingStudentId === selectedRow.student._id,
           )}
           error={formError}
+          canManage={canManageAttendance}
           onClose={closeMarkModal}
           onConfirm={confirmAttendance}
+          sessionSlotId={selectedSessionSlotId}
+          onSessionChange={setSelectedSessionSlotId}
+        />
+
+        <ConfirmationDialog
+          open={confirmMarkAllOpen}
+          title="Mark all students present?"
+          description={`This will mark every eligible scheduled program session as Present for ${formatDate(
+            selectedDate,
+          )}. Sessions already marked, students who are inactive, and sessions on holidays or closed days will be skipped.`}
+          confirmLabel="Mark All Present"
+          cancelLabel="Cancel"
+          confirmVariant="primary"
+          loading={markingAll}
+          onClose={() => setConfirmMarkAllOpen(false)}
+          onConfirm={async () => {
+            if (!canManageAttendance || markingAll) return;
+
+            setMarkingAll(true);
+
+            try {
+              const result = await markAllAttendancePresent(formatLocalDateKey(selectedDate));
+
+              setConfirmMarkAllOpen(false);
+              await loadSheet();
+
+              if (result.marked === 0) {
+                toast.info(result.failed > 0 ? `No sessions were marked. ${result.failed} session(s) could not be processed; please refresh and try again.` : "No sessions were marked. All eligible attendance is already completed or unavailable for this date.");
+              } else {
+                toast.success(
+                  `${result.marked} ${result.marked === 1 ? "program session" : "program sessions"} marked Present. ${result.skipped} ${result.skipped === 1 ? "session" : "sessions"} skipped.${
+                    result.failed > 0
+                      ? ` ${result.failed} could not be marked because of an error.`
+                      : ""
+                  }`,
+                );
+              }
+            } catch (err) {
+              toast.error(err instanceof Error ? err.message : "Failed to mark all eligible students present.");
+            } finally {
+              setMarkingAll(false);
+            }
+          }}
         />
       </div>
     </main>

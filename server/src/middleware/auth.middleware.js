@@ -1,50 +1,58 @@
 const jwt = require("jsonwebtoken");
+
 const User = require("../models/User");
 const Role = require("../models/Role");
 
 /**
- * Resolves whether the user's role can see every branch
- * ("ALL") or only their own branch ("BRANCH").
- *
- * SUPER_ADMIN always gets global scope without a DB lookup.
+ * Resolve the current database role.
  */
-const resolveDataScope = async (user) => {
-  if (user.role === "SUPER_ADMIN") {
-    return "ALL";
+const resolveRole = async (user) => {
+  const roleKey = String(user?.role || "").toUpperCase();
+
+  if (!roleKey) {
+    return null;
   }
 
-  const role = await Role.findOne({ key: user.role }).select("dataScope");
-
-  return role?.dataScope === "ALL" ? "ALL" : "BRANCH";
+  return Role.findOne({
+    key: roleKey,
+  }).select("key name permissions dataScope isSystem");
 };
 
 /**
- * protect — JWT authentication middleware.
+ * JWT authentication middleware.
  *
- * Verifies the Bearer token, fetches the User from the DB,
- * and attaches req.user for downstream handlers.
+ * The JWT authenticates the identity only.
  *
- * Also checks req.user.isActive so that deactivated accounts
- * are rejected even while their token is still technically valid.
+ * Current role, permissions and data scope are resolved
+ * from MongoDB on every authenticated request.
+ *
+ * Browser-accessible storage and client-supplied role values are never trusted.
  */
 const protect = async (req, res, next) => {
   try {
-    const authHeader = req.headers.authorization;
+    const cookieHeader = req.headers.cookie || "";
+    const sessionCookie = cookieHeader.split(";").map((part) => part.trim()).find((part) => part.startsWith("forcestrike_session="));
+    const cookieToken = sessionCookie ? decodeURIComponent(sessionCookie.slice("forcestrike_session=".length)) : "";
+    const token = cookieToken;
 
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    if (!token) {
       return res.status(401).json({
         success: false,
         message: "Authentication required",
       });
     }
 
-    const token = authHeader.split(" ")[1];
-
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
     const user = await User.findById(decoded.id);
 
     if (!user) {
+      res.clearCookie("forcestrike_session", {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        path: "/",
+      });
       return res.status(401).json({
         success: false,
         message: "User no longer exists",
@@ -56,18 +64,25 @@ const protect = async (req, res, next) => {
       Number.isInteger(decoded.iat) &&
       decoded.iat < Math.floor(user.passwordChangedAt.getTime() / 1000)
     ) {
+      res.clearCookie("forcestrike_session", {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        path: "/",
+      });
       return res.status(401).json({
         success: false,
         message: "Session expired. Please log in again.",
       });
     }
 
-    /*
-     * Reject deactivated accounts even if the JWT is still valid.
-     * This allows administrators to immediately block access
-     * without waiting for token expiry.
-     */
     if (user.isActive === false) {
+      res.clearCookie("forcestrike_session", {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        path: "/",
+      });
       return res.status(401).json({
         success: false,
         message:
@@ -75,12 +90,45 @@ const protect = async (req, res, next) => {
       });
     }
 
-    user.dataScope = await resolveDataScope(user);
+    const role = await resolveRole(user);
+
+    const roleKey = String(user.role || "").toUpperCase();
+
+    /*
+     * Fail closed for permissions if the role cannot
+     * currently be resolved.
+     */
+    const permissions = Array.isArray(role?.permissions)
+      ? Array.from(new Set(role.permissions))
+      : [];
+
+    user.role = roleKey;
+
+    user.permissions = permissions;
+
+    user.dataScope =
+      roleKey === "SUPER_ADMIN"
+        ? "ALL"
+        : role?.dataScope === "ALL"
+          ? "ALL"
+          : "BRANCH";
+
+    /*
+     * Internal request-only reference.
+     * Not persisted to MongoDB.
+     */
+    user.roleRecord = role;
 
     req.user = user;
 
     next();
   } catch (error) {
+    res.clearCookie("forcestrike_session", {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      path: "/",
+    });
     return res.status(401).json({
       success: false,
       message: "Invalid or expired token",

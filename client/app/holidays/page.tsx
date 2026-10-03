@@ -1,5 +1,8 @@
 "use client";
 
+import { fetchWithSession } from "@/lib/sessionFetch";
+import { confirmAction, toast } from "@/lib/toast";
+
 import {
   useCallback,
   useEffect,
@@ -23,9 +26,13 @@ import {
   Button,
   Card,
   ErrorState,
+  IconButton,
   Input,
   LoadingSpinner,
   PageHeader,
+  Select,
+  TableHeading,
+  Textarea,
 } from "@/components/ui";
 
 import {
@@ -35,6 +42,7 @@ import {
   updateHoliday,
   type Holiday,
 } from "@/lib/holidayApi";
+import { PERMISSIONS, useCan } from "@/lib/permissions";
 
 /* ==========================================
    TYPES
@@ -173,6 +181,8 @@ function getBranchName(
 ========================================== */
 
 export default function HolidaysPage() {
+  const canViewHolidays = useCan(PERMISSIONS.HOLIDAY_VIEW);
+  const canManageHolidays = useCan(PERMISSIONS.HOLIDAY_MANAGE);
   const [holidays, setHolidays] =
     useState<Holiday[]>([]);
 
@@ -274,23 +284,14 @@ export default function HolidaysPage() {
             .NEXT_PUBLIC_API_URL ||
           "http://localhost:5000/api";
 
-        const token =
-          typeof window !==
-          "undefined"
-            ? localStorage.getItem(
-                "token",
-              ) || ""
-            : "";
-
         const response =
-          await fetch(
+          await fetchWithSession(
             `${API_URL}/branches`,
             {
               method: "GET",
               headers: {
                 "Content-Type":
                   "application/json",
-                Authorization: `Bearer ${token}`,
               },
               cache: "no-store",
             },
@@ -478,6 +479,9 @@ export default function HolidaysPage() {
   ========================================== */
 
   function openCreate() {
+    if (!canManageHolidays) {
+      return;
+    }
     setEditingHoliday(null);
 
     setForm({
@@ -498,6 +502,9 @@ export default function HolidaysPage() {
   function openEdit(
     holiday: Holiday,
   ) {
+    if (!canManageHolidays) {
+      return;
+    }
     setEditingHoliday(
       holiday,
     );
@@ -558,6 +565,10 @@ export default function HolidaysPage() {
   async function handleSubmit(
     event: React.FormEvent,
   ) {
+    if (!canManageHolidays) {
+      toast.error("You do not have permission to perform this action.");
+      return;
+    }
     event.preventDefault();
 
     setFormError("");
@@ -653,17 +664,14 @@ export default function HolidaysPage() {
       closeForm();
 
       await loadHolidays();
+      toast.success(editingHoliday ? "Holiday updated successfully." : "Holiday created successfully.");
     } catch (err) {
       console.error(
         "Save holiday error:",
         err,
       );
 
-      setFormError(
-        err instanceof Error
-          ? err.message
-          : "Failed to save holiday.",
-      );
+      toast.error(err instanceof Error ? err.message : "Failed to save holiday.");
     } finally {
       setSaving(false);
     }
@@ -676,12 +684,11 @@ export default function HolidaysPage() {
   async function handleDelete(
     holiday: Holiday,
   ) {
-    const confirmed =
-      window.confirm(
-        `Delete "${holiday.name}" on ${formatDate(
-          holiday.date,
-        )}?`,
-      );
+    if (!canManageHolidays) {
+      toast.error("You do not have permission to perform this action.");
+      return;
+    }
+    const confirmed = await confirmAction({ title: "Delete holiday?", message: `Delete "${holiday.name}" on ${formatDate(holiday.date)}?`, confirmLabel: "Delete holiday", destructive: true });
 
     if (!confirmed) {
       return;
@@ -703,14 +710,12 @@ export default function HolidaysPage() {
         err,
       );
 
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Failed to delete holiday.",
-      );
+      toast.error(err instanceof Error ? err.message : "Failed to delete holiday.");
+      return;
     } finally {
       setDeletingId(null);
     }
+    toast.success("Holiday deleted successfully.");
   }
 
   /* ==========================================
@@ -733,6 +738,18 @@ export default function HolidaysPage() {
   const dateFieldDisabled =
     saving ||
     editingPastHoliday;
+
+  if (!canViewHolidays) {
+    return (
+      <main className="df-page">
+        <PageHeader
+          eyebrow="Authorization"
+          title="Holidays"
+          description="Your role does not include permission to manage holidays."
+        />
+      </main>
+    );
+  }
 
   /* ==========================================
      RENDER
@@ -767,7 +784,7 @@ export default function HolidaysPage() {
                 Refresh
               </Button>
 
-              <Button
+              {canManageHolidays && <Button
                 type="button"
                 onClick={
                   openCreate
@@ -776,7 +793,7 @@ export default function HolidaysPage() {
                 <Plus size={16} />
 
                 Add holiday
-              </Button>
+              </Button>}
             </div>
           }
         />
@@ -866,7 +883,7 @@ export default function HolidaysPage() {
             FORM
         ====================================== */}
 
-        {showForm && (
+        {showForm && canManageHolidays && (
           <Card
             padding="md"
             className="mt-6"
@@ -1003,7 +1020,7 @@ export default function HolidaysPage() {
                     Description
                   </span>
 
-                  <textarea
+                  <Textarea
                     value={
                       form.description
                     }
@@ -1024,7 +1041,7 @@ export default function HolidaysPage() {
                     }
                     placeholder="Optional holiday description"
                     rows={3}
-                    className="df-input w-full resize-y"
+                    className="resize-y"
                   />
                 </label>
 
@@ -1035,7 +1052,7 @@ export default function HolidaysPage() {
                     Holiday scope
                   </span>
 
-                  <select
+                  <Select
                     value={
                       form.branch
                     }
@@ -1078,7 +1095,7 @@ export default function HolidaysPage() {
                         </option>
                       ),
                     )}
-                  </select>
+                  </Select>
 
                   <p className="mt-2 text-xs text-(--ink-muted)">
                     <strong>
@@ -1184,7 +1201,7 @@ export default function HolidaysPage() {
                   : "No holidays have been configured yet."}
               </p>
 
-              {!search && (
+              {!search && canManageHolidays && (
                 <Button
                   type="button"
                   size="sm"
@@ -1192,6 +1209,7 @@ export default function HolidaysPage() {
                   onClick={
                     openCreate
                   }
+                  disabled={!canManageHolidays}
                 >
                   <Plus
                     size={15}
@@ -1225,9 +1243,9 @@ export default function HolidaysPage() {
                         Status
                       </TableHeading>
 
-                      <TableHeading align="right">
-                        Actions
-                      </TableHeading>
+                      {canManageHolidays && (
+                        <TableHeading align="right">Actions</TableHeading>
+                      )}
                     </tr>
                   </thead>
 
@@ -1242,29 +1260,29 @@ export default function HolidaysPage() {
                           }
                           className="transition-colors hover:bg-(--surface)"
                         >
-                          <td className="px-6 py-5">
-                            <p className="text-sm font-bold text-(--foreground-soft)">
+                          {canManageHolidays && <td className="px-6 py-5">
+                            <p className="text-[15px] font-semibold leading-5 text-(--foreground-soft)">
                               {formatDate(
                                 holiday.date,
                               )}
                             </p>
 
-                            <p className="mt-1 text-xs text-(--ink-muted)">
+                            <p className="mt-1 text-sm leading-5 text-(--ink-muted)">
                               {getDateInputValue(
                                 holiday.date,
                               )}
                             </p>
-                          </td>
+                          </td>}
 
                           <td className="px-6 py-5">
-                            <p className="text-sm font-bold text-(--foreground-soft)">
+                            <p className="text-[15px] font-semibold leading-5 text-(--foreground-soft)">
                               {
                                 holiday.name
                               }
                             </p>
 
                             {holiday.description && (
-                              <p className="mt-1 max-w-[320px] truncate text-xs text-(--ink-muted)">
+                              <p className="mt-1 max-w-[320px] truncate text-sm leading-5 text-(--ink-muted)">
                                 {
                                   holiday.description
                                 }
@@ -1294,31 +1312,25 @@ export default function HolidaysPage() {
 
                           <td className="px-6 py-5">
                             <div className="flex items-center justify-end gap-2">
-                              <Button
+                              <IconButton
                                 type="button"
-                                size="sm"
-                                variant="outline"
+                                label={`Edit ${holiday.name}`}
                                 onClick={() =>
                                   openEdit(
                                     holiday,
                                   )
                                 }
+                                disabled={!canManageHolidays}
                               >
-                                <Edit3
-                                  size={
-                                    14
-                                  }
-                                />
+                                <Edit3 size={16} />
+                              </IconButton>
 
-                                Edit
-                              </Button>
-
-                              <Button
+                              <IconButton
                                 type="button"
-                                size="sm"
                                 variant="danger"
+                                label={`Delete ${holiday.name}`}
                                 disabled={
-                                  deletingId ===
+                                  !canManageHolidays || deletingId ===
                                   holiday._id
                                 }
                                 onClick={() =>
@@ -1333,15 +1345,9 @@ export default function HolidaysPage() {
                                     size="sm"
                                   />
                                 ) : (
-                                  <Trash2
-                                    size={
-                                      14
-                                    }
-                                  />
+                                  <Trash2 size={16} />
                                 )}
-
-                                Delete
-                              </Button>
+                              </IconButton>
                             </div>
                           </td>
                         </tr>
@@ -1420,7 +1426,7 @@ export default function HolidaysPage() {
                         </p>
                       </div>
 
-                      <div className="mt-4 flex gap-2">
+                      {canManageHolidays && <div className="mt-4 flex gap-2">
                         <Button
                           type="button"
                           size="sm"
@@ -1431,6 +1437,7 @@ export default function HolidaysPage() {
                               holiday,
                             )
                           }
+                          disabled={!canManageHolidays}
                         >
                           <Edit3
                             size={
@@ -1447,7 +1454,7 @@ export default function HolidaysPage() {
                           variant="danger"
                           className="flex-1"
                           disabled={
-                            deletingId ===
+                            !canManageHolidays || deletingId ===
                             holiday._id
                           }
                           onClick={() =>
@@ -1471,7 +1478,7 @@ export default function HolidaysPage() {
 
                           Delete
                         </Button>
-                      </div>
+                      </div>}
                     </div>
                   ),
                 )}
@@ -1488,23 +1495,3 @@ export default function HolidaysPage() {
    TABLE HEADING
 ========================================== */
 
-function TableHeading({
-  children,
-  align = "left",
-}: {
-  children: React.ReactNode;
-  align?: "left" | "right";
-}) {
-  return (
-    <th
-      scope="col"
-      className={`px-6 py-4 text-[10px] font-black uppercase tracking-[0.16em] text-(--ink-faint) ${
-        align === "right"
-          ? "text-right"
-          : "text-left"
-      }`}
-    >
-      {children}
-    </th>
-  );
-}

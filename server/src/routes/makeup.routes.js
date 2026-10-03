@@ -10,15 +10,9 @@ const {
 } = require("../controllers/makeup.controller");
 
 const protect = require("../middleware/auth.middleware");
-const authorize = require("../middleware/role.middleware");
+const { authorizePermission } = require("../middleware/permission.middleware");
 
 const router = express.Router();
-
-const STAFF_ROLES = [
-  "SUPER_ADMIN",
-  "BRANCH_ADMIN",
-  "COACH",
-];
 
 /*
  * ======================================================
@@ -27,12 +21,7 @@ const STAFF_ROLES = [
  *
  * GET /api/makeups
  */
-router.get(
-  "/",
-  protect,
-  authorize(...STAFF_ROLES),
-  getMakeups
-);
+router.get("/", protect, authorizePermission("makeup.view"), getMakeups);
 
 /*
  * ======================================================
@@ -41,32 +30,18 @@ router.get(
  *
  * POST /api/makeups
  */
-router.post(
-  "/",
-  protect,
-  authorize(...STAFF_ROLES),
-  createMakeup
-);
+router.post("/", protect, authorizePermission("makeup.manage"), createMakeup);
 
 /*
  * ======================================================
  * GET MAKEUP BY ID
  * ======================================================
- *
- * IMPORTANT:
- * This route must remain after "/" routes and before
- * no conflicting dynamic routes.
  */
-router.get(
-  "/:id",
-  protect,
-  authorize(...STAFF_ROLES),
-  getMakeupById
-);
+router.get("/:id", protect, authorizePermission("makeup.view"), getMakeupById);
 
 /*
  * ======================================================
- * SCHEDULE AUTOMATICALLY CREATED MAKEUP
+ * SCHEDULE / RESCHEDULE MAKEUP
  * ======================================================
  *
  * PUT /api/makeups/:id/schedule
@@ -74,8 +49,8 @@ router.get(
 router.put(
   "/:id/schedule",
   protect,
-  authorize(...STAFF_ROLES),
-  scheduleMakeup
+  authorizePermission("makeup.manage"),
+  scheduleMakeup,
 );
 
 /*
@@ -88,8 +63,8 @@ router.put(
 router.put(
   "/:id/complete",
   protect,
-  authorize(...STAFF_ROLES),
-  completeMakeup
+  authorizePermission("makeup.manage"),
+  completeMakeup,
 );
 
 /*
@@ -102,8 +77,8 @@ router.put(
 router.put(
   "/:id/cancel",
   protect,
-  authorize(...STAFF_ROLES),
-  cancelMakeup
+  authorizePermission("makeup.manage"),
+  cancelMakeup,
 );
 
 module.exports = router;

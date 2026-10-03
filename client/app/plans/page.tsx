@@ -1,4 +1,5 @@
 "use client";
+import { confirmAction, toast } from "@/lib/toast";
 
 import {
   Award,
@@ -8,9 +9,9 @@ import {
   Dumbbell,
   Edit3,
   Layers3,
+  RefreshCw,
   Plus,
   Trash2,
-  Zap,
 } from "lucide-react";
 import {
   type ChangeEvent,
@@ -36,7 +37,8 @@ import {
 
 import { createPlan, deletePlan, getPlans, updatePlan } from "@/lib/api";
 
-import { useCan } from "@/lib/permissions";
+import { PERMISSIONS, useCan } from "@/lib/permissions";
+import { getPublicTrainingSessionTypes, type TrainingSessionTypeRecord } from "@/lib/trainingSessionTypeApi";
 
 type CurriculumItem = {
   day: number;
@@ -64,6 +66,7 @@ type Plan = {
   milestones: MilestoneItem[];
   curriculum: CurriculumItem[];
   isActive: boolean;
+  programs?: { program: string | TrainingSessionTypeRecord; weeklyLimit?: number | null }[];
 };
 
 type FormData = {
@@ -74,6 +77,7 @@ type FormData = {
   classesPerWeek: string;
   startingBelt: string;
   progressReports: string;
+  programs: string[];
 };
 
 const EMPTY_FORM: FormData = {
@@ -84,6 +88,7 @@ const EMPTY_FORM: FormData = {
   classesPerWeek: "4",
   startingBelt: "White",
   progressReports: "Monthly",
+  programs: [],
 };
 
 const BELTS = [
@@ -109,7 +114,10 @@ const BELT_STYLES: Record<string, string> = {
 };
 
 export default function PlansPage() {
-  const canManagePlans = useCan("plan.manage");
+  const canViewPlans = useCan(PERMISSIONS.PLAN_VIEW);
+  const canManagePlans = useCan(PERMISSIONS.PLAN_MANAGE);
+  const canManageCurriculum = useCan(PERMISSIONS.CURRICULUM_MANAGE);
+
   const [plans, setPlans] = useState<Plan[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -120,19 +128,31 @@ export default function PlansPage() {
   const [formError, setFormError] = useState("");
 
   const [form, setForm] = useState<FormData>(EMPTY_FORM);
-  const [curriculum, setCurriculum] = useState<CurriculumItem[]>([]);
+
   const [milestones, setMilestones] = useState<MilestoneItem[]>([]);
+  const [availablePrograms, setAvailablePrograms] = useState<TrainingSessionTypeRecord[]>([]);
 
   useEffect(() => {
+    if (!canViewPlans) {
+      setLoading(false);
+      return;
+    }
+
     void loadPlans();
-  }, []);
+    void getPublicTrainingSessionTypes().then(setAvailablePrograms).catch(() => setAvailablePrograms([]));
+  }, [canViewPlans]);
 
   async function loadPlans() {
+    if (!canViewPlans) {
+      return;
+    }
+
     try {
       setLoading(true);
       setError("");
 
       const response = await getPlans();
+
       setPlans(Array.isArray(response?.plans) ? response.plans : []);
     } catch (err: unknown) {
       setError(
@@ -144,15 +164,22 @@ export default function PlansPage() {
   }
 
   function openCreateModal() {
+    if (!canManagePlans) {
+      return;
+    }
+
     setEditingPlan(null);
-    setForm({ ...EMPTY_FORM });
-    setCurriculum([]);
+    setForm({ ...EMPTY_FORM, programs: [] });
     setMilestones([]);
     setFormError("");
     setModalOpen(true);
   }
 
   function openEditModal(plan: Plan) {
+    if (!canManagePlans) {
+      return;
+    }
+
     setEditingPlan(plan);
 
     setForm({
@@ -163,16 +190,8 @@ export default function PlansPage() {
       classesPerWeek: String(plan.classesPerWeek ?? 4),
       startingBelt: plan.startingBelt ?? "White",
       progressReports: plan.progressReports ?? "Monthly",
+      programs: (plan.programs ?? []).map((item) => typeof item.program === "string" ? item.program : item.program._id),
     });
-
-    setCurriculum(
-      (plan.curriculum ?? []).map((item) => ({
-        day: Number(item.day) || 1,
-        title: item.title ?? "",
-        description: item.description ?? "",
-        skill: item.skill ?? "",
-      })),
-    );
 
     setMilestones(
       (plan.milestones ?? []).map((item) => ({
@@ -188,7 +207,9 @@ export default function PlansPage() {
   }
 
   function closeModal() {
-    if (saving) return;
+    if (saving) {
+      return;
+    }
 
     setModalOpen(false);
     setEditingPlan(null);
@@ -206,47 +227,11 @@ export default function PlansPage() {
     }));
   }
 
-  function addCurriculumDay() {
-    setCurriculum((previous) => [
-      ...previous,
-      {
-        day: previous.length + 1,
-        title: "",
-        description: "",
-        skill: "",
-      },
-    ]);
-  }
-
-  function updateCurriculum(
-    index: number,
-    field: keyof CurriculumItem,
-    value: string,
-  ) {
-    setCurriculum((previous) =>
-      previous.map((item, itemIndex) =>
-        itemIndex === index
-          ? {
-              ...item,
-              [field]: field === "day" ? Number(value) || 1 : value,
-            }
-          : item,
-      ),
-    );
-  }
-
-  function removeCurriculumDay(index: number) {
-    setCurriculum((previous) =>
-      previous
-        .filter((_, itemIndex) => itemIndex !== index)
-        .map((item, itemIndex) => ({
-          ...item,
-          day: itemIndex + 1,
-        })),
-    );
-  }
-
   function addMilestone() {
+    if (!canManagePlans) {
+      return;
+    }
+
     setMilestones((previous) => [
       ...previous,
       {
@@ -265,6 +250,10 @@ export default function PlansPage() {
     field: keyof MilestoneItem,
     value: string,
   ) {
+    if (!canManagePlans) {
+      return;
+    }
+
     setMilestones((previous) =>
       previous.map((item, itemIndex) =>
         itemIndex === index
@@ -278,6 +267,10 @@ export default function PlansPage() {
   }
 
   function removeMilestone(index: number) {
+    if (!canManagePlans) {
+      return;
+    }
+
     setMilestones((previous) =>
       previous.filter((_, itemIndex) => itemIndex !== index),
     );
@@ -300,11 +293,7 @@ export default function PlansPage() {
       return "Please enter valid classes per week.";
     }
 
-    for (const item of curriculum) {
-      if (!item.day || !item.title.trim()) {
-        return "Every curriculum day must have a day number and title.";
-      }
-    }
+    if (form.programs.length === 0) return "Select at least one program for this plan.";
 
     for (const item of milestones) {
       if (!item.day || !item.belt.trim() || !item.skill.trim()) {
@@ -318,6 +307,11 @@ export default function PlansPage() {
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
+    if (!canManagePlans) {
+      toast.error("You do not have permission to perform this action.");
+      return;
+    }
+
     const validationError = validateForm();
 
     if (validationError) {
@@ -325,22 +319,28 @@ export default function PlansPage() {
       return;
     }
 
+    /*
+     * IMPORTANT:
+     *
+     * Curriculum is deliberately NOT sent here.
+     *
+     * Curriculum has its own authorization:
+     *   curriculum.manage
+     *
+     * It is managed from the dedicated Curriculum module.
+     *
+     * This prevents plan.manage from becoming an implicit
+     * curriculum.manage permission.
+     */
     const payload = {
       name: form.name.trim(),
       price: Number(form.price),
       duration: Number(form.duration),
       durationUnit: form.durationUnit,
       classesPerWeek: Number(form.classesPerWeek),
+      programs: form.programs.map((program) => ({ program, weeklyLimit: null })),
       startingBelt: form.startingBelt.trim(),
       progressReports: form.progressReports.trim(),
-      curriculum: curriculum
-        .map((item) => ({
-          ...item,
-          title: item.title.trim(),
-          skill: item.skill.trim(),
-          description: item.description.trim(),
-        }))
-        .sort((a, b) => a.day - b.day),
       milestones: milestones
         .map((item) => ({
           ...item,
@@ -349,6 +349,7 @@ export default function PlansPage() {
           description: item.description.trim(),
         }))
         .sort((a, b) => a.day - b.day),
+      curriculum: [],
     };
 
     try {
@@ -363,61 +364,86 @@ export default function PlansPage() {
 
       setModalOpen(false);
       setEditingPlan(null);
+
       await loadPlans();
+      toast.success(editingPlan ? "Training plan updated successfully." : "Training plan created successfully.");
     } catch (err: unknown) {
-      setFormError(
-        err instanceof Error
-          ? err.message
-          : `Failed to ${editingPlan ? "update" : "create"} the training plan.`,
-      );
+      toast.error(err instanceof Error ? err.message : `Failed to ${editingPlan ? "update" : "create"} the training plan.`);
     } finally {
       setSaving(false);
     }
   }
 
   async function handleDelete(plan: Plan) {
-    const confirmed = window.confirm(
-      `Deactivate "${plan.name}"? Existing students will keep their plan history.`,
-    );
+    if (!canManagePlans) {
+      toast.error("You do not have permission to perform this action.");
+      return;
+    }
 
-    if (!confirmed) return;
+    const confirmed = await confirmAction({ title: "Deactivate plan?", message: `Deactivate "${plan.name}"? Existing students will keep their plan history.`, confirmLabel: "Deactivate", destructive: true });
+
+    if (!confirmed) {
+      return;
+    }
 
     try {
-      setError("");
       await deletePlan(plan._id);
+
+      toast.success("Training plan deactivated successfully.");
+
       await loadPlans();
     } catch (err: unknown) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Failed to delete the training plan.",
-      );
+      toast.error(err instanceof Error ? err.message : "Failed to deactivate the training plan.");
     }
   }
 
   const activePlans = plans.filter((plan) => plan.isActive).length;
+
   const curriculumDays = plans.reduce(
     (total, plan) => total + (plan.curriculum?.length ?? 0),
     0,
   );
+
   const milestoneCount = plans.reduce(
     (total, plan) => total + (plan.milestones?.length ?? 0),
     0,
   );
+
+  if (!canViewPlans) {
+    return (
+      <div className="df-page">
+        <ErrorState
+          title="Access restricted"
+          message="Your account does not have permission to view training plans."
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="df-page">
       <PageHeader
         eyebrow="Academy Management"
         title="Training Plans"
-        description="Create and manage structured training programs, curriculum, pricing, and belt progression."
+        description="Create and manage structured training programs, pricing, schedules, and belt progression."
         actions={
-          canManagePlans ? (
-            <Button variant="primary" size="lg" onClick={openCreateModal}>
-              <Plus size={18} />
-              Add Training Plan
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="outline"
+              disabled={loading}
+              onClick={() => void loadPlans()}
+            >
+              <RefreshCw size={17} className={loading ? "animate-spin" : ""} />
+              <span className="hidden sm:inline">Refresh</span>
             </Button>
-          ) : undefined
+
+            {canManagePlans ? (
+              <Button variant="primary" size="lg" onClick={openCreateModal}>
+                <Plus size={18} />
+                <span className="hidden sm:inline">Add Training Plan</span>
+              </Button>
+            ) : undefined}
+          </div>
         }
       />
 
@@ -481,7 +507,11 @@ export default function PlansPage() {
         ) : plans.length === 0 ? (
           <EmptyState
             title="No training plans yet"
-            description="Create your first plan to organize classes, curriculum, pricing, and belt progression."
+            description={
+              canManagePlans
+                ? "Create your first plan to organize classes, pricing, and belt progression."
+                : "No training plans are currently available."
+            }
             icon={<Layers3 size={22} />}
             action={
               canManagePlans ? (
@@ -498,6 +528,7 @@ export default function PlansPage() {
               <PlanCard
                 key={plan._id}
                 plan={plan}
+                availablePrograms={availablePrograms}
                 canManage={canManagePlans}
                 onEdit={() => openEditModal(plan)}
                 onDelete={() => void handleDelete(plan)}
@@ -507,244 +538,249 @@ export default function PlansPage() {
         )}
       </div>
 
-      <Modal
-        open={modalOpen}
-        onClose={closeModal}
-        size="xl"
-        title={editingPlan ? "Edit Training Plan" : "Create Training Plan"}
-        description="Configure pricing, schedule, curriculum, and belt progression."
-        footer={
-          <>
-            <Button variant="outline" onClick={closeModal} disabled={saving}>
-              Cancel
-            </Button>
+      {canManagePlans && (
+        <Modal
+          open={modalOpen}
+          onClose={closeModal}
+          size="xl"
+          title={editingPlan ? "Edit Training Plan" : "Create Training Plan"}
+          description="Configure pricing, schedule, and belt progression for this training plan."
+          footer={
+            <>
+              <Button variant="outline" onClick={closeModal} disabled={saving}>
+                Cancel
+              </Button>
 
-            <Button
-              variant="secondary"
-              type="submit"
-              form="plan-form"
-              loading={saving}
+              <Button
+                variant="secondary"
+                type="submit"
+                form="plan-form"
+                loading={saving}
+              >
+                {editingPlan ? "Update Plan" : "Create Plan"}
+              </Button>
+            </>
+          }
+        >
+          <form id="plan-form" onSubmit={handleSubmit} className="space-y-8">
+            {formError && (
+              <div className="rounded-xl border border-(--danger-soft) bg-(--danger-soft) px-4 py-3 text-sm font-medium text-(--danger)">
+                {formError}
+              </div>
+            )}
+
+            <FormSection
+              icon={<Layers3 size={17} />}
+              title="Basic Information"
+              description="Set the core details for this training plan."
             >
-              {editingPlan ? "Update Plan" : "Create Plan"}
-            </Button>
-          </>
-        }
-      >
-        <form id="plan-form" onSubmit={handleSubmit} className="space-y-8">
-          {formError && (
-            <div className="rounded-xl border border-(--danger-soft) bg-(--danger-soft) px-4 py-3 text-sm font-medium text-(--danger)">
-              {formError}
-            </div>
-          )}
-
-          <FormSection
-            icon={<Layers3 size={17} />}
-            title="Basic Information"
-            description="Set the core details for this training plan."
-          >
-            <div className="grid gap-4 md:grid-cols-2">
-              <Field label="Plan Name" required>
-                <Input
-                  name="name"
-                  value={form.name}
-                  onChange={handleFormChange}
-                  placeholder="e.g. Beginner Karate"
-                />
-              </Field>
-
-              <Field label="Price" required>
-                <div className="relative">
-                  <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-sm font-semibold text-(--ink-muted)">
-                    ₹
-                  </span>
+              <div className="grid gap-4 md:grid-cols-2">
+                <Field label="Plan Name" required>
                   <Input
-                    name="price"
-                    type="number"
-                    min="0"
-                    value={form.price}
+                    name="name"
+                    value={form.name}
                     onChange={handleFormChange}
-                    placeholder="4000"
-                    className="pl-8"
+                    placeholder="e.g. Beginner Karate"
                   />
+                </Field>
+
+                <Field label="Price" required>
+                  <div className="relative">
+                    <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-sm font-semibold text-(--ink-muted)">
+                      ₹
+                    </span>
+
+                    <Input
+                      name="price"
+                      type="number"
+                      min="0"
+                      value={form.price}
+                      onChange={handleFormChange}
+                      placeholder="4000"
+                      className="pl-8"
+                    />
+                  </div>
+                </Field>
+
+                <Field label="Duration" required>
+                  <Input
+                    name="duration"
+                    type="number"
+                    min="1"
+                    value={form.duration}
+                    onChange={handleFormChange}
+                    placeholder="6"
+                  />
+                </Field>
+
+                <Field label="Duration Unit">
+                  <Select
+                    name="durationUnit"
+                    value={form.durationUnit}
+                    onChange={handleFormChange}
+                  >
+                    <option value="MONTHS">Months</option>
+
+                    <option value="DAYS">Days</option>
+                  </Select>
+                </Field>
+
+                <Field label="Classes Per Week" required>
+                  <Input
+                    name="classesPerWeek"
+                    type="number"
+                    min="1"
+                    value={form.classesPerWeek}
+                    onChange={handleFormChange}
+                  />
+                </Field>
+
+                <Field label="Starting Belt">
+                  <Select
+                    name="startingBelt"
+                    value={form.startingBelt}
+                    onChange={handleFormChange}
+                  >
+                    {BELTS.map((belt) => (
+                      <option key={belt} value={belt}>
+                        {belt}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+
+                <Field label="Progress Reports">
+                  <Select
+                    name="progressReports"
+                    value={form.progressReports}
+                    onChange={handleFormChange}
+                  >
+                    <option value="Weekly">Weekly</option>
+
+                    <option value="Monthly">Monthly</option>
+
+                    <option value="Quarterly">Quarterly</option>
+                  </Select>
+                </Field>
+              </div>
+            </FormSection>
+
+            <FormSection icon={<Dumbbell size={17} />} title="Included Programs" description="Students on this plan can attend sessions belonging to these programs. The weekly class allowance is shared across the selected programs.">
+              {availablePrograms.filter((program) => program.isActive).length === 0 ? (
+                <p className="rounded-lg border border-(--line) p-4 text-sm text-(--ink-muted)">Create or activate programs in Training Session Types before configuring plan access.</p>
+              ) : (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {availablePrograms.filter((program) => program.isActive).map((program) => {
+                    const checked = form.programs.includes(program._id);
+                    return <label key={program._id} className="flex cursor-pointer items-center gap-3 rounded-xl border border-(--line) p-4 text-sm font-semibold">
+                      <input type="checkbox" checked={checked} onChange={() => setForm((current) => ({ ...current, programs: checked ? current.programs.filter((id) => id !== program._id) : [...current.programs, program._id] }))} />
+                      {program.name}
+                    </label>;
+                  })}
                 </div>
-              </Field>
+              )}
+            </FormSection>
 
-              <Field label="Duration" required>
-                <Input
-                  name="duration"
-                  type="number"
-                  min="1"
-                  value={form.duration}
-                  onChange={handleFormChange}
-                  placeholder="6"
-                />
-              </Field>
-
-              <Field label="Duration Unit">
-                <Select
-                  name="durationUnit"
-                  value={form.durationUnit}
-                  onChange={handleFormChange}
+            <FormSection
+              icon={<Award size={17} />}
+              title="Belt Milestones"
+              description="Define achievement checkpoints students work toward."
+              action={
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={addMilestone}
                 >
-                  <option value="MONTHS">Months</option>
-                  <option value="DAYS">Days</option>
-                </Select>
-              </Field>
-
-              <Field label="Classes Per Week" required>
-                <Input
-                  name="classesPerWeek"
-                  type="number"
-                  min="1"
-                  value={form.classesPerWeek}
-                  onChange={handleFormChange}
+                  <Plus size={15} />
+                  Add Milestone
+                </Button>
+              }
+            >
+              {milestones.length === 0 ? (
+                <EmptyState
+                  title="No milestones"
+                  description="Add belt checkpoints to track student progression."
+                  icon={<Award size={21} />}
+                  className="py-9"
+                  action={
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      onClick={addMilestone}
+                    >
+                      <Plus size={15} />
+                      Add First Milestone
+                    </Button>
+                  }
                 />
-              </Field>
-
-              <Field label="Starting Belt">
-                <Select
-                  name="startingBelt"
-                  value={form.startingBelt}
-                  onChange={handleFormChange}
-                >
-                  {BELTS.map((belt) => (
-                    <option key={belt} value={belt}>
-                      {belt}
-                    </option>
+              ) : (
+                <div className="space-y-3">
+                  {milestones.map((item, index) => (
+                    <MilestoneEditor
+                      key={`milestone-${index}`}
+                      item={item}
+                      index={index}
+                      onChange={updateMilestone}
+                      onRemove={removeMilestone}
+                    />
                   ))}
-                </Select>
-              </Field>
+                </div>
+              )}
+            </FormSection>
 
-              <Field label="Progress Reports">
-                <Select
-                  name="progressReports"
-                  value={form.progressReports}
-                  onChange={handleFormChange}
-                >
-                  <option value="Weekly">Weekly</option>
-                  <option value="Monthly">Monthly</option>
-                  <option value="Quarterly">Quarterly</option>
-                </Select>
-              </Field>
+            <div className="rounded-2xl border border-(--line) bg-(--surface) p-4">
+              <div className="flex items-start gap-3">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-(--accent-soft) text-(--accent)">
+                  <CalendarDays size={17} />
+                </div>
+
+                <div>
+                  <p className="text-sm font-extrabold text-(--foreground)">
+                    Curriculum is managed separately
+                  </p>
+
+                  <p className="mt-1 text-xs leading-5 text-(--ink-muted)">
+                    Day-wise curriculum is protected by
+                    <span className="mx-1 font-bold text-(--foreground)">
+                      curriculum.manage
+                    </span>
+                    and is managed from the dedicated Curriculum page.
+                  </p>
+
+                  {!canManageCurriculum && (
+                    <p className="mt-2 text-xs font-semibold text-(--ink-faint)">
+                      Your current role does not have curriculum management
+                      permission.
+                    </p>
+                  )}
+                </div>
+              </div>
             </div>
-          </FormSection>
-
-          <FormSection
-            icon={<CalendarDays size={17} />}
-            title="Day-wise Curriculum"
-            description="Define exactly what students learn on each training day."
-            action={
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={addCurriculumDay}
-              >
-                <Plus size={15} />
-                Add Day
-              </Button>
-            }
-          >
-            {curriculum.length === 0 ? (
-              <EmptyState
-                title="No curriculum days"
-                description="Add training days to build the plan's learning path."
-                icon={<CalendarDays size={21} />}
-                className="py-9"
-                action={
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    onClick={addCurriculumDay}
-                  >
-                    <Plus size={15} />
-                    Add First Day
-                  </Button>
-                }
-              />
-            ) : (
-              <div className="space-y-3">
-                {curriculum.map((item, index) => (
-                  <CurriculumEditor
-                    key={`curriculum-${index}`}
-                    item={item}
-                    index={index}
-                    onChange={updateCurriculum}
-                    onRemove={removeCurriculumDay}
-                  />
-                ))}
-              </div>
-            )}
-          </FormSection>
-
-          <FormSection
-            icon={<Award size={17} />}
-            title="Belt Milestones"
-            description="Define the achievement checkpoints students work toward."
-            action={
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={addMilestone}
-              >
-                <Plus size={15} />
-                Add Milestone
-              </Button>
-            }
-          >
-            {milestones.length === 0 ? (
-              <EmptyState
-                title="No milestones"
-                description="Add belt checkpoints to track student progression."
-                icon={<Award size={21} />}
-                className="py-9"
-                action={
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    onClick={addMilestone}
-                  >
-                    <Plus size={15} />
-                    Add First Milestone
-                  </Button>
-                }
-              />
-            ) : (
-              <div className="space-y-3">
-                {milestones.map((item, index) => (
-                  <MilestoneEditor
-                    key={`milestone-${index}`}
-                    item={item}
-                    index={index}
-                    onChange={updateMilestone}
-                    onRemove={removeMilestone}
-                  />
-                ))}
-              </div>
-            )}
-          </FormSection>
-        </form>
-      </Modal>
+          </form>
+        </Modal>
+      )}
     </div>
   );
 }
 
 function PlanCard({
   plan,
+  availablePrograms,
   canManage,
   onEdit,
   onDelete,
 }: {
   plan: Plan;
+  availablePrograms: TrainingSessionTypeRecord[];
   canManage: boolean;
   onEdit: () => void;
   onDelete: () => void;
 }) {
   const curriculum = plan.curriculum ?? [];
   const milestones = plan.milestones ?? [];
+  const includedPrograms = (plan.programs ?? []).map((item) => typeof item.program === "string" ? availablePrograms.find((program) => program._id === item.program)?.name : item.program?.name).filter(Boolean);
 
   return (
     <Card padding="none" hoverable className="group overflow-hidden">
@@ -826,11 +862,14 @@ function PlanCard({
           />
         </div>
 
+        <p className="mt-4 text-xs leading-5 text-(--ink-muted)"><span className="font-bold text-(--foreground-soft)">Programs:</span> {includedPrograms.join(", ") || "Not configured"}</p>
+
         {curriculum.length > 0 && (
           <div className="mt-4 rounded-2xl border border-(--line) bg-(--hover-bg) p-4">
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-2">
                 <CalendarDays size={15} className="text-(--accent)" />
+
                 <span className="text-xs font-bold text-(--foreground)">
                   Curriculum Preview
                 </span>
@@ -940,6 +979,7 @@ function PlanStat({
     <div className="rounded-xl border border-(--line) bg-(--card) px-3 py-2.5">
       <div className="flex items-center gap-1.5 text-(--ink-faint)">
         {icon}
+
         <span className="text-[9px] font-semibold">{label}</span>
       </div>
 
@@ -1003,91 +1043,11 @@ function Field({
     <div>
       <label className="mb-1.5 block text-xs font-semibold text-(--foreground-soft)">
         {label}
+
         {required && <span className="ml-1 text-(--danger)">*</span>}
       </label>
 
       {children}
-    </div>
-  );
-}
-
-function CurriculumEditor({
-  item,
-  index,
-  onChange,
-  onRemove,
-}: {
-  item: CurriculumItem;
-  index: number;
-  onChange: (index: number, field: keyof CurriculumItem, value: string) => void;
-  onRemove: (index: number) => void;
-}) {
-  return (
-    <div className="rounded-2xl border border-(--line) bg-(--surface) p-4">
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2.5">
-          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-(--accent-soft) text-xs font-extrabold text-(--accent)">
-            {item.day}
-          </span>
-
-          <div>
-            <p className="text-xs font-extrabold text-(--foreground)">
-              Training Day {item.day}
-            </p>
-            <p className="text-[10px] text-(--ink-faint)">
-              Curriculum lesson #{index + 1}
-            </p>
-          </div>
-        </div>
-
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          aria-label={`Remove training day ${item.day}`}
-          onClick={() => onRemove(index)}
-          className="text-(--danger) hover:bg-(--danger-soft) hover:text-(--danger)"
-        >
-          <Trash2 size={15} />
-        </Button>
-      </div>
-
-      <div className="grid gap-3 md:grid-cols-2">
-        <Field label="Day" required>
-          <Input
-            type="number"
-            min="1"
-            value={item.day}
-            onChange={(event) => onChange(index, "day", event.target.value)}
-          />
-        </Field>
-
-        <Field label="Title" required>
-          <Input
-            value={item.title}
-            onChange={(event) => onChange(index, "title", event.target.value)}
-            placeholder="e.g. Warm-up + Basic Stance"
-          />
-        </Field>
-
-        <Field label="Skill">
-          <Input
-            value={item.skill}
-            onChange={(event) => onChange(index, "skill", event.target.value)}
-            placeholder="e.g. Stance"
-          />
-        </Field>
-
-        <Field label="Description">
-          <Input
-            value={item.description}
-            onChange={(event) =>
-              onChange(index, "description", event.target.value)
-            }
-            placeholder="Brief lesson description"
-          />
-        </Field>
-      </div>
     </div>
   );
 }
@@ -1115,6 +1075,7 @@ function MilestoneEditor({
             <p className="text-xs font-extrabold text-(--foreground)">
               Milestone {index + 1}
             </p>
+
             <p className="text-[10px] text-(--ink-faint)">
               Belt progression checkpoint
             </p>
@@ -1149,6 +1110,7 @@ function MilestoneEditor({
             onChange={(event) => onChange(index, "belt", event.target.value)}
           >
             <option value="">Select belt</option>
+
             {BELTS.map((belt) => (
               <option key={belt} value={belt}>
                 {belt}

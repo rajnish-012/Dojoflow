@@ -1,20 +1,21 @@
 "use client";
 
+
+import { fetchWithSession } from "@/lib/sessionFetch";
 import { useEffect, useMemo, useState } from "react";
 import {
   Award,
   ArrowUpRight,
   BarChart3,
-  Building2,
   CalendarDays,
   CheckCircle2,
   Clock3,
+  GraduationCap,
   Mail,
   Phone,
   RefreshCw,
   ShieldCheck,
   UserRound,
-  Users,
   XCircle,
 } from "lucide-react";
 
@@ -28,6 +29,7 @@ import {
   PageHeader,
   SummaryCard,
 } from "@/components/ui";
+import { toast } from "@/lib/toast";
 
 const API_URL =
   process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api";
@@ -114,23 +116,12 @@ type PerformanceRecord = {
 // HELPERS
 // ======================================================
 
-function getToken() {
-  if (typeof window === "undefined") return "";
-  return localStorage.getItem("token") || "";
-}
 
 async function fetchJson<T>(url: string): Promise<T> {
-  const token = getToken();
-
-  if (!token) {
-    throw new Error("Authentication required. Please log in again.");
-  }
-
-  const response = await fetch(url, {
+  const response = await fetchWithSession(url, {
     method: "GET",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
     },
     cache: "no-store",
   });
@@ -381,8 +372,8 @@ function PerformanceSection({
               overflow-hidden
               rounded-2xl
               border
-              border-(--dark-card-border)
-              bg-(--dark-card)
+              border-white/10
+              bg-(--dark-panel)
               p-5
               text-white
               sm:p-6
@@ -390,7 +381,7 @@ function PerformanceSection({
           >
             <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
               <div className="min-w-0">
-                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-(--dark-muted)">
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-white/70">
                   Latest Evaluation
                 </p>
 
@@ -400,26 +391,26 @@ function PerformanceSection({
                 </h3>
 
                 {latestPerformance.skill && (
-                  <p className="mt-2 text-sm text-(--dark-text)">
+                  <p className="mt-2 text-sm text-white/90">
                     Skill: {latestPerformance.skill}
                   </p>
                 )}
 
                 {latestPerformance.planDay !== undefined && (
-                  <p className="mt-1 text-sm text-(--dark-muted)">
+                  <p className="mt-1 text-sm text-white/70">
                     Training Day: {latestPerformance.planDay}
                   </p>
                 )}
               </div>
 
               <div className="shrink-0 sm:text-right">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-(--dark-muted)">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-white/70">
                   Rating
                 </p>
 
                 <p className="mt-1 text-4xl font-extrabold">
                   {getSafeRating(latestPerformance.rating)}
-                  <span className="text-lg font-medium text-(--dark-muted)">
+                  <span className="text-lg font-medium text-white/70">
                     /5
                   </span>
                 </p>
@@ -432,16 +423,16 @@ function PerformanceSection({
 
             <div className="mt-5">
               <div className="mb-2 flex items-center justify-between text-xs">
-                <span className="text-(--dark-muted)">
+                <span className="text-white/70">
                   Performance rating
                 </span>
 
-                <span className="font-semibold text-(--dark-text)">
+                <span className="font-semibold text-white/90">
                   {getSafeRating(latestPerformance.rating)}/5
                 </span>
               </div>
 
-              <div className="h-2 overflow-hidden rounded-full bg-(--dark-track)">
+              <div className="h-2 overflow-hidden rounded-full bg-white/15">
                 <div
                   className="h-full rounded-full bg-(--gold) transition-all duration-500"
                   style={{
@@ -453,7 +444,7 @@ function PerformanceSection({
               </div>
             </div>
 
-            <p className="mt-4 text-xs text-(--dark-muted)">
+            <p className="mt-4 text-xs text-white/70">
               Evaluated on{" "}
               {formatDate(
                 latestPerformance.evaluationDate ||
@@ -575,7 +566,7 @@ function ProfileSection({
       </div>
 
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
-        <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-(--dark-card) text-xl font-extrabold text-white">
+        <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-(--dark-panel) text-xl font-extrabold text-white">
           {getInitials(student?.name)}
         </div>
 
@@ -710,10 +701,10 @@ function PlanSection({
         />
       ) : (
         <div className="space-y-5">
-          <div className="rounded-2xl bg-(--dark-card) p-5 text-white sm:p-6">
+          <div className="rounded-2xl bg-(--dark-panel) p-5 text-white sm:p-6">
             <div className="flex items-start justify-between gap-4">
               <div className="min-w-0">
-                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-(--dark-muted)">
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-white/70">
                   Current Plan
                 </p>
 
@@ -729,7 +720,7 @@ function PlanSection({
             </div>
 
             {plan.price !== undefined && (
-              <p className="mt-4 text-sm text-(--dark-text)">
+              <p className="mt-4 text-sm text-white/90">
                 ₹{plan.price}
 
                 {plan.duration && (
@@ -872,7 +863,7 @@ export default function StudentDashboard() {
         setLoading(true);
       }
 
-      setError("");
+      if (!refresh) setError("");
 
       const [
         studentResponse,
@@ -893,6 +884,7 @@ export default function StudentDashboard() {
       setStudent(studentResponse.student || null);
       setAttendance(attendanceResponse.attendance || []);
       setPerformance(performanceResponse.performance || []);
+      setError("");
     } catch (dashboardError) {
       console.error("Student dashboard error:", dashboardError);
 
@@ -910,7 +902,11 @@ export default function StudentDashboard() {
         return;
       }
 
-      setError(message);
+      if (refresh && student) {
+        toast.error(message, "Dashboard refresh failed");
+      } else {
+        setError(message);
+      }
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -948,7 +944,27 @@ export default function StudentDashboard() {
   }, [attendance]);
 
   const currentBelt =
-    student?.currentBelt || student?.belt || "Beginner";
+    student?.currentBelt || student?.belt || "Not recorded";
+
+  const attendedPlanDays = useMemo(() => {
+    return new Set(
+      attendance
+        .filter((record) => getAttendanceStatus(record.status) === "PRESENT")
+        .map((record) => record.planDay)
+        .filter((day): day is number => typeof day === "number" && day > 0),
+    );
+  }, [attendance]);
+
+  const curriculumDays = student?.plan?.curriculum || [];
+  const curriculumDayNumbers = curriculumDays
+    .map((item, index) => item.day ?? index + 1)
+    .filter((day) => typeof day === "number" && day > 0);
+  const attendedCurriculumDays = curriculumDayNumbers.filter((day) =>
+    attendedPlanDays.has(day),
+  ).length;
+  const latestRecordedDay = attendance.find(
+    (record) => typeof record.planDay === "number",
+  )?.planDay;
 
   const latestPerformance = performance[0];
 
@@ -1090,6 +1106,60 @@ export default function StudentDashboard() {
           />
         </div>
 
+        <Card className="mb-6" padding="lg">
+          <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
+            <div className="min-w-0">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-(--accent-soft) text-(--accent)">
+                  <GraduationCap size={20} />
+                </div>
+                <div>
+                  <h2 className="text-lg font-extrabold text-(--foreground)">Training progress</h2>
+                  <p className="mt-1 text-sm text-(--ink-muted)">Attendance recorded against your assigned curriculum.</p>
+                </div>
+              </div>
+              <div className="mt-5 flex flex-wrap gap-2">
+                <Badge variant="info">{student?.plan?.name || "No plan assigned"}</Badge>
+                {student?.branch?.name && <Badge variant="neutral">{student.branch.name}</Badge>}
+                <Badge variant="neutral">{currentBelt}</Badge>
+              </div>
+            </div>
+
+            <div className="grid min-w-0 gap-3 sm:grid-cols-2 lg:w-[380px]">
+              <div className="rounded-xl border border-(--line) bg-(--surface-muted) p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-(--ink-muted)">Attended curriculum days</p>
+                <p className="mt-2 text-2xl font-extrabold text-(--foreground)">
+                  {curriculumDays.length ? `${attendedCurriculumDays} / ${curriculumDays.length}` : attendedPlanDays.size}
+                </p>
+                <p className="mt-1 text-xs text-(--ink-muted)">{curriculumDays.length ? "Distinct plan days marked present" : "Distinct plan days marked present; no curriculum total is available"}</p>
+              </div>
+              <div className="rounded-xl border border-(--line) bg-(--surface-muted) p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-(--ink-muted)">Latest recorded training day</p>
+                <p className="mt-2 text-2xl font-extrabold text-(--foreground)">{latestRecordedDay ? `Day ${latestRecordedDay}` : "—"}</p>
+                <p className="mt-1 text-xs text-(--ink-muted)">From your attendance history</p>
+              </div>
+              {curriculumDays.length > 0 && (
+                <div className="sm:col-span-2">
+                  <div className="mb-2 flex items-center justify-between text-xs text-(--ink-muted)">
+                    <span>Attendance coverage of listed curriculum days</span>
+                    <span className="font-semibold text-(--foreground)">{Math.round((attendedCurriculumDays / curriculumDays.length) * 100)}%</span>
+                  </div>
+                  <div
+                    className="h-2 overflow-hidden rounded-full bg-(--surface-muted)"
+                    role="progressbar"
+                    aria-label="Attendance coverage of listed curriculum days"
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-valuenow={Math.round((attendedCurriculumDays / curriculumDays.length) * 100)}
+                  >
+                    <div className="h-full rounded-full bg-(--accent) transition-[width]" style={{ width: `${Math.min(100, (attendedCurriculumDays / curriculumDays.length) * 100)}%` }} />
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </Card>
+
         <div className="grid gap-6 xl:grid-cols-2">
           <AttendanceSection attendance={attendance} />
           <PerformanceSection performance={performance} />
@@ -1102,7 +1172,7 @@ export default function StudentDashboard() {
 
         <div className="mt-5 flex items-center justify-between border-t border-(--line) pt-4">
           <p className="text-xs font-medium text-(--ink-faint)">
-            DojoFlow Student Portal
+            ForceStrike Academy Student Portal
           </p>
 
           <p className="text-xs text-(--ink-faint)">

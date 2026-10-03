@@ -4,6 +4,7 @@ import {
   ButtonHTMLAttributes,
   ReactNode,
 } from "react";
+import Link from "next/link";
 
 type IconButtonVariant =
   | "default"
@@ -22,6 +23,7 @@ type IconButtonProps =
     label: string;
     variant?: IconButtonVariant;
     size?: IconButtonSize;
+    href?: string;
   };
 
 export default function IconButton({
@@ -31,6 +33,8 @@ export default function IconButton({
   size = "md",
   className = "",
   type = "button",
+  href,
+  title,
   ...props
 }: IconButtonProps) {
   const variants: Record<
@@ -55,9 +59,10 @@ export default function IconButton({
 
     danger: `
       border-(--danger)
-      bg-(--danger)
-      text-white
-      hover:opacity-90
+      bg-(--danger-soft)
+      text-(--danger)
+      hover:bg-(--danger)
+      hover:text-white
     `,
 
     ghost: `
@@ -78,28 +83,42 @@ export default function IconButton({
     lg: "h-11 w-11 rounded-[10px]",
   };
 
+  const sharedClassName = `
+    inline-flex
+    shrink-0
+    items-center
+    justify-center
+    border
+    transition-all
+    duration-200
+    active:scale-95
+    disabled:cursor-not-allowed
+    disabled:opacity-50
+    ${variants[variant]}
+    ${sizes[size]}
+    ${className}
+  `;
+
+  if (href) {
+    return (
+      <Link
+        href={href}
+        aria-label={label}
+        title={title ?? label}
+        className={sharedClassName}
+      >
+        {children}
+      </Link>
+    );
+  }
+
   return (
     <button
       {...props}
       type={type}
       aria-label={label}
-      title={label}
-      className={`
-        inline-flex
-        shrink-0
-        items-center
-        justify-center
-        border
-        shadow-sm
-        transition-all
-        duration-200
-        active:scale-95
-        disabled:cursor-not-allowed
-        disabled:opacity-50
-        ${variants[variant]}
-        ${sizes[size]}
-        ${className}
-      `}
+      title={title ?? label}
+      className={sharedClassName}
     >
       {children}
     </button>

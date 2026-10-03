@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
 import {
   type ChangeEvent,
@@ -16,6 +15,7 @@ import {
   CheckCircle2,
   Clock3,
   Dumbbell,
+  Globe,
   Loader2,
   Mail,
   MapPin,
@@ -29,6 +29,7 @@ import {
 
 import PublicBranchSchedules from "@/components/public/PublicBranchSchedules";
 import { Button, Card, Input, Select } from "@/components/ui";
+import { AcademyLogo, useAcademyBrand } from "@/components/settings/AcademyBrandProvider";
 
 type FormData = {
   fullName: string;
@@ -242,13 +243,7 @@ function PlanCard({
           </div>
 
           <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-(--sidebar-logo-bg)">
-            <Image
-              src="/logo.png"
-              alt="DojoFlow logo"
-              width={28}
-              height={28}
-              className="h-7 w-7 rounded-md object-contain"
-            />
+            <AcademyLogo className="h-7 w-7 rounded-md object-contain text-(--accent)" />
           </div>
         </div>
 
@@ -334,6 +329,9 @@ function PlanCard({
 }
 
 export default function InquiryPage() {
+  const { settings } = useAcademyBrand();
+  const academyName = settings.academyName.trim() || "Your Academy";
+  const academyTagline = settings.tagline.trim() || "Train with discipline. Grow with confidence.";
   const [formData, setFormData] =
     useState<FormData>(initialFormData);
 
@@ -794,22 +792,16 @@ export default function InquiryPage() {
             className="flex items-center gap-3"
           >
             <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-(--sidebar-logo-bg)">
-              <Image
-                src="/logo.png"
-                alt="DojoFlow logo"
-                width={28}
-                height={28}
-                className="h-7 w-7 rounded-md object-contain"
-              />
+              <AcademyLogo className="h-7 w-7 rounded-md object-contain text-(--accent)" />
             </div>
 
             <div>
               <p className="text-lg font-bold tracking-tight text-(--foreground)">
-                DojoFlow
+                {academyName}
               </p>
 
               <p className="text-xs text-(--ink-muted)">
-                Karate Academy
+                {academyTagline}
               </p>
             </div>
           </Link>
@@ -943,13 +935,7 @@ export default function InquiryPage() {
                       </div>
 
                       <div className="hidden h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-(--sidebar-logo-bg) sm:flex">
-                        <Image
-                          src="/logo.png"
-                          alt="DojoFlow logo"
-                          width={28}
-                          height={28}
-                          className="h-7 w-7 rounded-md object-contain"
-                        />
+                        <AcademyLogo className="h-7 w-7 rounded-md object-contain text-(--accent)" />
                       </div>
                     </div>
                   </div>
@@ -1543,36 +1529,47 @@ export default function InquiryPage() {
         <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-6 px-4 py-8 text-sm text-(--ink-muted) sm:px-6 md:flex-row md:items-center md:justify-between lg:px-8">
           <div className="flex items-center gap-3">
             <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-(--sidebar-logo-bg)">
-              <Image
-                src="/logo.png"
-                alt="DojoFlow logo"
-                width={24}
-                height={24}
-                className="h-6 w-6 rounded-md object-contain"
-              />
+                <AcademyLogo className="h-6 w-6 rounded-md object-contain text-(--accent)" />
             </div>
 
             <div>
               <p className="font-semibold text-(--foreground)">
-                DojoFlow Karate Academy
+                {academyName}
               </p>
 
               <p className="mt-1">
-                Train with discipline. Grow with confidence.
+                {academyTagline}
               </p>
             </div>
           </div>
 
           <div className="flex flex-wrap gap-5">
-            <span className="inline-flex items-center gap-2">
-              <Mail className="h-4 w-4" />
-              Academy support
-            </span>
+            {settings.contactEmail && (
+              <a href={`mailto:${settings.contactEmail}`} className="inline-flex items-center gap-2">
+                <Mail className="h-4 w-4" />
+                {settings.contactEmail}
+              </a>
+            )}
 
-            <span className="inline-flex items-center gap-2">
-              <Phone className="h-4 w-4" />
-              Admission assistance
-            </span>
+            {settings.contactPhone && (
+              <a href={`tel:${settings.contactPhone}`} className="inline-flex items-center gap-2">
+                <Phone className="h-4 w-4" />
+                {settings.contactPhone}
+              </a>
+            )}
+
+            {settings.address && (
+              <span className="inline-flex items-center gap-2">
+                <MapPin className="h-4 w-4" />
+                {settings.address}
+              </span>
+            )}
+            {settings.website && (
+              <a href={settings.website} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 hover:text-(--accent)">
+                <Globe className="h-4 w-4" />
+                {settings.website}
+              </a>
+            )}
           </div>
         </div>
       </footer>

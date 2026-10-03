@@ -1,13 +1,19 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
 import {
+  Building2,
+  ChevronDown,
   ChevronLeft,
+  FileText,
+  Folder,
+  Layers,
   LogOut,
+  Settings,
+  ShieldCheck,
   X,
 } from "lucide-react";
 
@@ -24,7 +30,7 @@ import {
 
 import {
   hasPermission,
-  NAVIGATION_PERMISSIONS,
+  PERMISSIONS,
 } from "@/lib/permissions";
 
 import { getNavigationIcon } from "@/lib/navigation-icons";
@@ -47,9 +53,44 @@ type SidebarProps = {
 ========================================================= */
 
 const SIDEBAR_WIDTH = {
-  expanded: 260,
+  expanded: 288,
   collapsed: 84,
 } as const;
+
+const NAVIGATION_GROUPS = [
+  { id: "academy", label: "Academy", icon: Building2, keys: ["students", "plans", "curriculum", "attendance", "performance", "promotions", "progress"] },
+  { id: "operations", label: "Operations", icon: Layers, keys: ["makeups", "inquiries", "coach-assignments", "holidays", "branch-schedules"] },
+  { id: "content", label: "Content", icon: Folder, keys: ["website", "homepage", "gallery", "news", "sponsors"] },
+  { id: "reports", label: "Reports", icon: FileText, keys: ["reports", "analytics"] },
+  { id: "administration", label: "Administration", icon: ShieldCheck, keys: ["branches", "roles", "modules", "users", "staff", "permissions", "training-session-types"] },
+  { id: "settings", label: "Settings", icon: Settings, keys: ["settings", "academy-settings", "branding", "settings-branding", "settings-staff", "settings-maintenance"] },
+] as const;
+
+type NavigationGroup = {
+  id: string;
+  label: string;
+  icon: typeof Building2;
+  children: NavigationModule[];
+};
+
+type NavigationEntry = NavigationModule | NavigationGroup;
+
+function isNavigationGroup(item: NavigationEntry): item is NavigationGroup {
+  return "children" in item;
+}
+
+function getGroupId(item: NavigationModule) {
+  const key = item.key.toLowerCase();
+  const href = item.href.toLowerCase();
+  return NAVIGATION_GROUPS.find((group) =>
+    group.keys.some((candidate) => key === candidate || key.startsWith(`${candidate}-`) || href.startsWith(`/website/${candidate}`)),
+  )?.id;
+}
+
+function matchesRoute(pathname: string, href: string) {
+  if (href === "/dashboard" || href === "/student-dashboard") return pathname === href;
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
 
 /* =========================================================
    HELPERS
@@ -65,7 +106,7 @@ function formatRole(role: string) {
 }
 
 /**
- * Determines whether the authenticated user can see
+ * Determines whether the authenticated user can see.
  * a navigation module.
  *
  * The backend already filters modules by role.
@@ -79,40 +120,9 @@ function canSeeNavigationItem(
     return false;
   }
 
-  const role = String(
-    user.role || "",
-  ).toUpperCase();
-
-  /*
-   * Student dashboard is intentionally available only
-   * to the STUDENT role.
-   */
-  if (item.key === "student-dashboard") {
-    return role === "STUDENT";
-  }
-
-  /*
-   * If this module has a known frontend permission,
-   * require that permission.
-   */
-  const requiredPermission =
-    NAVIGATION_PERMISSIONS[item.key];
-
-  if (requiredPermission) {
-    return hasPermission(
-      user,
-      requiredPermission,
-    );
-  }
-
-  /*
-   * Unknown/custom modules are already filtered by
-   * the backend's /modules/navigation endpoint.
-   *
-   * We therefore keep them visible here rather than
-   * accidentally hiding administrator-created modules.
-   */
-  return true;
+  // /modules/navigation already filters role visibility. Recheck the
+  // permission returned by that API without duplicating role rules here.
+  return !item.requiredPermission || hasPermission(user, item.requiredPermission);
 }
 
 /* =========================================================
@@ -137,8 +147,17 @@ export default function Sidebar({
     user?.role || "",
   ).toUpperCase();
 
-  const [branchName, setBranchName] =
-    useState("");
+  const [resolvedBranchName, setResolvedBranchName] = useState("");
+  const branchValue = user?.branch as unknown as
+    | string
+    | { _id?: string; name?: string }
+    | null
+    | undefined;
+  const embeddedBranchName = branchValue && typeof branchValue === "object"
+    ? branchValue.name
+    : undefined;
+  const branchName = user?.branchName || embeddedBranchName ||
+    (!user?.branch ? "All Branches" : resolvedBranchName || "Assigned Branch");
 
   const logoHref =
     role === "STUDENT"
@@ -151,32 +170,7 @@ export default function Sidebar({
 
   useEffect(() => {
     let cancelled = false;
-
-    if (!user?.branch) {
-      setBranchName("All Branches");
-      return;
-    }
-
-    const branchValue =
-      user.branch as unknown as
-        | string
-        | {
-            _id?: string;
-            name?: string;
-          }
-        | null
-        | undefined;
-
-    if (
-      branchValue &&
-      typeof branchValue === "object" &&
-      branchValue.name
-    ) {
-      setBranchName(
-        branchValue.name,
-      );
-      return;
-    }
+    if (user?.branchName || embeddedBranchName || !user?.branch) return;
 
     const branchId =
       typeof branchValue === "string"
@@ -184,7 +178,6 @@ export default function Sidebar({
         : branchValue?._id;
 
     if (!branchId) {
-      setBranchName("All Branches");
       return;
     }
 
@@ -206,23 +199,18 @@ export default function Sidebar({
               item._id === branchId,
           );
 
-        setBranchName(
-          branch?.name ||
-            "Assigned Branch",
-        );
+        setResolvedBranchName(branch?.name || "Assigned Branch");
       })
       .catch(() => {
         if (!cancelled) {
-          setBranchName(
-            "Assigned Branch",
-          );
+          setResolvedBranchName("Assigned Branch");
         }
       });
 
     return () => {
       cancelled = true;
     };
-  }, [user?.branch]);
+  }, [user?.branch, user?.branchName, embeddedBranchName, branchValue]);
 
   /* =======================================================
      NAVIGATION
@@ -243,9 +231,6 @@ export default function Sidebar({
   useEffect(() => {
     let cancelled = false;
 
-    setNavLoading(true);
-    setNavError("");
-
     getMyNavigation()
       .then((modules) => {
         if (cancelled) {
@@ -253,6 +238,7 @@ export default function Sidebar({
         }
 
         setNavItems(modules);
+        setNavError("");
       })
       .catch((error) => {
         if (cancelled) {
@@ -303,31 +289,53 @@ export default function Sidebar({
    * Apply the frontend permission layer.
    */
   const visibleNavItems = useMemo(() => {
-    return navItems.filter((item) =>
+    const dynamicItems = navItems.filter((item) =>
       canSeeNavigationItem(
         user,
         item,
       ),
-    );
+    ).filter((item) => !["settings", "academy-settings", "branding"].includes(item.key));
+    if (!user) return dynamicItems;
+
+    const settingsItems: NavigationModule[] = [
+      { _id: "settings-branding", key: "settings-branding", label: "Academy Branding", href: "/settings/branding", icon: "Building2", order: 1, requiredPermission: PERMISSIONS.SETTINGS_VIEW },
+      { _id: "settings-staff", key: "settings-staff", label: "Staff Management", href: "/settings/staff", icon: "Users", order: 2, requiredPermission: PERMISSIONS.USER_VIEW },
+      { _id: "settings-maintenance", key: "settings-maintenance", label: "Maintenance", href: "/settings/maintenance", icon: "ShieldCheck", order: 3, requiredPermission: PERMISSIONS.MAINTENANCE_VIEW },
+    ].filter((item) => canSeeNavigationItem(user, item));
+    return [...dynamicItems, ...settingsItems];
   }, [navItems, user]);
+
+  const navigationEntries = useMemo<NavigationEntry[]>(() => {
+    const dashboardItems = visibleNavItems.filter((item) =>
+      ["dashboard", "student-dashboard"].includes(item.key),
+    );
+    const groupedKeys = new Set<string>();
+    const groups = NAVIGATION_GROUPS.flatMap((config) => {
+      const children = visibleNavItems.filter((item) => getGroupId(item) === config.id);
+      if (!children.length) return [];
+      children.forEach((item) => groupedKeys.add(item.key));
+      return [{ id: config.id, label: config.label, icon: config.icon, children }];
+    });
+    const ungrouped = visibleNavItems.filter((item) =>
+      !dashboardItems.includes(item) && !groupedKeys.has(item.key),
+    );
+    return [...dashboardItems, ...groups, ...ungrouped];
+  }, [visibleNavItems]);
+
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
+  const [collapsedAtRoute, setCollapsedAtRoute] = useState<{ id: string; pathname: string } | null>(null);
+  const [collapsedFlyout, setCollapsedFlyout] = useState<string | null>(null);
 
   /* =======================================================
      ACTIVE ROUTE
   ======================================================= */
 
   const isActive = (href: string) => {
-    if (
-      href === "/dashboard" ||
-      href === "/student-dashboard"
-    ) {
-      return pathname === href;
-    }
-
-    return (
-      pathname === href ||
-      pathname.startsWith(`${href}/`)
-    );
+    return matchesRoute(pathname, href);
   };
+
+  const activeGroupId = visibleNavItems.reduce<string | undefined>((activeId, item) =>
+    activeId || (matchesRoute(pathname, item.href) ? getGroupId(item) : undefined), undefined);
 
   /* =======================================================
      LOGOUT
@@ -347,6 +355,37 @@ export default function Sidebar({
 
   const handleNavigation = () => {
     onClose?.();
+    setCollapsedFlyout(null);
+  };
+
+  const renderNavigationLink = (item: NavigationModule, nested = false, forceExpanded = false) => {
+    const Icon = getNavigationIcon(item.icon);
+    const active = isActive(item.href);
+    const compact = collapsed && !forceExpanded;
+    return (
+      <Link
+        key={item.href}
+        href={item.href}
+        onClick={handleNavigation}
+        title={compact ? item.label : undefined}
+        aria-current={active ? "page" : undefined}
+        className={[
+          "group relative flex min-h-11 items-center rounded-xl py-2 text-[13px] font-semibold transition-colors duration-200",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--gold)",
+          compact ? "justify-center px-3" : nested ? "gap-2.5 px-3" : "gap-3 px-3.5",
+          active
+            ? "bg-(--gold) text-(--sidebar-active-text)"
+            : "text-(--sidebar-text) opacity-80 hover:bg-(--sidebar-hover) hover:opacity-100",
+        ].join(" ")}
+      >
+        {active && !compact && (
+          <span aria-hidden="true" className="absolute -left-3 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-r-full bg-(--gold)" />
+        )}
+        <Icon size={18} strokeWidth={active ? 2.3 : 1.9} className={active ? "shrink-0" : "shrink-0 text-(--sidebar-muted) group-hover:text-(--gold)"} />
+        {!compact && <span className="truncate">{item.label}</span>}
+        {!compact && active && <span aria-hidden="true" className="ml-auto h-1.5 w-1.5 shrink-0 rounded-full bg-(--sidebar-active-text)" />}
+      </Link>
+    );
   };
 
   /* =======================================================
@@ -387,7 +426,7 @@ export default function Sidebar({
           "border-r border-(--line)",
           "bg-(--sidebar-bg)",
           "text-(--sidebar-text)",
-          "shadow-[10px_0_40px_rgba(15,23,42,0.08)]",
+          "shadow-none",
           "transition-[width,transform] duration-300 ease-out",
           isOpen
             ? "translate-x-0"
@@ -405,7 +444,7 @@ export default function Sidebar({
 
         <div
           className={[
-            "flex h-[72px] shrink-0 items-center",
+            "flex h-[76px] shrink-0 items-center",
             "border-b border-(--line)",
             collapsed
               ? "justify-center px-3"
@@ -428,51 +467,26 @@ export default function Sidebar({
             <div
               className="
                 flex
-                h-10
-                w-10
+                h-12
+                w-12
                 shrink-0
                 items-center
                 justify-center
-                overflow-hidden
                 rounded-xl
-                border
-                border-(--line)
-                bg-(--sidebar-logo-bg)
-                shadow-sm
+                border border-(--line)
+                bg-white
               "
             >
-              {academySettings.logoUrl ? (
-                <img
-                  src={
-                    academySettings.logoUrl
+              <img
+                src={academySettings.logoUrl || "/logo.png"}
+                alt={academySettings.academyName || "ForceStrike Academy"}
+                onError={(event) => {
+                  if (event.currentTarget.getAttribute("src") !== "/logo.png") {
+                    event.currentTarget.setAttribute("src", "/logo.png");
                   }
-                  alt={
-                    academySettings.academyName
-                  }
-                  className="
-                    h-full
-                    w-full
-                    object-contain
-                    p-1
-                  "
-                />
-              ) : (
-                <Image
-                  src="/logo.png"
-                  alt={
-                    academySettings.academyName ||
-                    "DojoFlow"
-                  }
-                  width={40}
-                  height={40}
-                  priority
-                  className="
-                    h-full
-                    w-full
-                    object-contain
-                  "
-                />
-              )}
+                }}
+                className="h-9 w-9 object-contain p-0.5"
+              />
             </div>
 
             {!collapsed && (
@@ -480,28 +494,33 @@ export default function Sidebar({
                 <p
                   className="
                     truncate
-                    text-[17px]
-                    font-extrabold
+                    text-[15px]
+                    font-bold
                     tracking-tight
+                    leading-5
                     text-(--sidebar-text)
                   "
+                  title={academySettings.academyName || "ForceStrike Academy"}
                 >
-                  {academySettings.academyName}
+                  {academySettings.academyName || "ForceStrike Academy"}
                 </p>
 
                 <p
                   className="
                     mt-0.5
-                    truncate
-                    text-[9px]
+                    line-clamp-2
+                    whitespace-normal
+                    text-[10px]
                     font-bold
                     uppercase
-                    tracking-[0.18em]
+                    tracking-[0.06em]
+                    leading-3.5
                     text-(--sidebar-muted)
                   "
+                  title={academySettings.tagline || "Train with purpose. Manage with clarity."}
                 >
                   {academySettings.tagline ||
-                    "Academy Management"}
+                    "Train with purpose. Manage with clarity."}
                 </p>
               </div>
             )}
@@ -658,118 +677,76 @@ export default function Sidebar({
             )}
 
           <div className="space-y-1">
-            {visibleNavItems.map(
-              (item) => {
-                const Icon =
-                  getNavigationIcon(
-                    item.icon,
-                  );
+            {navigationEntries.map((entry) => {
+              if (!isNavigationGroup(entry)) return renderNavigationLink(entry);
+              const GroupIcon = entry.icon;
+              const groupActive = entry.children.some((child) => isActive(child.href));
+              const routeCollapsed = collapsedAtRoute?.id === entry.id && collapsedAtRoute.pathname === pathname;
+              const expanded = groupActive
+                ? !routeCollapsed
+                : expandedGroups[entry.id] === true;
+              const flyoutOpen = collapsedFlyout === entry.id;
+              const toggleGroup = () => {
+                if (collapsed) {
+                  setCollapsedFlyout((current) => current === entry.id ? null : entry.id);
+                  return;
+                }
+                setExpandedGroups(expanded ? {} : { [entry.id]: true });
+                if (expanded && groupActive) {
+                  setCollapsedAtRoute({ id: entry.id, pathname });
+                } else if (!expanded && activeGroupId && activeGroupId !== entry.id) {
+                  setCollapsedAtRoute({ id: activeGroupId, pathname });
+                } else {
+                  setCollapsedAtRoute(null);
+                }
+              };
 
-                const active =
-                  isActive(item.href);
-
-                return (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    onClick={
-                      handleNavigation
-                    }
-                    title={
-                      collapsed
-                        ? item.label
-                        : undefined
-                    }
-                    aria-current={
-                      active
-                        ? "page"
-                        : undefined
-                    }
+              return (
+                <div
+                  key={entry.id}
+                  className="relative"
+                  onMouseEnter={() => collapsed && setCollapsedFlyout(entry.id)}
+                  onMouseLeave={() => collapsed && setCollapsedFlyout(null)}
+                >
+                  <button
+                    type="button"
+                    aria-expanded={collapsed ? flyoutOpen : expanded}
+                    aria-controls={`sidebar-group-${entry.id}`}
+                    aria-label={collapsed ? entry.label : undefined}
+                    title={collapsed ? entry.label : undefined}
+                    onClick={toggleGroup}
                     className={[
-                      "group relative flex min-h-11",
-                      "items-center rounded-xl",
-                      "py-2.5 text-[13px] font-semibold",
-                      "transition-all duration-200",
-                      "focus-visible:outline-none",
-                      "focus-visible:ring-2",
-                      "focus-visible:ring-(--gold)",
-                      collapsed
-                        ? "justify-center px-3"
-                        : "gap-3 px-3.5",
-
-                      active
-                        ? [
-                            "bg-(--gold)",
-                            "text-(--sidebar-active-text)",
-                            "shadow-[0_6px_20px_rgba(0,0,0,0.12)]",
-                          ].join(" ")
-                        : [
-                            "text-(--sidebar-text)",
-                            "opacity-80",
-                            "hover:bg-(--sidebar-hover)",
-                            "hover:opacity-100",
-                          ].join(" "),
+                      "group relative flex min-h-11 w-full items-center rounded-xl py-2.5 text-[13px] font-semibold transition-colors duration-200",
+                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--gold)",
+                      collapsed ? "justify-center px-3" : "gap-3 px-3.5",
+                      groupActive ? "bg-(--sidebar-hover) text-(--sidebar-text)" : "text-(--sidebar-text) opacity-80 hover:bg-(--sidebar-hover) hover:opacity-100",
                     ].join(" ")}
                   >
-                    {active && (
-                      <span
-                        aria-hidden="true"
-                        className="
-                          absolute
-                          -left-3
-                          top-1/2
-                          h-5
-                          w-0.5
-                          -translate-y-1/2
-                          rounded-r-full
-                          bg-(--gold)
-                        "
-                      />
-                    )}
+                    <GroupIcon size={18} className={groupActive ? "shrink-0 text-(--gold)" : "shrink-0 text-(--sidebar-muted) group-hover:text-(--gold)"} />
+                    {!collapsed && <span className="truncate">{entry.label}</span>}
+                    {!collapsed && <ChevronDown size={15} className={`ml-auto shrink-0 transition-transform duration-200 ${expanded ? "rotate-180" : ""}`} />}
+                  </button>
 
-                    <Icon
-                      size={18}
-                      strokeWidth={
-                        active
-                          ? 2.3
-                          : 1.9
-                      }
+                  {(!collapsed || flyoutOpen) && (
+                    <div
+                      id={`sidebar-group-${entry.id}`}
+                      aria-hidden={!collapsed && !expanded}
+                      inert={!collapsed && !expanded}
+                      onMouseEnter={() => collapsed && setCollapsedFlyout(entry.id)}
+                      onMouseLeave={() => collapsed && setCollapsedFlyout(null)}
                       className={[
-                        "shrink-0",
-                        "transition-colors duration-200",
-                        active
-                          ? "text-(--sidebar-active-text)"
-                          : [
-                              "text-(--sidebar-muted)",
-                              "group-hover:text-(--gold)",
-                            ].join(" "),
+                        "grid transition-[grid-template-rows,opacity] duration-200 ease-out",
+                        collapsed ? "absolute left-full top-0 z-[60] ml-2 w-56 rounded-xl border border-(--line) bg-(--sidebar-bg) p-2 shadow-xl" : expanded ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0",
                       ].join(" ")}
-                    />
-
-                    {!collapsed && (
-                      <span className="truncate">
-                        {item.label}
-                      </span>
-                    )}
-
-                    {!collapsed &&
-                      active && (
-                        <span
-                          aria-hidden="true"
-                          className="
-                            ml-auto
-                            h-1.5
-                            w-1.5
-                            shrink-0
-                            rounded-full
-                            bg-(--sidebar-active-text)
-                          "
-                        />
-                      )}
-                  </Link>
-                );
-              },
-            )}
+                    >
+                      <div className={collapsed ? "space-y-1" : "min-h-0 space-y-1 overflow-hidden border-l border-(--line) ml-7 pl-2 pt-1"}>
+                        {entry.children.map((child) => renderNavigationLink(child, true, collapsed))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </nav>
 

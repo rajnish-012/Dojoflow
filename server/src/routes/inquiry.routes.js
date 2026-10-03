@@ -7,27 +7,22 @@ const {
 } = require("../controllers/inquiry.controller");
 
 const protect = require("../middleware/auth.middleware");
-const authorize = require("../middleware/role.middleware");
+const { authorizePermission } = require("../middleware/permission.middleware");
 
 const router = express.Router();
 
-// Public inquiry submission
+// Public inquiry submission.
 router.post("/", createInquiry);
 
-// Admin, branch admin and coach can view inquiries
-router.get(
-  "/",
-  protect,
-  authorize("SUPER_ADMIN", "BRANCH_ADMIN", "COACH"),
-  getInquiries
-);
+// Database-backed inquiry read permission.
+router.get("/", protect, authorizePermission("inquiry.view"), getInquiries);
 
-// Only super admin and branch admin can update status
+// Database-backed inquiry update permission.
 router.patch(
   "/:id/status",
   protect,
-  authorize("SUPER_ADMIN", "BRANCH_ADMIN"),
-  updateInquiryStatus
+  authorizePermission("inquiry.update"),
+  updateInquiryStatus,
 );
 
 module.exports = router;

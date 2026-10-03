@@ -17,6 +17,7 @@ import HeroManager from "./HeroManager";
 import StatisticsManager from "./StatisticsManager";
 import FeaturesManager from "./FeaturesManager";
 import SectionsManager from "./SectionsManager";
+import { PERMISSIONS, useCan } from "@/lib/permissions";
 
 
 type CMSSection =
@@ -72,12 +73,21 @@ const tabs: {
 
 
 export default function HomepageCMS() {
+  const canViewWebsite = useCan(PERMISSIONS.WEBSITE_VIEW);
   const [activeSection, setActiveSection] =
     useState<CMSSection>("overview");
 
   const websiteUrl =
     process.env.NEXT_PUBLIC_WEBSITE_URL ||
     "https://www.theforcestrike.com/";
+
+  if (!canViewWebsite) {
+    return (
+      <div className="rounded-2xl border border-(--line) bg-(--card) p-6 text-sm text-(--ink-muted)">
+        Your role does not have permission to view website content.
+      </div>
+    );
+  }
 
 
   return (

@@ -38,6 +38,11 @@ export type DailyAttendanceRow = {
     makeupRequired?: boolean;
     makeupCompleted?: boolean;
   } | null;
+  attendanceComplete?: boolean;
+  curriculumComplete?: boolean;
+  curriculumScheduled?: boolean;
+  sessionAttendanceCount?: number;
+  sessionAttendanceTotal?: number;
 
   planDay?: number;
 
@@ -76,10 +81,18 @@ export type DailyAttendanceRow = {
 
     slots: {
       _id?: string;
+      sessionTypeId?: string;
       sessionName?: string;
       startTime: string;
       endTime: string;
       isActive?: boolean;
+      attendance?: { _id?: string; status?: string } | null;
+      planDay?: number | null;
+      curriculum?: { title?: string; description?: string; skill?: string } | null;
+      programName?: string;
+      entitled?: boolean;
+      curriculumAvailable?: boolean;
+      curriculumComplete?: boolean;
     }[];
 
     openingTime: string | null;
@@ -89,6 +102,7 @@ export type DailyAttendanceRow = {
 
 type AttendanceRowProps = {
   row: DailyAttendanceRow;
+  canManage: boolean;
 
   saving: boolean;
 
@@ -157,6 +171,7 @@ function formatTime(
 
 export default function AttendanceRow({
   row,
+  canManage,
   saving,
   onMark,
 }: AttendanceRowProps) {
@@ -183,15 +198,16 @@ export default function AttendanceRow({
     row.branchSchedule.isOpen ===
       false;
 
+  const activeSlots = row.branchSchedule?.slots || [];
+  const hasMarkableSlot = activeSlots.some((slot) => slot.entitled && slot.curriculumAvailable && !slot.attendance);
+
   const canMarkAttendance =
+    canManage &&
     !isHoliday &&
     !isBranchClosed &&
     !marked &&
+    hasMarkableSlot &&
     !saving;
-
-  const activeSlots =
-    row.branchSchedule?.slots ||
-    [];
 
   return (
     <tr
@@ -235,7 +251,7 @@ export default function AttendanceRow({
           <div className="min-w-0">
             <p
               className="
-                truncate text-sm font-bold
+                truncate text-[15px] font-semibold leading-5
                 text-(--foreground-soft)
                 transition-colors
                 group-hover:text-(--accent)
@@ -244,7 +260,7 @@ export default function AttendanceRow({
               {row.student.name}
             </p>
 
-            <p className="mt-1 text-xs text-(--ink-muted)">
+            <p className="mt-1 text-sm leading-5 text-(--ink-muted)">
               Age{" "}
               {row.student.age ??
                 "—"}
@@ -260,7 +276,7 @@ export default function AttendanceRow({
       <td className="px-6 py-5">
         <p
           className="
-            text-sm font-medium
+            text-[15px] font-medium leading-5
             text-(--foreground-soft)
           "
         >
@@ -271,7 +287,7 @@ export default function AttendanceRow({
         <p
           className="
             mt-1 max-w-[200px]
-            truncate text-xs
+            truncate text-sm leading-5
             text-(--ink-muted)
           "
         >
@@ -288,7 +304,7 @@ export default function AttendanceRow({
       <td className="px-6 py-5">
         <p
           className="
-            text-sm font-medium
+            text-[15px] font-medium leading-5
             text-(--foreground-soft)
           "
         >
@@ -298,7 +314,7 @@ export default function AttendanceRow({
         <p
           className="
             mt-1 max-w-[230px]
-            truncate text-xs
+            truncate text-sm leading-5
             text-(--ink-muted)
           "
         >
@@ -339,7 +355,7 @@ export default function AttendanceRow({
                 className="
                   max-w-[220px]
                   truncate
-                  text-sm font-bold
+                  text-[15px] font-semibold leading-5
                   text-(--accent)
                 "
               >
@@ -350,7 +366,7 @@ export default function AttendanceRow({
               <p
                 className="
                   mt-1 max-w-[220px]
-                  truncate text-xs
+                  truncate text-sm leading-5
                   text-(--ink-muted)
                 "
               >
@@ -386,7 +402,7 @@ export default function AttendanceRow({
                 className="
                   max-w-[220px]
                   truncate
-                  text-sm font-bold
+                  text-[15px] font-semibold leading-5
                   text-(--foreground-soft)
                 "
               >
@@ -396,7 +412,7 @@ export default function AttendanceRow({
               <p
                 className="
                   mt-1 max-w-[260px]
-                  text-xs
+                  text-sm leading-5
                   text-(--ink-muted)
                 "
               >
@@ -415,7 +431,7 @@ export default function AttendanceRow({
             <p
               className="
                 max-w-[220px]
-                truncate text-sm font-medium
+                truncate text-[15px] font-medium leading-5
                 text-(--foreground-soft)
               "
             >
@@ -425,7 +441,7 @@ export default function AttendanceRow({
             <p
               className="
                 mt-1 max-w-[220px]
-                truncate text-xs
+                truncate text-sm leading-5
                 text-(--ink-muted)
               "
             >
@@ -435,28 +451,26 @@ export default function AttendanceRow({
                 "Training step"}
             </p>
 
-            {activeSlots.length >
-              0 && (
-              <p
-                className="
-                  mt-2 text-[11px]
-                  font-semibold
-                  text-(--accent)
-                "
-              >
-                {activeSlots.length ===
-                1
-                  ? `${formatTime(
-                      activeSlots[0]
-                        .startTime,
-                    )} – ${formatTime(
-                      activeSlots[0]
-                        .endTime,
-                    )}`
-                  : `${activeSlots.length} training sessions`}
+            {row.curriculumScheduled && activeSlots.some((slot) => slot.entitled && slot.curriculumAvailable) && (
+              <p className="mt-2 text-[11px] font-semibold text-(--accent)">
+                {(() => {
+                  const matching = activeSlots.filter((slot) => slot.entitled && slot.curriculumAvailable);
+                  return matching.length === 1
+                    ? `${formatTime(matching[0].startTime)} – ${formatTime(matching[0].endTime)}`
+                    : `${matching.length} training sessions`;
+                })()}
+              </p>
+            )}
+            {!row.curriculumScheduled && (
+              <p className="mt-2 text-[11px] font-semibold text-(--ink-muted)">
+                No matching program session scheduled today; attendance is unavailable.
               </p>
             )}
           </>
+        ) : row.curriculumComplete ? (
+          <div className="rounded-xl border border-(--line) bg-(--surface) px-3 py-2.5 text-sm font-semibold text-(--ink-muted)">
+            This program&apos;s curriculum is complete.
+          </div>
         ) : (
           <div
             className="
@@ -468,8 +482,7 @@ export default function AttendanceRow({
               size={14}
             />
 
-            No curriculum
-            configured
+            {activeSlots.some((slot) => slot.entitled) ? "No curriculum day available" : "No enrolled program session"}
           </div>
         )}
       </td>
@@ -524,7 +537,19 @@ export default function AttendanceRow({
 
         {!isHoliday &&
           !isBranchClosed &&
-          !marked && (
+          status === "PARTIAL" && (
+            <Badge variant="warning">Partial ({row.sessionAttendanceCount}/{row.sessionAttendanceTotal})</Badge>
+          )}
+
+        {!isHoliday &&
+          !isBranchClosed &&
+          !marked && row.curriculumComplete && (
+            <Badge variant="warning">Curriculum complete</Badge>
+          )}
+
+        {!isHoliday &&
+          !isBranchClosed &&
+          !marked && !row.curriculumComplete && (
             <Badge variant="default">
               Not marked
             </Badge>
@@ -554,6 +579,7 @@ export default function AttendanceRow({
                   disabled={
                     !canMarkAttendance
                   }
+                  className={status === "PRESENT" ? "disabled:opacity-100" : ""}
                   onClick={() =>
                     onMark(
                       row,
@@ -580,6 +606,7 @@ export default function AttendanceRow({
                   disabled={
                     !canMarkAttendance
                   }
+                  className={status === "ABSENT" ? "disabled:opacity-100" : ""}
                   onClick={() =>
                     onMark(
                       row,

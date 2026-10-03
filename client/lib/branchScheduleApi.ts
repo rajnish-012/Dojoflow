@@ -1,3 +1,5 @@
+import { fetchWithSession } from "@/lib/sessionFetch";
+
 const API_URL = (
   process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api"
 ).replace(/\/+$/, "");
@@ -9,6 +11,8 @@ const API_URL = (
 export interface TrainingSlot {
   _id?: string;
   sessionName: string;
+  sessionTypeId?: string;
+  sessionType?: string;
   startTime: string;
   endTime: string;
   isActive: boolean;
@@ -141,19 +145,11 @@ async function branchScheduleRequest(
   if (typeof window === "undefined") {
     throw new Error("This request must run in the browser.");
   }
-
-  const token = localStorage.getItem("token");
-
-  const response = await fetch(`${API_URL}/branch-schedules${path}`, {
+  const response = await fetchWithSession(`${API_URL}/branch-schedules${path}`, {
     method: options.method || "GET",
 
     headers: {
       "Content-Type": "application/json",
-      ...(token
-        ? {
-            Authorization: `Bearer ${token}`,
-          }
-        : {}),
     },
 
     body:
@@ -167,11 +163,6 @@ async function branchScheduleRequest(
   const data = await response.json().catch(() => ({}));
 
   if (response.status === 401) {
-    localStorage.removeItem("token");
-    localStorage.removeItem("user");
-    localStorage.removeItem("dojoUser");
-    localStorage.removeItem("currentUser");
-
     window.location.href = "/login";
 
     throw new Error("Authentication required.");

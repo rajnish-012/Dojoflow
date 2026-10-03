@@ -57,7 +57,7 @@ function getPrimaryColor(
 ) {
   return isValidColor(value)
     ? value
-    : "#D7A84B";
+    : "#BD4835";
 }
 
 function getSecondaryColor(
@@ -65,7 +65,7 @@ function getSecondaryColor(
 ) {
   return isValidColor(value)
     ? value
-    : "#101A33";
+    : "#242629";
 }
 
 function getDisplayName(

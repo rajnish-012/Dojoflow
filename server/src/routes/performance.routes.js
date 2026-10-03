@@ -9,65 +9,97 @@ const {
 } = require("../controllers/performance.controller");
 
 const protect = require("../middleware/auth.middleware");
-const authorize = require("../middleware/role.middleware");
+const { authorizePermission } = require("../middleware/permission.middleware");
 
 const router = express.Router();
 
 // ======================================================
 // STUDENT'S OWN PERFORMANCE
-// IMPORTANT: /me must come before /:id
+//
+// Students access their own performance through /me.
+// This remains role-specific business behavior because
+// it is the student's personal dashboard endpoint.
+//
+// IMPORTANT:
+// /me must come before /:id.
 // ======================================================
 
 router.get(
   "/me",
   protect,
-  authorize("STUDENT"),
-  getMyPerformance
+  async (req, res, next) => {
+    if (String(req.user?.role || "").toUpperCase() !== "STUDENT") {
+      return res.status(403).json({
+        success: false,
+        message: "Student access required",
+      });
+    }
+
+    return next();
+  },
+  getMyPerformance,
 );
 
 // ======================================================
 // GET ALL PERFORMANCE RECORDS
+//
+// Requires:
+//   performance.view
+//
+// Backend authorization is database-driven.
+// Custom roles can access this endpoint when their
+// database Role contains performance.view.
 // ======================================================
 
 router.get(
   "/",
   protect,
-  authorize("SUPER_ADMIN", "BRANCH_ADMIN", "COACH"),
-  getPerformance
+  authorizePermission("performance.view"),
+  getPerformance,
 );
 
-
-// ==============================
+// ======================================================
 // GET PERFORMANCE BY STUDENT ID
-// ==============================
+//
+// Requires:
+//   performance.view
+// ======================================================
+
 router.get(
   "/student/:studentId",
   protect,
-  authorize("SUPER_ADMIN", "BRANCH_ADMIN", "COACH"),
-  getPerformanceByStudent
+  authorizePermission("performance.view"),
+  getPerformanceByStudent,
 );
-
 
 // ======================================================
 // GET PERFORMANCE BY ID
+//
+// Requires:
+//   performance.view
 // ======================================================
 
 router.get(
   "/:id",
   protect,
-  authorize("SUPER_ADMIN", "BRANCH_ADMIN", "COACH"),
-  getPerformanceById
+  authorizePermission("performance.view"),
+  getPerformanceById,
 );
 
 // ======================================================
 // CREATE PERFORMANCE RECORD
+//
+// Requires:
+//   performance.manage
+//
+// View-only roles cannot create performance records.
 // ======================================================
 
 router.post(
   "/",
   protect,
-  authorize("SUPER_ADMIN", "BRANCH_ADMIN", "COACH"),
-  createPerformance
+  authorizePermission("performance.manage"),
+  createPerformance,
 );
 
 module.exports = router;

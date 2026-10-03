@@ -7,62 +7,139 @@ const {
   createPlan,
   updatePlan,
   deletePlan,
+  getCurriculumPlans,
+  getPlanCurriculum,
+  updatePlanCurriculum,
 } = require("../controllers/plan.controller");
 
 const protect = require("../middleware/auth.middleware");
-const authorize = require("../middleware/role.middleware");
+const { authorizePermission } = require("../middleware/permission.middleware");
 
 const router = express.Router();
 
-// Get active plans for public users
+/*
+ * =========================================================
+ * PUBLIC PLANS
+ * =========================================================
+ *
+ * Public-facing plan data.
+ * No authentication required.
+ */
+
 router.get("/public", getPublicPlans);
 
-// Get all plans
+/*
+ * =========================================================
+ * CURRICULUM-SPECIFIC APIs
+ * =========================================================
+ *
+ * Curriculum is stored inside Plan.curriculum.
+ *
+ * These endpoints intentionally use curriculum permissions
+ * instead of plan permissions.
+ *
+ * This keeps curriculum management separate from general
+ * plan management.
+ */
+
+/*
+ * Get plans available to the Curriculum page.
+ *
+ * Requires:
+ *   curriculum.view
+ *
+ * This route MUST remain before /:id routes.
+ */
 router.get(
-  "/",
+  "/curriculum",
   protect,
-  authorize(
-    "SUPER_ADMIN",
-    "BRANCH_ADMIN",
-    "COACH"
-  ),
-  getPlans
+  authorizePermission("curriculum.view"),
+  getCurriculumPlans,
 );
 
-// Get one plan
+/*
+ * Get curriculum for one training plan.
+ *
+ * Requires:
+ *   curriculum.view
+ */
 router.get(
-  "/:id",
+  "/:id/curriculum",
   protect,
-  authorize(
-    "SUPER_ADMIN",
-    "BRANCH_ADMIN",
-    "COACH"
-  ),
-  getPlanById
+  authorizePermission("curriculum.view"),
+  getPlanCurriculum,
 );
 
-// Create plan
-router.post(
-  "/",
-  protect,
-  authorize("SUPER_ADMIN"),
-  createPlan
-);
-
-// Update plan
+/*
+ * Replace curriculum for one training plan.
+ *
+ * Requires:
+ *   curriculum.manage
+ *
+ * Only the curriculum field is modified.
+ */
 router.put(
-  "/:id",
+  "/:id/curriculum",
   protect,
-  authorize("SUPER_ADMIN"),
-  updatePlan
+  authorizePermission("curriculum.manage"),
+  updatePlanCurriculum,
 );
 
-// Delete plan
-router.delete(
-  "/:id",
-  protect,
-  authorize("SUPER_ADMIN"),
-  deletePlan
-);
+/*
+ * =========================================================
+ * STANDARD PLAN APIs
+ * =========================================================
+ *
+ * These remain separate from curriculum authorization.
+ */
+
+/*
+ * Get all plans.
+ *
+ * Requires:
+ *   plan.view
+ */
+router.get("/", protect, authorizePermission("plan.view"), getPlans);
+
+/*
+ * Get one plan.
+ *
+ * Requires:
+ *   plan.view
+ */
+router.get("/:id", protect, authorizePermission("plan.view"), getPlanById);
+
+/*
+ * Create plan.
+ *
+ * Requires:
+ *   plan.manage
+ */
+router.post("/", protect, authorizePermission("plan.manage"), createPlan);
+
+/*
+ * Update plan configuration.
+ *
+ * Requires:
+ *   plan.manage
+ *
+ * Curriculum-specific changes must use:
+ *
+ *   PUT /:id/curriculum
+ *
+ * protected by curriculum.manage.
+ */
+router.put("/:id", protect, authorizePermission("plan.manage"), updatePlan);
+
+/*
+ * Deactivate plan.
+ *
+ * Requires:
+ *   plan.manage
+ *
+ * This is a soft deactivation.
+ * Historical plan data is preserved.
+ */
+router.delete("/:id", protect, authorizePermission("plan.manage"), deletePlan);
 
 module.exports = router;

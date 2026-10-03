@@ -1,4 +1,5 @@
 "use client";
+import { confirmAction, toast } from "@/lib/toast";
 
 import { useEffect, useMemo, useState } from "react";
 
@@ -24,6 +25,8 @@ import {
   Modal,
   PageHeader,
   SummaryCard,
+  TablePagination,
+  TableHeading,
 } from "@/components/ui";
 
 import {
@@ -33,6 +36,8 @@ import {
   type BeltHistory,
   type EligiblePromotion,
 } from "@/lib/promotionsApi";
+
+import { PERMISSIONS, useCan } from "@/lib/permissions";
 
 /* ======================================================
    HELPERS
@@ -74,6 +79,10 @@ function formatDate(date?: string | null) {
 ====================================================== */
 
 export default function PromotionsPage() {
+  const canViewPromotion = useCan(PERMISSIONS.PROMOTION_VIEW);
+
+  const canManagePromotion = useCan(PERMISSIONS.PROMOTION_MANAGE);
+
   const [eligible, setEligible] = useState<EligiblePromotion[]>([]);
 
   const [loading, setLoading] = useState(true);
@@ -82,7 +91,6 @@ export default function PromotionsPage() {
 
   const [error, setError] = useState("");
 
-  const [success, setSuccess] = useState("");
 
   const [search, setSearch] = useState("");
 
@@ -96,6 +104,17 @@ export default function PromotionsPage() {
   const [historyLoading, setHistoryLoading] = useState(false);
 
   const loadPromotions = async (refresh = false) => {
+    /*
+     * Never call the API when the frontend user
+     * does not have the read permission.
+     */
+    if (!canViewPromotion) {
+      setEligible([]);
+      setLoading(false);
+      setRefreshing(false);
+      return;
+    }
+
     try {
       if (refresh) {
         setRefreshing(true);
@@ -121,20 +140,8 @@ export default function PromotionsPage() {
   };
 
   useEffect(() => {
-    loadPromotions();
-  }, []);
-
-  useEffect(() => {
-    if (!success) {
-      return;
-    }
-
-    const timer = window.setTimeout(() => {
-      setSuccess("");
-    }, 4000);
-
-    return () => window.clearTimeout(timer);
-  }, [success]);
+    void loadPromotions();
+  }, [canViewPromotion]);
 
   const filteredEligible = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -151,6 +158,7 @@ export default function PromotionsPage() {
       const branch = item.branch.name.toLowerCase();
 
       const plan = item.plan.name.toLowerCase();
+      const program = item.program.name.toLowerCase();
 
       const currentBelt = (item.student.currentBelt || "").toLowerCase();
 
@@ -163,6 +171,7 @@ export default function PromotionsPage() {
         phone.includes(query) ||
         branch.includes(query) ||
         plan.includes(query) ||
+        program.includes(query) ||
         currentBelt.includes(query) ||
         nextBelt.includes(query) ||
         skill.includes(query)
@@ -171,39 +180,42 @@ export default function PromotionsPage() {
   }, [eligible, search]);
 
   const handlePromote = async (item: EligiblePromotion) => {
-    const confirmed = window.confirm(
-      `Promote ${item.student.name} from ${item.student.currentBelt || "White"} to ${item.milestone.belt} belt?`,
-    );
+    if (!canManagePromotion) {
+      toast.error("You do not have permission to perform this action.");
+      return;
+    }
+
+    const confirmed = await confirmAction({ title: "Approve belt promotion?", message: `Promote ${item.student.name} in ${item.program.name} from ${item.student.currentBelt || "White"} to ${item.milestone.belt} belt?`, confirmLabel: "Promote student" });
 
     if (!confirmed) {
       return;
     }
 
     try {
-      setActionLoading(item.student._id);
+      setActionLoading(`${item.student._id}:${item.program._id}`);
 
       setError("");
-      setSuccess("");
 
-      const response = await promoteStudent(item.student._id);
+      const response = await promoteStudent(item.student._id, item.program._id);
 
-      setSuccess(
-        response.message || `${item.student.name} promoted successfully.`,
-      );
+      toast.success(response.message || `${item.student.name} promoted successfully.`);
 
       await loadPromotions(true);
     } catch (err) {
       console.error(err);
 
-      setError(
-        err instanceof Error ? err.message : "Failed to promote student.",
-      );
+      toast.error(err instanceof Error ? err.message : "Failed to promote student.");
     } finally {
       setActionLoading("");
     }
   };
 
   const openHistory = async (item: EligiblePromotion) => {
+    if (!canViewPromotion) {
+      toast.error("You do not have permission to perform this action.");
+      return;
+    }
+
     try {
       setHistoryStudent(item);
 
@@ -217,9 +229,7 @@ export default function PromotionsPage() {
     } catch (err) {
       console.error(err);
 
-      setError(
-        err instanceof Error ? err.message : "Failed to load belt history.",
-      );
+      toast.error(err instanceof Error ? err.message : "Failed to load belt history.");
 
       setHistoryStudent(null);
     } finally {
@@ -236,6 +246,33 @@ export default function PromotionsPage() {
 
     setHistory([]);
   };
+
+  /*
+   * Frontend is only a visibility layer.
+   *
+   * Backend permission middleware remains the actual
+   * security boundary.
+   */
+  if (!canViewPromotion) {
+    return (
+      <main>
+        <div className="df-page">
+          <PageHeader
+            eyebrow="Achievement management"
+            title="Belt Promotions"
+            description="Review belt milestones and promotion history."
+          />
+
+          <div className="mt-6">
+            <ErrorState
+              title="Access denied"
+              message="You do not have permission to view belt promotions."
+            />
+          </div>
+        </div>
+      </main>
+    );
+  }
 
   if (loading) {
     return (
@@ -265,7 +302,7 @@ export default function PromotionsPage() {
             <Button
               variant="outline"
               size="lg"
-              onClick={() => loadPromotions(true)}
+              onClick={() => void loadPromotions(true)}
               disabled={refreshing}
             >
               <RefreshCw size={18} />
@@ -281,32 +318,14 @@ export default function PromotionsPage() {
           </div>
         )}
 
-        {success && (
-          <div
-            className="
-              mt-5 flex items-center
-              gap-3 rounded-xl
-              border border-(--success)/20
-              bg-(--success-soft)
-              px-4 py-3
-            "
-          >
-            <CheckCircle2 size={18} className="text-(--success)" />
-
-            <p className="text-sm font-semibold text-(--success)">{success}</p>
-          </div>
-        )}
 
         <PromotionSummary
           eligible={eligible.length}
           visible={filteredEligible.length}
+          canManage={canManagePromotion}
         />
 
         <Card padding="none" className="mt-6 overflow-hidden">
-          {/* ==================================================
-             SAME HEADER STRUCTURE AS STUDENTS
-          ================================================== */}
-
           <div
             className="
               flex flex-col
@@ -409,6 +428,7 @@ export default function PromotionsPage() {
             <PromotionTable
               items={filteredEligible}
               actionLoading={actionLoading}
+              canManage={canManagePromotion}
               onPromote={handlePromote}
               onHistory={openHistory}
             />
@@ -419,29 +439,18 @@ export default function PromotionsPage() {
               items={filteredEligible}
               total={eligible.length}
               actionLoading={actionLoading}
+              canManage={canManagePromotion}
               onPromote={handlePromote}
               onHistory={openHistory}
             />
           </div>
 
           {filteredEligible.length > 0 && (
-            <div
-              className="
-                border-t border-(--line)
-                px-5 py-4
-                sm:px-6
-              "
-            >
-              <p
-                className="
-                  text-xs font-medium
-                  text-(--ink-faint)
-                "
-              >
-                Showing {filteredEligible.length} of {eligible.length} promotion
-                candidates
-              </p>
-            </div>
+            <TablePagination
+              totalItems={filteredEligible.length}
+              visibleItems={filteredEligible.length}
+              entityLabel="promotion candidates"
+            />
           )}
         </Card>
       </div>
@@ -464,9 +473,11 @@ export default function PromotionsPage() {
 function PromotionSummary({
   eligible,
   visible,
+  canManage,
 }: {
   eligible: number;
   visible: number;
+  canManage: boolean;
 }) {
   return (
     <div
@@ -492,8 +503,12 @@ function PromotionSummary({
 
       <SummaryCard
         title="Approval"
-        value="Admin"
-        subtitle="Promotion requires approval"
+        value={canManage ? "Enabled" : "View only"}
+        subtitle={
+          canManage
+            ? "You can approve promotions"
+            : "Promotion approval permission not assigned"
+        }
         icon={<ShieldCheck size={20} />}
       />
     </div>
@@ -507,11 +522,13 @@ function PromotionSummary({
 function PromotionTable({
   items,
   actionLoading,
+  canManage,
   onPromote,
   onHistory,
 }: {
   items: EligiblePromotion[];
   actionLoading: string;
+  canManage: boolean;
   onPromote: (item: EligiblePromotion) => void;
   onHistory: (item: EligiblePromotion) => void;
 }) {
@@ -554,9 +571,10 @@ function PromotionTable({
         ) : (
           items.map((item) => (
             <PromotionTableRow
-              key={item.student._id}
+              key={`${item.student._id}:${item.program._id}`}
               item={item}
               actionLoading={actionLoading}
+              canManage={canManage}
               onPromote={onPromote}
               onHistory={onHistory}
             />
@@ -574,17 +592,19 @@ function PromotionTable({
 function PromotionTableRow({
   item,
   actionLoading,
+  canManage,
   onPromote,
   onHistory,
 }: {
   item: EligiblePromotion;
   actionLoading: string;
+  canManage: boolean;
   onPromote: (item: EligiblePromotion) => void;
   onHistory: (item: EligiblePromotion) => void;
 }) {
   const name = item.student.name;
 
-  const isLoading = actionLoading === item.student._id;
+  const isLoading = actionLoading === `${item.student._id}:${item.program._id}`;
 
   return (
     <tr
@@ -602,8 +622,8 @@ function PromotionTableRow({
           <div className="min-w-0">
             <p
               className="
-                truncate text-sm
-                font-bold
+                truncate text-[15px]
+                font-semibold leading-5
                 text-(--foreground-soft)
                 transition-colors
                 group-hover:text-(--accent)
@@ -614,7 +634,7 @@ function PromotionTableRow({
 
             <p
               className="
-                mt-1 text-xs
+                mt-1 text-sm leading-5
                 text-(--ink-muted)
               "
             >
@@ -634,7 +654,7 @@ function PromotionTableRow({
         <div>
           <p
             className="
-              text-sm font-bold
+              text-[15px] font-semibold leading-5
               text-(--foreground-soft)
             "
           >
@@ -643,7 +663,7 @@ function PromotionTableRow({
 
           <p
             className="
-              mt-1 text-xs
+              mt-1 text-sm leading-5
               text-(--ink-muted)
             "
           >
@@ -657,7 +677,7 @@ function PromotionTableRow({
         <div>
           <p
             className="
-              text-sm font-bold
+              text-[15px] font-semibold leading-5
               text-(--foreground-soft)
             "
           >
@@ -666,7 +686,7 @@ function PromotionTableRow({
 
           <p
             className="
-              mt-1 text-xs
+              mt-1 text-sm leading-5
               text-(--ink-muted)
             "
           >
@@ -678,16 +698,18 @@ function PromotionTableRow({
       <td className="px-6 py-5">
         <p
           className="
-            text-sm font-medium
+            text-[15px] font-medium leading-5
             text-(--foreground-soft)
           "
         >
           {item.plan.name}
         </p>
 
+        <p className="mt-1 text-sm font-semibold text-(--accent)">{item.program.name}</p>
+
         <p
           className="
-            mt-1 text-xs
+            mt-1 text-sm leading-5
             text-(--ink-muted)
           "
         >
@@ -707,15 +729,17 @@ function PromotionTableRow({
             History
           </Button>
 
-          <Button
-            size="sm"
-            variant="primary"
-            loading={isLoading}
-            onClick={() => onPromote(item)}
-          >
-            <Check size={15} />
-            Promote
-          </Button>
+          {canManage && (
+            <Button
+              size="sm"
+              variant="primary"
+              loading={isLoading}
+              onClick={() => onPromote(item)}
+            >
+              <Check size={15} />
+              Promote
+            </Button>
+          )}
         </div>
       </td>
     </tr>
@@ -730,12 +754,14 @@ function PromotionMobileList({
   items,
   total,
   actionLoading,
+  canManage,
   onPromote,
   onHistory,
 }: {
   items: EligiblePromotion[];
   total: number;
   actionLoading: string;
+  canManage: boolean;
   onPromote: (item: EligiblePromotion) => void;
   onHistory: (item: EligiblePromotion) => void;
 }) {
@@ -760,6 +786,7 @@ function PromotionMobileList({
           key={item.student._id}
           item={item}
           actionLoading={actionLoading}
+          canManage={canManage}
           onPromote={onPromote}
           onHistory={onHistory}
         />
@@ -771,11 +798,13 @@ function PromotionMobileList({
 function PromotionMobileCard({
   item,
   actionLoading,
+  canManage,
   onPromote,
   onHistory,
 }: {
   item: EligiblePromotion;
   actionLoading: string;
+  canManage: boolean;
   onPromote: (item: EligiblePromotion) => void;
   onHistory: (item: EligiblePromotion) => void;
 }) {
@@ -853,6 +882,8 @@ function PromotionMobileCard({
 
         <MobileDetail label="Plan" value={item.plan.name} />
 
+        <MobileDetail label="Program" value={item.program.name} />
+
         <MobileDetail label="Branch" value={item.branch.name} />
       </div>
 
@@ -886,15 +917,17 @@ function PromotionMobileCard({
           History
         </Button>
 
-        <Button
-          size="sm"
-          variant="primary"
-          loading={isLoading}
-          onClick={() => onPromote(item)}
-        >
-          <Check size={15} />
-          Promote
-        </Button>
+        {canManage && (
+          <Button
+            size="sm"
+            variant="primary"
+            loading={isLoading}
+            onClick={() => onPromote(item)}
+          >
+            <Check size={15} />
+            Promote
+          </Button>
+        )}
       </div>
     </div>
   );
@@ -948,7 +981,9 @@ function HistoryModal({
       title="Belt history"
       description={
         student
-          ? `${student.student.name} · Current belt: ${student.student.currentBelt || "White"}`
+          ? `${student.student.name} · Current belt: ${
+              student.student.currentBelt || "White"
+            }`
           : undefined
       }
       size="lg"
@@ -1018,6 +1053,7 @@ function HistoryModal({
                           text-(--ink-muted)
                         "
                     >
+                      {record.sessionTypeId && typeof record.sessionTypeId === "object" ? `${record.sessionTypeId.name} · ` : ""}
                       Day {record.milestoneDay} ·{" "}
                       {formatDate(record.promotedAt)}
                     </p>
@@ -1081,31 +1117,6 @@ function HistoryModal({
 /* ======================================================
    TABLE HEADING
 ====================================================== */
-
-function TableHeading({
-  children,
-  align = "left",
-}: {
-  children: React.ReactNode;
-  align?: "left" | "right";
-}) {
-  return (
-    <th
-      scope="col"
-      className={`
-        px-6 py-4
-        text-[10px]
-        font-black
-        uppercase
-        tracking-[0.16em]
-        text-(--ink-faint)
-        ${align === "right" ? "text-right" : "text-left"}
-      `}
-    >
-      {children}
-    </th>
-  );
-}
 
 /* ======================================================
    MOBILE DETAIL

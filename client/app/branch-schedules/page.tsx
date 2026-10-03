@@ -1,9 +1,9 @@
 "use client";
-import Link from "next/link";
+
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 
 import {
-  ArrowRight,
   CalendarDays,
   ChevronLeft,
   ChevronRight,
@@ -14,11 +14,13 @@ import {
 } from "lucide-react";
 
 import {
+  Badge,
   Button,
   Card,
   ErrorState,
   LoadingSpinner,
   PageHeader,
+  Select,
 } from "@/components/ui";
 
 import {
@@ -27,6 +29,8 @@ import {
   type BranchCalendarDay,
   type BranchScheduleListItem,
 } from "@/lib/branchScheduleApi";
+import { PERMISSIONS, useCan } from "@/lib/permissions";
+import { getTrainingSessionTypes, type TrainingSessionTypeRecord } from "@/lib/trainingSessionTypeApi";
 
 /* =========================================================
    CONSTANTS
@@ -236,6 +240,14 @@ function getStatusClasses(day: BranchCalendarDay, selected: boolean) {
 ========================================================= */
 
 export default function BranchSchedulesPage() {
+  const router = useRouter();
+
+  const canViewSchedule = useCan(PERMISSIONS.BRANCH_SCHEDULE_VIEW);
+  const [trainingTypes, setTrainingTypes] = useState<TrainingSessionTypeRecord[]>([]);
+
+  useEffect(() => { getTrainingSessionTypes().then(setTrainingTypes).catch(() => setTrainingTypes([])); }, []);
+  const canManageSchedule = useCan(PERMISSIONS.BRANCH_SCHEDULE_MANAGE);
+
   const today = useMemo(() => {
     const now = new Date();
 
@@ -390,20 +402,29 @@ export default function BranchSchedulesPage() {
   ======================================================= */
 
   useEffect(() => {
-    void loadBranches();
-  }, [loadBranches]);
+    if (canViewSchedule) {
+      // The loader owns the async loading/error state for this request.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      void loadBranches();
+    } else {
+      setLoadingBranches(false);
+      setError("You do not have permission to view branch schedules.");
+    }
+  }, [canViewSchedule, loadBranches]);
 
   /* =======================================================
      LOAD CALENDAR WHEN BRANCH / MONTH CHANGES
   ======================================================= */
 
   useEffect(() => {
-    if (!selectedBranchId) {
+    if (!canViewSchedule || !selectedBranchId) {
       return;
     }
 
+    // The loader owns the async loading/error state for this request.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadCalendar(selectedBranchId, year, month);
-  }, [selectedBranchId, year, month, loadCalendar]);
+  }, [canViewSchedule, selectedBranchId, year, month, loadCalendar]);
 
   /* =======================================================
      CALENDAR CELLS
@@ -471,6 +492,18 @@ export default function BranchSchedulesPage() {
   }
 
   /* =======================================================
+     MANAGE WEEKLY SCHEDULE
+  ======================================================= */
+
+  function handleManageWeeklySchedule() {
+    if (!selectedBranchId || !canManageSchedule) {
+      return;
+    }
+
+    router.push(`/branches/${selectedBranchId}/schedule`);
+  }
+
+  /* =======================================================
      LOADING
   ======================================================= */
 
@@ -496,18 +529,32 @@ export default function BranchSchedulesPage() {
           title="Training Availability"
           description="View actual training availability for every date in a month, including holidays, closed days and scheduled training sessions."
           actions={
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => void handleRefresh()}
-              disabled={refreshing || loadingCalendar}
-            >
-              <RefreshCw
-                size={16}
-                className={refreshing ? "animate-spin" : undefined}
-              />
-              Refresh
-            </Button>
+            <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => void handleRefresh()}
+                disabled={refreshing || loadingCalendar}
+              >
+                <RefreshCw
+                  size={16}
+                  className={refreshing ? "animate-spin" : undefined}
+                />
+                <span className="hidden sm:inline">Refresh</span>
+              </Button>
+
+              {selectedBranchId && canManageSchedule && (
+                <Button
+                  type="button"
+                  variant="primary"
+                  size="lg"
+                  onClick={handleManageWeeklySchedule}
+                >
+                  <CalendarDays size={18} />
+                  <span>Manage Weekly Schedule</span>
+                </Button>
+              )}
+            </div>
           }
         />
 
@@ -563,36 +610,21 @@ export default function BranchSchedulesPage() {
                     Branch
                   </label>
 
-                  <select
+                  <Select
                     id="branch-selector"
                     value={selectedBranchId}
                     onChange={(event) => {
                       setSelectedBranchId(event.target.value);
                       setSelectedDate(null);
                     }}
-                    className="
-          h-11
-          w-full
-          rounded-xl
-          border
-          border-(--line)
-          bg-(--surface)
-          px-3
-          text-sm
-          font-medium
-          text-(--foreground)
-          outline-none
-          transition
-          focus:border-(--accent)
-          lg:max-w-md
-        "
+                    className="lg:max-w-md"
                   >
                     {branches.map((item) => (
                       <option key={item.branch._id} value={item.branch._id}>
                         {item.branch.name}
                       </option>
                     ))}
-                  </select>
+                  </Select>
                 </div>
 
                 <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center">
@@ -605,34 +637,6 @@ export default function BranchSchedulesPage() {
                           "Branch address not available"}
                       </span>
                     </div>
-                  )}
-
-                  {selectedBranchId && (
-                    <Link
-                      href={`/branches/${selectedBranchId}/schedule`}
-                      className="
-            inline-flex
-            h-11
-            shrink-0
-            items-center
-            justify-center
-            gap-2
-            rounded-xl
-            border
-            border-(--accent)
-            bg-(--accent)
-            px-4
-            text-sm
-            font-bold
-            text-white
-            transition
-            hover:opacity-90
-          "
-                    >
-                      <CalendarDays size={17} />
-                      Manage Weekly Schedule
-                      <ArrowRight size={16} />
-                    </Link>
                   )}
                 </div>
               </div>
@@ -683,7 +687,6 @@ export default function BranchSchedulesPage() {
                     >
                       <ChevronRight size={17} />
                     </Button>
-                    
                   </div>
                 </div>
               </div>
@@ -787,33 +790,33 @@ export default function BranchSchedulesPage() {
                               key={cell.key}
                               type="button"
                               onClick={() => setSelectedDate(day)}
-                              className={`
-                                    min-h-[116px]
-                                    bg-(--surface)
-                                    p-2
-                                    text-left
-                                    transition
-                                    hover:bg-(--surface-muted)
-                                    sm:p-3
-                                  `}
+                              className="
+                                min-h-[116px]
+                                bg-(--surface)
+                                p-2
+                                text-left
+                                transition
+                                hover:bg-(--surface-muted)
+                                sm:p-3
+                              "
                             >
                               <div
                                 className={`
-                                      flex
-                                      h-full
-                                      min-h-[100px]
-                                      flex-col
-                                      rounded-xl
-                                      border
-                                      p-2
-                                      transition
-                                      ${classes.card}
-                                      ${
-                                        selected
-                                          ? "ring-2 ring-(--accent) ring-offset-1"
-                                          : ""
-                                      }
-                                    `}
+                                  flex
+                                  h-full
+                                  min-h-[100px]
+                                  flex-col
+                                  rounded-xl
+                                  border
+                                  p-2
+                                  transition
+                                  ${classes.card}
+                                  ${
+                                    selected
+                                      ? "ring-2 ring-(--accent) ring-offset-1"
+                                      : ""
+                                  }
+                                `}
                               >
                                 <div className="flex items-start justify-between gap-2">
                                   <span className="text-sm font-bold text-(--foreground)">
@@ -822,29 +825,29 @@ export default function BranchSchedulesPage() {
 
                                   <span
                                     className={`
-                                          h-2
-                                          w-2
-                                          shrink-0
-                                          rounded-full
-                                          ${classes.dot}
-                                        `}
+                                      h-2
+                                      w-2
+                                      shrink-0
+                                      rounded-full
+                                      ${classes.dot}
+                                    `}
                                   />
                                 </div>
 
                                 <div className="mt-2">
                                   <span
                                     className={`
-                                          inline-flex
-                                          rounded-full
-                                          border
-                                          px-2
-                                          py-1
-                                          text-[9px]
-                                          font-bold
-                                          uppercase
-                                          tracking-[0.06em]
-                                          ${classes.badge}
-                                        `}
+                                      inline-flex
+                                      rounded-full
+                                      border
+                                      px-2
+                                      py-1
+                                      text-[9px]
+                                      font-bold
+                                      uppercase
+                                      tracking-[0.06em]
+                                      ${classes.badge}
+                                    `}
                                   >
                                     {status.label}
                                   </span>
@@ -896,6 +899,7 @@ export default function BranchSchedulesPage() {
             {selectedDate && (
               <SelectedDatePanel
                 day={selectedDate}
+                trainingTypes={trainingTypes}
                 onClose={() => setSelectedDate(null)}
               />
             )}
@@ -954,9 +958,11 @@ function Legend({ dotClass, label }: { dotClass: string; label: string }) {
 
 function SelectedDatePanel({
   day,
+  trainingTypes,
   onClose,
 }: {
   day: BranchCalendarDay;
+  trainingTypes: TrainingSessionTypeRecord[];
   onClose: () => void;
 }) {
   const status = getStatus(day);
@@ -1086,6 +1092,10 @@ function SelectedDatePanel({
                       <p className="text-sm font-bold text-(--foreground)">
                         {slot.sessionName || "Training Session"}
                       </p>
+
+                      <Badge variant={slot.sessionTypeId || slot.sessionType ? "accent" : "neutral"} className="mt-2">
+                        {trainingTypes.find((type) => type._id === slot.sessionTypeId)?.name || slot.sessionType?.replaceAll("_", " ") || "General (legacy)"}
+                      </Badge>
 
                       <p className="mt-2 flex items-center gap-2 text-sm font-medium text-(--ink-muted)">
                         <Clock3 size={15} />

@@ -8,6 +8,8 @@ import {
   useMemo,
   useState,
 } from "react";
+import { usePathname } from "next/navigation";
+import Image from "next/image";
 
 import type { CSSProperties } from "react";
 
@@ -44,6 +46,7 @@ type AcademyBrandContextValue = {
   settings: AcademySettings;
 
   loading: boolean;
+  initialized: boolean;
 
   reload: () => Promise<void>;
 };
@@ -91,6 +94,7 @@ const EMPTY_SETTINGS: AcademySettings = {
 const API_URL =
   process.env.NEXT_PUBLIC_API_URL ||
   "http://localhost:5000/api";
+const NORMALIZED_API_URL = API_URL.replace(/\/+$/, "");
 
 /* =========================================================
    CONTEXT
@@ -264,6 +268,7 @@ export default function AcademyBrandProvider({
 }: {
   children: React.ReactNode;
 }) {
+  const pathname = usePathname();
   const [
     settings,
     setSettings,
@@ -275,6 +280,7 @@ export default function AcademyBrandProvider({
     loading,
     setLoading,
   ] = useState(true);
+  const [initialized, setInitialized] = useState(false);
 
   /* =======================================================
      LOAD SETTINGS
@@ -285,20 +291,40 @@ export default function AcademyBrandProvider({
       try {
         setLoading(true);
 
-        const response =
-          await fetch(
-            `${API_URL}/settings/academy/public`,
-            {
-              method: "GET",
+        let response: Response | null = null;
+        let networkError: unknown;
 
-              headers: {
-                "Content-Type":
-                  "application/json",
+        // The API can start slightly after the client during local/dev
+        // startup. Retry only fetch/network failures; HTTP errors should be
+        // surfaced immediately and won't benefit from another request.
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+          try {
+            response = await fetch(
+              `${NORMALIZED_API_URL}/settings/academy/public`,
+              {
+                method: "GET",
+                headers: {
+                  "Content-Type": "application/json",
+                },
+                cache: "no-store",
               },
+            );
+            break;
+          } catch (error) {
+            networkError = error;
+            if (attempt < 2) {
+              await new Promise((resolve) =>
+                window.setTimeout(resolve, 400 * (attempt + 1)),
+              );
+            }
+          }
+        }
 
-              cache: "no-store",
-            },
-          );
+        if (!response) {
+          throw networkError instanceof Error
+            ? networkError
+            : new Error("Academy settings API is unreachable.");
+        }
 
         const payload =
           await response.json();
@@ -319,22 +345,16 @@ export default function AcademyBrandProvider({
           latestSettings,
         );
       } catch (error) {
-        console.error(
-          "Academy brand loading error:",
-          error,
+        console.warn(
+          `Academy branding could not be refreshed from ${NORMALIZED_API_URL}. The last successfully loaded branding will remain in use.`,
+          error instanceof Error ? error.message : error,
         );
 
-        /*
-         * Do not replace the failed API response
-         * with hardcoded academy information.
-         *
-         * Keep the context empty.
-         */
-        setSettings({
-          ...EMPTY_SETTINGS,
-        });
+        // Never substitute hardcoded academy data. On first load the context
+        // stays empty; on refresh, the last successfully loaded values remain.
       } finally {
         setLoading(false);
+        setInitialized(true);
       }
     }, []);
 
@@ -345,6 +365,26 @@ export default function AcademyBrandProvider({
   useEffect(() => {
     void loadSettings();
   }, [loadSettings]);
+
+  /* Keep the browser tab in sync with saved academy branding. */
+  useEffect(() => {
+    const academyName = settings.academyName.trim();
+    const faviconUrl = settings.faviconUrl.trim();
+    const safeFaviconUrl = /^(https?:\/\/|\/)/i.test(faviconUrl)
+      ? faviconUrl
+      : "";
+
+    document.title = academyName || "ForceStrike | Karate Academy Management";
+
+    const iconUrl = safeFaviconUrl || "/logo.png";
+    const iconLinks = document.querySelectorAll<HTMLLinkElement>(
+      'link[rel="icon"], link[rel="shortcut icon"], link[rel="apple-touch-icon"]',
+    );
+
+    iconLinks.forEach((link) => {
+      link.href = iconUrl;
+    });
+  }, [pathname, settings.academyName, settings.faviconUrl]);
 
   /* =======================================================
      RELOAD
@@ -423,11 +463,13 @@ export default function AcademyBrandProvider({
       () => ({
         settings,
         loading,
+        initialized,
         reload,
       }),
       [
         settings,
         loading,
+        initialized,
         reload,
       ],
     );
@@ -467,4 +509,42 @@ export function useAcademyBrand() {
   }
 
   return context;
+}
+
+export function AcademyLogo({
+  className = "h-full w-full rounded-md object-contain",
+}: {
+  className?: string;
+}) {
+  const { settings } = useAcademyBrand();
+  const academyName = settings.academyName.trim() || "Your Academy";
+  const initials = academyName
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((word) => word[0]?.toUpperCase())
+    .join("");
+
+  if (settings.logoUrl.trim()) {
+    return (
+      <Image
+        src={settings.logoUrl}
+        alt={`${academyName} logo`}
+        width={256}
+        height={256}
+        unoptimized
+        className={className}
+      />
+    );
+  }
+
+  return (
+    <span
+      role="img"
+      aria-label={`${academyName} logo`}
+      className={`flex items-center justify-center font-extrabold ${className}`}
+    >
+      {initials || "A"}
+    </span>
+  );
 }

@@ -88,9 +88,7 @@ const formatDate = (value) => {
   }
 
   const year = date.getFullYear();
-
   const month = String(date.getMonth() + 1).padStart(2, "0");
-
   const day = String(date.getDate()).padStart(2, "0");
 
   return `${year}-${month}-${day}`;
@@ -123,15 +121,17 @@ const isPastDate = (value) => {
 };
 
 /* =========================================================
-   ROLE / ACCESS HELPERS
+   DATA-SCOPE HELPERS
 ========================================================= */
 
+/**
+ * SUPER_ADMIN is resolved by the authentication/permission
+ * layer and remains globally scoped.
+ *
+ * Other users use the Role.dataScope resolved by auth.middleware.
+ */
 const isSuperAdmin = (req) => {
-  return req.user?.role === "SUPER_ADMIN";
-};
-
-const isBranchAdmin = (req) => {
-  return req.user?.role === "BRANCH_ADMIN";
+  return String(req.user?.role || "").toUpperCase() === "SUPER_ADMIN";
 };
 
 const getUserBranchId = (req) => {
@@ -142,30 +142,33 @@ const getUserBranchId = (req) => {
   return req.user.branch.toString();
 };
 
+const hasGlobalDataScope = (req) => {
+  return (
+    String(req.user?.role || "").toUpperCase() === "SUPER_ADMIN" ||
+    String(req.user?.dataScope || "").toUpperCase() === "ALL"
+  );
+};
+
 /**
  * Check whether the current user may access
  * a specific holiday.
  *
- * SUPER_ADMIN:
- * - global holidays
- * - every branch holiday
+ * Global-scope users:
+ *   - all branches
+ *   - global holidays
  *
- * BRANCH_ADMIN:
- * - global holidays
- * - own branch holidays
- *
- * COACH:
- * - global holidays
- * - own branch holidays
- *
- * Write access is handled separately.
+ * Branch-scope users:
+ *   - global holidays
+ *   - own branch holidays
  */
 const canAccessHoliday = (req, holiday) => {
-  if (isSuperAdmin(req)) {
+  if (hasGlobalDataScope(req)) {
     return true;
   }
 
-  if (!req.user?.branch) {
+  const userBranch = getUserBranchId(req);
+
+  if (!userBranch) {
     return false;
   }
 
@@ -176,37 +179,40 @@ const canAccessHoliday = (req, holiday) => {
     return true;
   }
 
-  return holiday.branch.toString() === req.user.branch.toString();
+  return holiday.branch.toString() === userBranch;
 };
 
+/**
+ * Check whether the current user may modify
+ * a specific holiday.
+ *
+ * Permission itself is enforced by:
+ *
+ * authorizePermission("holiday.manage")
+ *
+ * This helper only handles data scope and
+ * global/branch holiday business rules.
+ */
 const canManageHoliday = (req, holiday) => {
-  /*
-   * SUPER_ADMIN can manage everything.
-   */
-  if (isSuperAdmin(req)) {
+  if (hasGlobalDataScope(req)) {
     return true;
   }
 
-  /*
-   * Only BRANCH_ADMIN can manage holidays.
-   */
-  if (!isBranchAdmin(req)) {
-    return false;
-  }
+  const userBranch = getUserBranchId(req);
 
-  if (!req.user?.branch) {
+  if (!userBranch) {
     return false;
   }
 
   /*
-   * Branch Admin cannot manage
+   * Branch-scoped users cannot manage
    * global holidays.
    */
   if (!holiday.branch) {
     return false;
   }
 
-  return holiday.branch.toString() === req.user.branch.toString();
+  return holiday.branch.toString() === userBranch;
 };
 
 /* =========================================================
@@ -328,7 +334,6 @@ const getHolidays = async (req, res) => {
 
       filter.date = {
         $gte: new Date(numericYear, 0, 1, 0, 0, 0, 0),
-
         $lt: new Date(numericYear + 1, 0, 1, 0, 0, 0, 0),
       };
     }
@@ -350,10 +355,6 @@ const getHolidays = async (req, res) => {
         });
       }
 
-      /*
-       * If year is not supplied,
-       * use the current local year.
-       */
       const numericYear =
         year !== undefined ? Number(year) : getToday().getFullYear();
 
@@ -379,11 +380,20 @@ const getHolidays = async (req, res) => {
       }
 
       if (branch === "global") {
+        /*
+         * A branch-scoped user may view global
+         * holidays because they are relevant to
+         * their branch calendar.
+         */
         filter.branch = null;
       } else {
+        /*
+         * Global-scope roles can request any branch.
+         */
         if (
-          !isSuperAdmin(req) &&
-          (!req.user?.branch || req.user.branch.toString() !== branch.toString())
+          !hasGlobalDataScope(req) &&
+          (!req.user?.branch ||
+            req.user.branch.toString() !== branch.toString())
         ) {
           return res.status(403).json({
             success: false,
@@ -393,9 +403,9 @@ const getHolidays = async (req, res) => {
 
         filter.branch = branch;
       }
-    } else if (!isSuperAdmin(req)) {
+    } else if (!hasGlobalDataScope(req)) {
       /*
-       * Non-super-admin users see:
+       * Branch-scoped users see:
        *
        * global holidays
        * +
@@ -455,13 +465,9 @@ const getHolidayByDate = async (req, res) => {
       });
     }
 
-    /*
-     * SUPER_ADMIN can optionally specify
-     * a branch.
-     */
     let branchId = req.query.branch || req.user?.branch || null;
 
-    if (!isSuperAdmin(req) && !req.user?.branch) {
+    if (!hasGlobalDataScope(req) && !req.user?.branch) {
       return res.status(403).json({
         success: false,
         message: "No branch is assigned to this account",
@@ -478,8 +484,17 @@ const getHolidayByDate = async (req, res) => {
     /*
      * Without a branch, return all holidays
      * for the requested date.
+     *
+     * This is only available to global-scope users.
      */
     if (!branchId) {
+      if (!hasGlobalDataScope(req)) {
+        return res.status(403).json({
+          success: false,
+          message: "You do not have access to global branch data",
+        });
+      }
+
       const { start, end } = getDateRange(date);
 
       const holidays = await populateHoliday(
@@ -507,11 +522,10 @@ const getHolidayByDate = async (req, res) => {
     }
 
     /*
-     * Non-super-admin cannot query
-     * another branch.
+     * Branch-scoped users cannot query another branch.
      */
     if (
-      !isSuperAdmin(req) &&
+      !hasGlobalDataScope(req) &&
       req.user?.branch?.toString() !== branchId.toString()
     ) {
       return res.status(403).json({
@@ -551,9 +565,6 @@ const createHoliday = async (req, res) => {
   try {
     const { date, name, description, branch } = req.body;
 
-    /*
-     * REQUIRED FIELDS
-     */
     if (!date || !name) {
       return res.status(400).json({
         success: false,
@@ -561,9 +572,6 @@ const createHoliday = async (req, res) => {
       });
     }
 
-    /*
-     * DATE
-     */
     if (!validateDate(date)) {
       return res.status(400).json({
         success: false,
@@ -573,9 +581,6 @@ const createHoliday = async (req, res) => {
 
     /*
      * HOLIDAYS ARE FUTURE-ONLY
-     *
-     * Attendance may already have been
-     * recorded for previous dates.
      */
     if (isPastDate(date)) {
       return res.status(400).json({
@@ -585,9 +590,6 @@ const createHoliday = async (req, res) => {
       });
     }
 
-    /*
-     * NAME
-     */
     const holidayName = String(name).trim();
 
     if (!holidayName) {
@@ -597,9 +599,6 @@ const createHoliday = async (req, res) => {
       });
     }
 
-    /*
-     * BRANCH
-     */
     if (!validateBranchId(branch)) {
       return res.status(400).json({
         success: false,
@@ -610,11 +609,14 @@ const createHoliday = async (req, res) => {
     let holidayBranch = branch || null;
 
     /*
-     * Branch Admin can ONLY create
-     * branch-specific holidays for
-     * their own branch.
+     * Branch-scoped roles can ONLY create
+     * branch-specific holidays for their
+     * assigned branch.
+     *
+     * Global-scope roles may create global
+     * or branch-specific holidays.
      */
-    if (isBranchAdmin(req)) {
+    if (!hasGlobalDataScope(req)) {
       if (!req.user?.branch) {
         return res.status(403).json({
           success: false,
@@ -625,9 +627,6 @@ const createHoliday = async (req, res) => {
       holidayBranch = req.user.branch;
     }
 
-    /*
-     * CALENDAR DATE
-     */
     const { start, end } = getDateRange(date);
 
     if (!start || !end) {
@@ -637,17 +636,6 @@ const createHoliday = async (req, res) => {
       });
     }
 
-    /*
-     * DUPLICATE CHECK
-     *
-     * Same branch + same date.
-     *
-     * Global and branch-specific holidays
-     * may coexist intentionally.
-     *
-     * The branch-specific holiday wins when
-     * the schedule service resolves a date.
-     */
     const duplicate = await Holiday.findOne({
       date: {
         $gte: start,
@@ -665,20 +653,12 @@ const createHoliday = async (req, res) => {
       });
     }
 
-    /*
-     * CREATE
-     */
     const holiday = await Holiday.create({
       date: start,
-
       name: holidayName,
-
       description: String(description || "").trim(),
-
       branch: holidayBranch,
-
       isActive: true,
-
       createdBy: req.user._id,
     });
 
@@ -732,9 +712,6 @@ const updateHoliday = async (req, res) => {
       });
     }
 
-    /*
-     * WRITE ACCESS
-     */
     if (!canManageHoliday(req, holiday)) {
       return res.status(403).json({
         success: false,
@@ -744,9 +721,6 @@ const updateHoliday = async (req, res) => {
 
     const { date, name, description, branch, isActive } = req.body;
 
-    /*
-     * DATE
-     */
     let nextDate = formatDate(holiday.date);
 
     if (date !== undefined) {
@@ -757,10 +731,6 @@ const updateHoliday = async (req, res) => {
         });
       }
 
-      /*
-       * Never move a holiday into
-       * the past.
-       */
       if (isPastDate(date)) {
         return res.status(400).json({
           success: false,
@@ -771,9 +741,6 @@ const updateHoliday = async (req, res) => {
       nextDate = date;
     }
 
-    /*
-     * NAME
-     */
     let nextName = holiday.name;
 
     if (name !== undefined) {
@@ -787,17 +754,13 @@ const updateHoliday = async (req, res) => {
       }
     }
 
-    /*
-     * BRANCH
-     */
     let nextBranch = holiday.branch ? holiday.branch.toString() : null;
 
-    if (isBranchAdmin(req)) {
-      /*
-       * Branch Admin cannot move
-       * a holiday to another branch
-       * or make it global.
-       */
+    /*
+     * Branch-scoped roles cannot change
+     * ownership or make a holiday global.
+     */
+    if (!hasGlobalDataScope(req)) {
       if (!req.user?.branch) {
         return res.status(403).json({
           success: false,
@@ -805,19 +768,21 @@ const updateHoliday = async (req, res) => {
         });
       }
 
-      nextBranch = req.user.branch.toString();
-
-      /*
-       * If the existing holiday is global,
-       * Branch Admin cannot take ownership
-       * of it.
-       */
       if (!holiday.branch) {
         return res.status(403).json({
           success: false,
-          message: "Branch Admin cannot modify a global holiday",
+          message: "Branch-scoped users cannot modify a global holiday",
         });
       }
+
+      if (holiday.branch.toString() !== req.user.branch.toString()) {
+        return res.status(403).json({
+          success: false,
+          message: "You do not have access to this holiday",
+        });
+      }
+
+      nextBranch = req.user.branch.toString();
     } else if (branch !== undefined) {
       if (!validateBranchId(branch)) {
         return res.status(400).json({
@@ -829,9 +794,6 @@ const updateHoliday = async (req, res) => {
       nextBranch = branch || null;
     }
 
-    /*
-     * DATE RANGE
-     */
     const { start, end } = getDateRange(nextDate);
 
     if (!start || !end) {
@@ -841,31 +803,19 @@ const updateHoliday = async (req, res) => {
       });
     }
 
-    /*
-     * Determine final active state.
-     */
     const nextActive =
       isActive === undefined ? holiday.isActive : Boolean(isActive);
 
-    /*
-     * DUPLICATE CHECK
-     *
-     * Only active holidays participate
-     * in conflicts.
-     */
     if (nextActive) {
       const duplicate = await Holiday.findOne({
         _id: {
           $ne: holiday._id,
         },
-
         date: {
           $gte: start,
           $lte: end,
         },
-
         branch: nextBranch,
-
         isActive: true,
       });
 
@@ -879,11 +829,7 @@ const updateHoliday = async (req, res) => {
       }
     }
 
-    /*
-     * APPLY
-     */
     holiday.date = start;
-
     holiday.name = nextName;
 
     if (description !== undefined) {
@@ -956,9 +902,7 @@ const deleteHoliday = async (req, res) => {
     /*
      * Soft delete.
      *
-     * We do NOT physically remove the
-     * record because audit/history is useful
-     * in a production system.
+     * Historical records are preserved.
      */
     holiday.isActive = false;
 

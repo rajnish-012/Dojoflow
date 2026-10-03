@@ -7,10 +7,12 @@ const {
   getAttendanceById,
   getDailyAttendanceSheet,
   markAttendance,
+  markAllAttendancePresent,
 } = require("../controllers/attendance.controller");
 
 const protect = require("../middleware/auth.middleware");
 const authorize = require("../middleware/role.middleware");
+const { authorizePermission } = require("../middleware/permission.middleware");
 
 const router = express.Router();
 
@@ -21,11 +23,7 @@ const router = express.Router();
 router.get(
   "/daily-sheet",
   protect,
-  authorize(
-    "SUPER_ADMIN",
-    "BRANCH_ADMIN",
-    "COACH",
-  ),
+  authorizePermission("attendance.view"),
   getDailyAttendanceSheet,
 );
 
@@ -33,27 +31,13 @@ router.get(
    ALL ATTENDANCE
 ============================== */
 
-router.get(
-  "/",
-  protect,
-  authorize(
-    "SUPER_ADMIN",
-    "BRANCH_ADMIN",
-    "COACH",
-  ),
-  getAttendance,
-);
+router.get("/", protect, authorizePermission("attendance.view"), getAttendance);
 
 /* ==============================
    STUDENT'S OWN ATTENDANCE
 ============================== */
 
-router.get(
-  "/me",
-  protect,
-  authorize("STUDENT"),
-  getMyAttendance,
-);
+router.get("/me", protect, authorize("STUDENT"), getMyAttendance);
 
 /* ==============================
    ATTENDANCE BY STUDENT
@@ -62,11 +46,7 @@ router.get(
 router.get(
   "/student/:studentId",
   protect,
-  authorize(
-    "SUPER_ADMIN",
-    "BRANCH_ADMIN",
-    "COACH",
-  ),
+  authorizePermission("attendance.view"),
   getAttendanceByStudent,
 );
 
@@ -77,11 +57,7 @@ router.get(
 router.get(
   "/:id",
   protect,
-  authorize(
-    "SUPER_ADMIN",
-    "BRANCH_ADMIN",
-    "COACH",
-  ),
+  authorizePermission("attendance.view"),
   getAttendanceById,
 );
 
@@ -92,12 +68,15 @@ router.get(
 router.post(
   "/",
   protect,
-  authorize(
-    "SUPER_ADMIN",
-    "BRANCH_ADMIN",
-    "COACH",
-  ),
+  authorizePermission("attendance.manage"),
   markAttendance,
+);
+
+router.post(
+  "/bulk-present",
+  protect,
+  authorizePermission("attendance.manage"),
+  markAllAttendancePresent,
 );
 
 module.exports = router;

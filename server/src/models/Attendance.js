@@ -14,6 +14,18 @@ const attendanceSchema = new mongoose.Schema(
       required: true,
     },
 
+    enrollment: { type: mongoose.Schema.Types.ObjectId, default: null },
+    plan: { type: mongoose.Schema.Types.ObjectId, ref: "Plan", default: null },
+
+    sessionTypeId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "TrainingSessionType",
+      default: null,
+      index: true,
+    },
+    sessionSlotId: { type: mongoose.Schema.Types.ObjectId, default: null, index: true },
+    sessionName: { type: String, trim: true, default: "" },
+
     date: {
       type: Date,
       required: true,
@@ -29,6 +41,8 @@ const attendanceSchema = new mongoose.Schema(
       required: true,
       trim: true,
     },
+    curriculumSkill: { type: String, trim: true, default: "" },
+    curriculumDescription: { type: String, trim: true, default: "" },
 
     status: {
       type: String,
@@ -51,6 +65,7 @@ const attendanceSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    makeupAttendance: { type: mongoose.Schema.Types.ObjectId, ref: "Attendance", default: null },
   },
   {
     timestamps: true,
@@ -61,6 +76,7 @@ attendanceSchema.index(
   {
     student: 1,
     date: 1,
+    sessionSlotId: 1,
   },
   {
     unique: true,

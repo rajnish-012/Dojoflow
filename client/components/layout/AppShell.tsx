@@ -18,6 +18,10 @@ import { useAuth } from "@/hooks/userAuth";
 import { getRoleDashboardPath } from "@/lib/current-user";
 
 import AcademyBrandProvider from "@/components/settings/AcademyBrandProvider";
+import {
+  AcademyLogo,
+  useAcademyBrand,
+} from "@/components/settings/AcademyBrandProvider";
 
 type AppShellProps = {
   children: React.ReactNode;
@@ -48,7 +52,10 @@ function isPublicPath(
   );
 }
 
-function AppLoadingScreen() {
+function AppLoadingScreen({ showBrand = true }: { showBrand?: boolean }) {
+  const { settings } = useAcademyBrand();
+  const academyName = settings.academyName.trim() || "ForceStrike";
+
   return (
     <div
       className="
@@ -68,7 +75,7 @@ function AppLoadingScreen() {
           gap-5
         "
       >
-        <div
+        {showBrand && <div
           className="
             flex
             h-14
@@ -85,19 +92,17 @@ function AppLoadingScreen() {
             animate-pulse
           "
         >
-          <img
-            src="/logo.png"
-            alt="DojoFlow"
+          <AcademyLogo
             className="
               h-11
               w-11
               object-contain
             "
           />
-        </div>
+        </div>}
 
         <div className="text-center">
-          <p
+          {showBrand && <p
             className="
               text-sm
               font-black
@@ -105,8 +110,8 @@ function AppLoadingScreen() {
               text-(--foreground)
             "
           >
-            Loading DojoFlow
-          </p>
+            Loading {academyName}
+          </p>}
 
           <p
             className="
@@ -115,7 +120,9 @@ function AppLoadingScreen() {
               text-(--ink-muted)
             "
           >
-            Preparing your workspace...
+            {showBrand && settings.tagline.trim()
+              ? settings.tagline.trim()
+              : "Preparing your workspace..."}
           </p>
         </div>
 
@@ -143,9 +150,10 @@ function AppLoadingScreen() {
   );
 }
 
-export default function AppShell({
+function AppShellContent({
   children,
 }: AppShellProps) {
+  const { initialized: academyBrandInitialized } = useAcademyBrand();
   const pathname =
     usePathname();
 
@@ -233,6 +241,10 @@ export default function AppShell({
     return <>{children}</>;
   }
 
+  if (!academyBrandInitialized) {
+    return <AppLoadingScreen showBrand={false} />;
+  }
+
   if (isLoading) {
     return <AppLoadingScreen />;
   }
@@ -242,8 +254,7 @@ export default function AppShell({
   }
 
   return (
-    <AcademyBrandProvider>
-      <div
+    <div
         className="
           min-h-screen
           bg-(--background)
@@ -296,7 +307,14 @@ export default function AppShell({
             </RouteGuard>
           </main>
         </div>
-      </div>
+    </div>
+  );
+}
+
+export default function AppShell(props: AppShellProps) {
+  return (
+    <AcademyBrandProvider>
+      <AppShellContent {...props} />
     </AcademyBrandProvider>
   );
 }

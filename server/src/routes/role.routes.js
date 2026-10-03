@@ -2,23 +2,77 @@ const express = require("express");
 
 const {
   getRoles,
+  getPermissions,
   createRole,
   updateRole,
   deleteRole,
 } = require("../controllers/role.controller");
 
 const protect = require("../middleware/auth.middleware");
-const authorize = require("../middleware/role.middleware");
+const { authorizePermission } = require("../middleware/permission.middleware");
 
 const router = express.Router();
 
-// Only the Super Admin manages roles.
-router.get("/", protect, authorize("SUPER_ADMIN"), getRoles);
+/*
+ * =========================================================
+ * ROLE MANAGEMENT
+ * =========================================================
+ *
+ * Authorization is database-permission based.
+ *
+ * SUPER_ADMIN remains protected by the centralized
+ * authorization middleware and automatically retains access.
+ *
+ * Normal/custom roles must receive:
+ *
+ *   role.view
+ *   role.manage
+ *
+ * from their database Role document.
+ */
 
-router.post("/", protect, authorize("SUPER_ADMIN"), createRole);
+/*
+ * Permission catalog.
+ *
+ * Reading the catalog requires role.view.
+ */
+router.get(
+  "/permissions",
+  protect,
+  authorizePermission("role.view"),
+  getPermissions,
+);
 
-router.put("/:id", protect, authorize("SUPER_ADMIN"), updateRole);
+/*
+ * Get all roles.
+ *
+ * Requires:
+ *   role.view
+ */
+router.get("/", protect, authorizePermission("role.view"), getRoles);
 
-router.delete("/:id", protect, authorize("SUPER_ADMIN"), deleteRole);
+/*
+ * Create custom role.
+ *
+ * Requires:
+ *   role.manage
+ */
+router.post("/", protect, authorizePermission("role.manage"), createRole);
+
+/*
+ * Update custom role.
+ *
+ * Requires:
+ *   role.manage
+ */
+router.put("/:id", protect, authorizePermission("role.manage"), updateRole);
+
+/*
+ * Delete custom role.
+ *
+ * Requires:
+ *   role.manage
+ */
+router.delete("/:id", protect, authorizePermission("role.manage"), deleteRole);
 
 module.exports = router;

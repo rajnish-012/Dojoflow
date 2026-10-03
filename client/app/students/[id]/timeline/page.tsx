@@ -21,6 +21,7 @@ import {
   LoadingSpinner,
   PageHeader,
   SummaryCard,
+  Select,
 } from "@/components/ui";
 
 import TrainingTimeline from "@/components/student/TrainingTimeline";
@@ -30,7 +31,7 @@ import {
   type StudentTimelineResponse,
 } from "@/lib/studentTimelineApi";
 
-function formatDate(value?: string) {
+function formatDate(value?: string | null) {
   if (!value) {
     return "—";
   }
@@ -69,6 +70,8 @@ export default function StudentTimelinePage() {
   const [error, setError] =
     useState("");
 
+  const [selectedProgramId, setSelectedProgramId] = useState("");
+
   useEffect(() => {
     if (!studentId) {
       return;
@@ -88,6 +91,8 @@ export default function StudentTimelinePage() {
 
         if (!cancelled) {
           setData(response);
+          const program = response.program;
+          setSelectedProgramId(typeof program === "object" ? program?._id || "" : program || "");
         }
       } catch (err) {
         console.error(err);
@@ -112,6 +117,19 @@ export default function StudentTimelinePage() {
       cancelled = true;
     };
   }, [studentId]);
+
+  const handleProgramChange = async (programId: string) => {
+    setSelectedProgramId(programId);
+    try {
+      setLoading(true);
+      setError("");
+      setData(await getStudentTimeline(studentId, programId));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load the selected program timeline.");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const completedPercentage =
     useMemo(() => {
@@ -267,6 +285,18 @@ export default function StudentTimelinePage() {
               gap-2
             "
           >
+            {(data.programs || []).length > 1 && (
+              <label className="flex items-center gap-2 text-sm font-semibold text-[var(--text-secondary)]">
+                Program
+                <Select value={selectedProgramId} onChange={(event) => void handleProgramChange(event.target.value)}>
+                  {(data.programs || []).map((program) => {
+                    const id = typeof program === "object" ? program._id : program;
+                    const name = typeof program === "object" ? program.name : "Training program";
+                    return <option key={id} value={id}>{name || "Training program"}</option>;
+                  })}
+                </Select>
+              </label>
+            )}
             <Badge variant="warning">
               {student.currentBelt}
             </Badge>

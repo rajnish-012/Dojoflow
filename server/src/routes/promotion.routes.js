@@ -7,7 +7,7 @@ const {
 } = require("../controllers/promotion.controller");
 
 const protect = require("../middleware/auth.middleware");
-const authorize = require("../middleware/role.middleware");
+const { authorizePermission } = require("../middleware/permission.middleware");
 
 const router = express.Router();
 
@@ -15,34 +15,38 @@ const router = express.Router();
  * ======================================================
  * ELIGIBLE PROMOTIONS
  * ======================================================
+ *
+ * Requires:
+ *   promotion.view
+ *
+ * The permission is resolved from the authenticated
+ * user's current database Role.
+ *
+ * SUPER_ADMIN remains supported by the centralized
+ * permission middleware.
  */
-
 router.get(
   "/eligible",
   protect,
-  authorize(
-    "SUPER_ADMIN",
-    "BRANCH_ADMIN",
-    "COACH",
-  ),
+  authorizePermission("promotion.view"),
   getEligiblePromotions,
 );
 
 /*
  * ======================================================
  * STUDENT BELT HISTORY
- *
- * Must be before any future /:id route.
  * ======================================================
+ *
+ * Requires:
+ *   promotion.view
+ *
+ * This route intentionally remains before any future
+ * /:id route.
  */
-
 router.get(
   "/history/:studentId",
   protect,
-  authorize(
-    "SUPER_ADMIN",
-    "BRANCH_ADMIN",
-  ),
+  authorizePermission("promotion.view"),
   getStudentBeltHistory,
 );
 
@@ -50,15 +54,17 @@ router.get(
  * ======================================================
  * APPROVE / CREATE PROMOTION
  * ======================================================
+ *
+ * Requires:
+ *   promotion.manage
+ *
+ * Reading promotion candidates and actually approving
+ * a promotion are intentionally separate permissions.
  */
-
 router.post(
   "/",
   protect,
-  authorize(
-    "SUPER_ADMIN",
-    "BRANCH_ADMIN",
-  ),
+  authorizePermission("promotion.manage"),
   promoteStudent,
 );
 

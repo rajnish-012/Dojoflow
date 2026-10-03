@@ -1,17 +1,14 @@
 "use client";
 
-import {
-  useEffect,
-  useMemo,
-  useState,
-  type ReactNode,
-} from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { toast } from "@/lib/toast";
 
 import {
   AlertCircle,
   ArrowRight,
   CheckCircle2,
   Clock3,
+  Eye,
   Mail,
   MapPin,
   MessageSquareText,
@@ -25,29 +22,24 @@ import {
 import {
   Button,
   Card,
+  DataFilters,
+  DataSort,
+  IconButton,
   Input,
   Modal,
   PageHeader,
   Select,
   SummaryCard,
+  TableHeading,
+  TablePagination,
+  type ActiveFilter,
 } from "@/components/ui";
 
-import {
-  getInquiries,
-  updateInquiryStatus,
-} from "@/lib/api";
+import { getInquiries, updateInquiryStatus } from "@/lib/api";
 
-type UserRole =
-  | "SUPER_ADMIN"
-  | "BRANCH_ADMIN"
-  | "COACH"
-  | "STUDENT";
+import { PERMISSIONS, useCan } from "@/lib/permissions";
 
-type InquiryStatus =
-  | "NEW"
-  | "CONTACTED"
-  | "ENROLLED"
-  | "CLOSED";
+type InquiryStatus = "NEW" | "CONTACTED" | "ENROLLED" | "CLOSED";
 
 type Inquiry = {
   _id: string;
@@ -64,6 +56,14 @@ type Inquiry = {
   createdAt: string;
   updatedAt: string;
 };
+
+type InquirySort =
+  | "createdAt-desc"
+  | "createdAt-asc"
+  | "name-asc"
+  | "name-desc"
+  | "status-asc"
+  | "status-desc";
 
 const STATUS_ORDER: InquiryStatus[] = [
   "NEW",
@@ -85,16 +85,19 @@ const STATUS_CONFIG: Record<
     description: "Awaiting first contact",
     icon: AlertCircle,
   },
+
   CONTACTED: {
     label: "Contacted",
     description: "Follow-up in progress",
     icon: Clock3,
   },
+
   ENROLLED: {
     label: "Enrolled",
     description: "Ready for admission",
     icon: CheckCircle2,
   },
+
   CLOSED: {
     label: "Closed",
     description: "Completed or inactive",
@@ -103,10 +106,7 @@ const STATUS_CONFIG: Record<
 };
 
 function getInitials(name: string) {
-  const parts = name
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean);
+  const parts = name.trim().split(/\s+/).filter(Boolean);
 
   return (
     parts
@@ -171,9 +171,7 @@ function getRelativeTime(date?: string) {
     return "Just now";
   }
 
-  const minutes = Math.floor(
-    difference / (60 * 1000),
-  );
+  const minutes = Math.floor(difference / (60 * 1000));
 
   if (minutes < 60) {
     return `${minutes}m ago`;
@@ -198,41 +196,32 @@ function getStatusClasses(status: InquiryStatus) {
   switch (status) {
     case "NEW":
       return {
-        wrapper:
-          "border-blue-200 bg-blue-50 text-blue-700",
+        wrapper: "border-blue-200 bg-blue-50 text-blue-700",
         icon: "bg-blue-100 text-blue-700",
       };
 
     case "CONTACTED":
       return {
-        wrapper:
-          "border-amber-200 bg-amber-50 text-amber-700",
+        wrapper: "border-amber-200 bg-amber-50 text-amber-700",
         icon: "bg-amber-100 text-amber-700",
       };
 
     case "ENROLLED":
       return {
-        wrapper:
-          "border-green-200 bg-green-50 text-green-700",
+        wrapper: "border-green-200 bg-green-50 text-green-700",
         icon: "bg-green-100 text-green-700",
       };
 
     case "CLOSED":
     default:
       return {
-        wrapper:
-          "border-(--line) bg-(--surface) text-(--ink-muted)",
-        icon:
-          "bg-(--background) text-(--ink-muted)",
+        wrapper: "border-(--line) bg-(--surface) text-(--ink-muted)",
+        icon: "bg-(--background) text-(--ink-muted)",
       };
   }
 }
 
-function StatusBadge({
-  status,
-}: {
-  status: InquiryStatus;
-}) {
+function StatusBadge({ status }: { status: InquiryStatus }) {
   const config = STATUS_CONFIG[status];
   const Icon = config.icon;
   const classes = getStatusClasses(status);
@@ -255,31 +244,6 @@ function StatusBadge({
       <Icon size={13} />
       {config.label}
     </span>
-  );
-}
-
-function TableHeading({
-  children,
-  align = "left",
-}: {
-  children: ReactNode;
-  align?: "left" | "right";
-}) {
-  return (
-    <th
-      className={`
-        px-6
-        py-4
-        text-[11px]
-        font-black
-        uppercase
-        tracking-[0.14em]
-        text-(--ink-muted)
-        ${align === "right" ? "text-right" : "text-left"}
-      `}
-    >
-      {children}
-    </th>
   );
 }
 
@@ -323,7 +287,15 @@ function DetailItem({
           {label}
         </p>
 
-        <p className="mt-1 break-words text-sm font-semibold text-(--foreground)">
+        <p
+          className="
+            mt-1
+            break-words
+            text-sm
+            font-semibold
+            text-(--foreground)
+          "
+        >
           {value}
         </p>
       </div>
@@ -331,13 +303,7 @@ function DetailItem({
   );
 }
 
-function InfoBox({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-}) {
+function InfoBox({ label, value }: { label: string; value: string }) {
   return (
     <div
       className="
@@ -360,7 +326,15 @@ function InfoBox({
         {label}
       </p>
 
-      <p className="mt-2 break-words text-sm font-semibold text-(--foreground)">
+      <p
+        className="
+          mt-2
+          break-words
+          text-sm
+          font-semibold
+          text-(--foreground)
+        "
+      >
         {value}
       </p>
     </div>
@@ -368,65 +342,56 @@ function InfoBox({
 }
 
 export default function InquiriesPage() {
-  const [inquiries, setInquiries] = useState<
-    Inquiry[]
-  >([]);
+  const canViewInquiries = useCan(PERMISSIONS.INQUIRY_VIEW);
 
-  const [selectedInquiry, setSelectedInquiry] =
-    useState<Inquiry | null>(null);
+  const canUpdateStatus = useCan(PERMISSIONS.INQUIRY_UPDATE);
 
-  const [searchTerm, setSearchTerm] =
-    useState("");
+  const [inquiries, setInquiries] = useState<Inquiry[]>([]);
 
-  const [statusFilter, setStatusFilter] =
-    useState<"ALL" | InquiryStatus>("ALL");
+  const [selectedInquiry, setSelectedInquiry] = useState<Inquiry | null>(null);
 
-  const [userRole, setUserRole] =
-    useState<UserRole | null>(null);
+  const [searchTerm, setSearchTerm] = useState("");
 
-  const [isLoading, setIsLoading] =
-    useState(true);
+  const [statusFilter, setStatusFilter] = useState<"ALL" | InquiryStatus>(
+    "ALL",
+  );
 
-  const [refreshing, setRefreshing] =
-    useState(false);
+  const [branchFilter, setBranchFilter] = useState("");
 
-  const [isUpdatingStatus, setIsUpdatingStatus] =
-    useState(false);
+  const [batchFilter, setBatchFilter] = useState("");
+
+  const [beltFilter, setBeltFilter] = useState("");
+
+  const [experienceFilter, setExperienceFilter] = useState("");
+
+  const [submittedFrom, setSubmittedFrom] = useState("");
+
+  const [submittedTo, setSubmittedTo] = useState("");
+
+  const [sort, setSort] = useState<InquirySort>("createdAt-desc");
+
+  const [page, setPage] = useState(1);
+
+  const [pageSize, setPageSize] = useState(25);
+
+  const [isLoading, setIsLoading] = useState(true);
+
+  const [refreshing, setRefreshing] = useState(false);
+
+  const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
 
   const [error, setError] = useState("");
 
-  const [statusError, setStatusError] =
-    useState("");
+  const [statusError, setStatusError] = useState("");
 
-  useEffect(() => {
-    const storedUser =
-      localStorage.getItem("user") ||
-      localStorage.getItem("dojoUser") ||
-      localStorage.getItem("currentUser");
-
-    if (!storedUser) {
+  const fetchInquiries = async (isRefresh = false) => {
+    if (!canViewInquiries) {
+      setInquiries([]);
+      setIsLoading(false);
+      setRefreshing(false);
       return;
     }
 
-    try {
-      const parsedUser = JSON.parse(storedUser);
-
-      if (parsedUser?.role) {
-        setUserRole(
-          parsedUser.role as UserRole,
-        );
-      }
-    } catch (parseError) {
-      console.error(
-        "Failed to read stored user:",
-        parseError,
-      );
-    }
-  }, []);
-
-  const fetchInquiries = async (
-    isRefresh = false,
-  ) => {
     if (isRefresh) {
       setRefreshing(true);
     } else {
@@ -438,16 +403,9 @@ export default function InquiriesPage() {
     try {
       const data = await getInquiries();
 
-      setInquiries(
-        Array.isArray(data?.inquiries)
-          ? data.inquiries
-          : [],
-      );
+      setInquiries(Array.isArray(data?.inquiries) ? data.inquiries : []);
     } catch (fetchError: unknown) {
-      console.error(
-        "Fetch inquiries error:",
-        fetchError,
-      );
+      console.error("Fetch inquiries error:", fetchError);
 
       setError(
         fetchError instanceof Error
@@ -462,79 +420,303 @@ export default function InquiriesPage() {
 
   useEffect(() => {
     void fetchInquiries();
-  }, []);
+  }, [canViewInquiries]);
 
-  const canUpdateStatus =
-    userRole === "SUPER_ADMIN" ||
-    userRole === "BRANCH_ADMIN";
+  /*
+   * Reset to page 1 whenever the visible dataset
+   * changes because of search, filtering or sorting.
+   */
+  useEffect(() => {
+    setPage(1);
+  }, [
+    searchTerm,
+    statusFilter,
+    branchFilter,
+    batchFilter,
+    beltFilter,
+    experienceFilter,
+    submittedFrom,
+    submittedTo,
+    sort,
+    pageSize,
+  ]);
+
+  /*
+   * Filter options are generated from the currently
+   * available inquiry data so they stay in sync with
+   * the actual academy records.
+   */
+  const branchOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          inquiries
+            .map((inquiry) => inquiry.preferredBranch?.trim())
+            .filter((value): value is string => Boolean(value)),
+        ),
+      ).sort((a, b) => a.localeCompare(b)),
+    [inquiries],
+  );
+
+  const batchOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          inquiries
+            .map((inquiry) => inquiry.preferredBatch?.trim())
+            .filter((value): value is string => Boolean(value)),
+        ),
+      ).sort((a, b) => a.localeCompare(b)),
+    [inquiries],
+  );
+
+  const beltOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          inquiries
+            .map((inquiry) => inquiry.currentBelt?.trim())
+            .filter((value): value is string => Boolean(value)),
+        ),
+      ).sort((a, b) => a.localeCompare(b)),
+    [inquiries],
+  );
+
+  const experienceOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          inquiries
+            .map((inquiry) => inquiry.experience?.trim())
+            .filter((value): value is string => Boolean(value)),
+        ),
+      ).sort((a, b) => a.localeCompare(b)),
+    [inquiries],
+  );
 
   const filteredInquiries = useMemo(() => {
-    const search =
-      searchTerm.trim().toLowerCase();
+    const search = searchTerm.trim().toLowerCase();
 
-    return inquiries.filter((inquiry) => {
+    const fromTimestamp = submittedFrom
+      ? new Date(`${submittedFrom}T00:00:00`).getTime()
+      : null;
+
+    const toTimestamp = submittedTo
+      ? new Date(`${submittedTo}T23:59:59.999`).getTime()
+      : null;
+
+    const filtered = inquiries.filter((inquiry) => {
+      const createdTimestamp = new Date(inquiry.createdAt).getTime();
+
       const matchesSearch =
         !search ||
-        inquiry.fullName
-          .toLowerCase()
-          .includes(search) ||
-        inquiry.email
-          .toLowerCase()
-          .includes(search) ||
-        inquiry.phone
-          .toLowerCase()
-          .includes(search) ||
-        Boolean(
-          inquiry.preferredBranch
-            ?.toLowerCase()
-            .includes(search),
-        ) ||
-        Boolean(
-          inquiry.currentBelt
-            ?.toLowerCase()
-            .includes(search),
-        ) ||
-        Boolean(
-          inquiry.preferredBatch
-            ?.toLowerCase()
-            .includes(search),
-        );
+        inquiry.fullName.toLowerCase().includes(search) ||
+        inquiry.email.toLowerCase().includes(search) ||
+        inquiry.phone.toLowerCase().includes(search) ||
+        Boolean(inquiry.preferredBranch?.toLowerCase().includes(search)) ||
+        Boolean(inquiry.currentBelt?.toLowerCase().includes(search)) ||
+        Boolean(inquiry.preferredBatch?.toLowerCase().includes(search)) ||
+        Boolean(inquiry.experience?.toLowerCase().includes(search));
 
       const matchesStatus =
-        statusFilter === "ALL" ||
-        inquiry.status === statusFilter;
+        statusFilter === "ALL" || inquiry.status === statusFilter;
+
+      const matchesBranch =
+        !branchFilter || inquiry.preferredBranch === branchFilter;
+
+      const matchesBatch =
+        !batchFilter || inquiry.preferredBatch === batchFilter;
+
+      const matchesBelt = !beltFilter || inquiry.currentBelt === beltFilter;
+
+      const matchesExperience =
+        !experienceFilter || inquiry.experience === experienceFilter;
+
+      const matchesSubmittedFrom =
+        fromTimestamp === null || createdTimestamp >= fromTimestamp;
+
+      const matchesSubmittedTo =
+        toTimestamp === null || createdTimestamp <= toTimestamp;
 
       return (
-        matchesSearch && matchesStatus
+        matchesSearch &&
+        matchesStatus &&
+        matchesBranch &&
+        matchesBatch &&
+        matchesBelt &&
+        matchesExperience &&
+        matchesSubmittedFrom &&
+        matchesSubmittedTo
       );
+    });
+
+    return [...filtered].sort((a, b) => {
+      switch (sort) {
+        case "createdAt-asc":
+          return (
+            new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+          );
+
+        case "name-asc":
+          return a.fullName.localeCompare(b.fullName);
+
+        case "name-desc":
+          return b.fullName.localeCompare(a.fullName);
+
+        case "status-asc":
+          return STATUS_CONFIG[a.status].label.localeCompare(
+            STATUS_CONFIG[b.status].label,
+          );
+
+        case "status-desc":
+          return STATUS_CONFIG[b.status].label.localeCompare(
+            STATUS_CONFIG[a.status].label,
+          );
+
+        case "createdAt-desc":
+        default:
+          return (
+            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+          );
+      }
     });
   }, [
     inquiries,
     searchTerm,
     statusFilter,
+    branchFilter,
+    batchFilter,
+    beltFilter,
+    experienceFilter,
+    submittedFrom,
+    submittedTo,
+    sort,
   ]);
+
+  const totalFiltered = filteredInquiries.length;
+
+  const totalPages = Math.max(1, Math.ceil(totalFiltered / pageSize));
+
+  const currentPage = Math.min(page, totalPages);
+
+  const paginatedInquiries = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+
+    return filteredInquiries.slice(start, start + pageSize);
+  }, [filteredInquiries, currentPage, pageSize]);
+
+  const showingFrom =
+    totalFiltered === 0 ? 0 : (currentPage - 1) * pageSize + 1;
+
+  const showingTo =
+    totalFiltered === 0 ? 0 : Math.min(currentPage * pageSize, totalFiltered);
 
   const statusCounts = useMemo(() => {
     return {
       total: inquiries.length,
-      new: inquiries.filter(
-        (item) => item.status === "NEW",
-      ).length,
-      contacted: inquiries.filter(
-        (item) => item.status === "CONTACTED",
-      ).length,
-      enrolled: inquiries.filter(
-        (item) => item.status === "ENROLLED",
-      ).length,
-      closed: inquiries.filter(
-        (item) => item.status === "CLOSED",
-      ).length,
+
+      new: inquiries.filter((item) => item.status === "NEW").length,
+
+      contacted: inquiries.filter((item) => item.status === "CONTACTED").length,
+
+      enrolled: inquiries.filter((item) => item.status === "ENROLLED").length,
+
+      closed: inquiries.filter((item) => item.status === "CLOSED").length,
     };
   }, [inquiries]);
 
-  const handleStatusUpdate = async (
-    newStatus: InquiryStatus,
-  ) => {
+  const activeFilters = useMemo<ActiveFilter[]>(() => {
+    const filters: ActiveFilter[] = [];
+
+    if (searchTerm.trim()) {
+      filters.push({
+        id: "search",
+        label: `Search: ${searchTerm.trim()}`,
+        onClear: () => setSearchTerm(""),
+      });
+    }
+
+    if (branchFilter) {
+      filters.push({
+        id: "branch",
+        label: `Branch: ${branchFilter}`,
+        onClear: () => setBranchFilter(""),
+      });
+    }
+
+    if (batchFilter) {
+      filters.push({
+        id: "batch",
+        label: `Training: ${batchFilter}`,
+        onClear: () => setBatchFilter(""),
+      });
+    }
+
+    if (beltFilter) {
+      filters.push({
+        id: "belt",
+        label: `Belt: ${beltFilter}`,
+        onClear: () => setBeltFilter(""),
+      });
+    }
+
+    if (experienceFilter) {
+      filters.push({
+        id: "experience",
+        label: `Experience: ${experienceFilter}`,
+        onClear: () => setExperienceFilter(""),
+      });
+    }
+
+    if (statusFilter !== "ALL") {
+      filters.push({
+        id: "status",
+        label: `Status: ${STATUS_CONFIG[statusFilter].label}`,
+        onClear: () => setStatusFilter("ALL"),
+      });
+    }
+
+    if (submittedFrom) {
+      filters.push({
+        id: "submitted-from",
+        label: `From: ${submittedFrom}`,
+        onClear: () => setSubmittedFrom(""),
+      });
+    }
+
+    if (submittedTo) {
+      filters.push({
+        id: "submitted-to",
+        label: `To: ${submittedTo}`,
+        onClear: () => setSubmittedTo(""),
+      });
+    }
+
+    return filters;
+  }, [
+    searchTerm,
+    branchFilter,
+    batchFilter,
+    beltFilter,
+    experienceFilter,
+    statusFilter,
+    submittedFrom,
+    submittedTo,
+  ]);
+
+  const clearFilters = () => {
+    setSearchTerm("");
+    setStatusFilter("ALL");
+    setBranchFilter("");
+    setBatchFilter("");
+    setBeltFilter("");
+    setExperienceFilter("");
+    setSubmittedFrom("");
+    setSubmittedTo("");
+    setPage(1);
+  };
+
+  const handleStatusUpdate = async (newStatus: InquiryStatus) => {
     if (!selectedInquiry) {
       return;
     }
@@ -543,9 +725,7 @@ export default function InquiriesPage() {
       return;
     }
 
-    if (
-      selectedInquiry.status === newStatus
-    ) {
+    if (selectedInquiry.status === newStatus) {
       return;
     }
 
@@ -553,40 +733,26 @@ export default function InquiriesPage() {
     setStatusError("");
 
     try {
-      const data =
-        await updateInquiryStatus(
-          selectedInquiry._id,
-          newStatus,
-        );
+      const data = await updateInquiryStatus(selectedInquiry._id, newStatus);
 
-      const updatedInquiry: Inquiry =
-        data?.inquiry;
+      const updatedInquiry: Inquiry = data?.inquiry;
 
       if (!updatedInquiry) {
-        throw new Error(
-          "The server did not return the updated inquiry.",
-        );
+        throw new Error("The server did not return the updated inquiry.");
       }
 
-      setInquiries(
-        (currentInquiries) =>
-          currentInquiries.map(
-            (inquiry) =>
-              inquiry._id ===
-              updatedInquiry._id
-                ? updatedInquiry
-                : inquiry,
-          ),
+      setInquiries((currentInquiries) =>
+        currentInquiries.map((inquiry) =>
+          inquiry._id === updatedInquiry._id ? updatedInquiry : inquiry,
+        ),
       );
 
       setSelectedInquiry(updatedInquiry);
+      toast.success("Inquiry status updated.");
     } catch (updateError: unknown) {
-      console.error(
-        "Update inquiry status error:",
-        updateError,
-      );
+      console.error("Update inquiry status error:", updateError);
 
-      setStatusError(
+      toast.error(
         updateError instanceof Error
           ? updateError.message
           : "Unable to update inquiry status.",
@@ -596,15 +762,22 @@ export default function InquiriesPage() {
     }
   };
 
-  const clearFilters = () => {
-    setSearchTerm("");
-    setStatusFilter("ALL");
-  };
-
   const closeModal = () => {
     setSelectedInquiry(null);
     setStatusError("");
   };
+
+  if (!canViewInquiries) {
+    return (
+      <div className="df-page">
+        <PageHeader
+          eyebrow="Authorization"
+          title="Student Inquiries"
+          description="Your role does not include permission to view inquiries."
+        />
+      </div>
+    );
+  }
 
   return (
     <main>
@@ -616,25 +789,15 @@ export default function InquiriesPage() {
           actions={
             <Button
               variant="outline"
-              disabled={
-                isLoading || refreshing
-              }
-              onClick={() =>
-                void fetchInquiries(true)
-              }
+              disabled={isLoading || refreshing}
+              onClick={() => void fetchInquiries(true)}
             >
               <RefreshCw
                 size={17}
-                className={
-                  refreshing
-                    ? "animate-spin"
-                    : ""
-                }
+                className={refreshing ? "animate-spin" : ""}
               />
 
-              <span className="hidden sm:inline">
-                Refresh
-              </span>
+              <span className="hidden sm:inline">Refresh</span>
             </Button>
           }
         />
@@ -657,15 +820,31 @@ export default function InquiriesPage() {
             <div className="flex items-start gap-3">
               <AlertCircle
                 size={19}
-                className="mt-0.5 shrink-0 text-(--danger)"
+                className="
+                  mt-0.5
+                  shrink-0
+                  text-(--danger)
+                "
               />
 
               <div>
-                <p className="text-sm font-semibold text-(--danger)">
+                <p
+                  className="
+                    text-sm
+                    font-semibold
+                    text-(--danger)
+                  "
+                >
                   Unable to load inquiries
                 </p>
 
-                <p className="mt-1 text-xs text-(--danger)">
+                <p
+                  className="
+                    mt-1
+                    text-xs
+                    text-(--danger)
+                  "
+                >
                   {error}
                 </p>
               </div>
@@ -689,7 +868,15 @@ export default function InquiriesPage() {
         )}
 
         {/* Summary cards */}
-        <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+        <div
+          className="
+            mb-6
+            grid
+            gap-4
+            sm:grid-cols-2
+            xl:grid-cols-5
+          "
+        >
           <SummaryCard
             title="Total Inquiries"
             value={statusCounts.total}
@@ -726,137 +913,91 @@ export default function InquiriesPage() {
           />
         </div>
 
-        {/* Pipeline */}
-        <Card
-          padding="md"
-          className="mb-6"
-        >
-          <div className="mb-5">
-            <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-(--accent)">
-              Lead Pipeline
-            </p>
 
-            <h2 className="mt-1 text-xl font-black tracking-tight text-(--foreground)">
-              Enquiry Progress
-            </h2>
 
-            <p className="mt-1 text-sm text-(--ink-muted)">
-              Track prospective students from first
-              enquiry to final outcome.
-            </p>
-          </div>
-
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            {STATUS_ORDER.map(
-              (status, index) => {
-                const config =
-                  STATUS_CONFIG[status];
-
-                const Icon = config.icon;
-
-                const count =
-                  status === "NEW"
-                    ? statusCounts.new
-                    : status === "CONTACTED"
-                      ? statusCounts.contacted
-                      : status === "ENROLLED"
-                        ? statusCounts.enrolled
-                        : statusCounts.closed;
-
-                return (
-                  <button
-                    key={status}
-                    type="button"
-                    onClick={() =>
-                      setStatusFilter(status)
-                    }
-                    className="
-                      group
-                      relative
-                      rounded-2xl
-                      border
-                      border-(--line)
-                      bg-(--surface)
-                      p-4
-                      text-left
-                      transition
-                      hover:-translate-y-0.5
-                      hover:border-(--accent)
-                    "
-                  >
-                    <div className="flex items-center justify-between gap-3">
-                      <div
-                        className="
-                          flex
-                          h-10
-                          w-10
-                          items-center
-                          justify-center
-                          rounded-xl
-                          bg-(--accent-soft)
-                          text-(--accent)
-                        "
-                      >
-                        <Icon size={18} />
-                      </div>
-
-                      <span className="text-2xl font-black text-(--foreground)">
-                        {count}
-                      </span>
-                    </div>
-
-                    <p className="mt-4 text-sm font-bold text-(--foreground)">
-                      {config.label}
-                    </p>
-
-                    <p className="mt-1 text-xs text-(--ink-muted)">
-                      {config.description}
-                    </p>
-
-                    {index <
-                      STATUS_ORDER.length -
-                        1}
-                  </button>
-                );
-              },
-            )}
-          </div>
-        </Card>
-
-        {/* Search and filters */}
-        <Card
-          padding="md"
-          className="mb-6"
-        >
+        {/* Unified inquiry table */}
+        <Card padding="none" className="overflow-hidden">
           <div
             className="
               flex
               flex-col
               justify-between
               gap-5
+              border-b
+              border-(--line)
+              px-5
+              py-5
+              sm:px-6
               lg:flex-row
               lg:items-center
             "
           >
-            <div>
-              <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-(--accent)">
-                Lead Management
-              </p>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <div
+                  className="
+                    flex
+                    h-9
+                    w-9
+                    items-center
+                    justify-center
+                    rounded-xl
+                    bg-(--accent-soft)
+                    text-(--accent)
+                  "
+                >
+                  <UserRound size={18} />
+                </div>
 
-              <h2 className="mt-1 text-xl font-black tracking-tight text-(--foreground)">
-                Inquiry Records
-              </h2>
+                <div>
+                  <h2
+                    className="
+                      text-xl
+                      font-extrabold
+                      tracking-tight
+                      text-(--foreground)
+                    "
+                  >
+                    All inquiries
+                  </h2>
 
-              <p className="mt-1 text-sm text-(--ink-muted)">
-                Search by student, contact, branch,
-                belt or batch.
-              </p>
+                  <p
+                    className="
+                      mt-0.5
+                      text-xs
+                      text-(--ink-muted)
+                      sm:text-sm
+                    "
+                  >
+                    View and manage every prospective student enquiry in your
+                    academy.
+                  </p>
+                </div>
+              </div>
             </div>
 
-            <div className="flex w-full flex-col gap-3 sm:flex-row lg:w-auto">
-              <div className="relative w-full sm:w-80">
+            <div
+              className="
+                flex
+                w-full
+                flex-col
+                gap-2
+                lg:w-auto
+                lg:flex-row
+                lg:items-start
+              "
+            >
+              {/* Search */}
+              <div
+                className="
+                  relative
+                  w-full
+                  lg:w-[340px]
+                "
+              >
                 <Search
                   size={17}
+                  aria-hidden="true"
                   className="
                     pointer-events-none
                     absolute
@@ -870,144 +1011,261 @@ export default function InquiriesPage() {
                 <Input
                   type="search"
                   value={searchTerm}
-                  onChange={(event) =>
-                    setSearchTerm(
-                      event.target.value,
-                    )
-                  }
+                  onChange={(event) => setSearchTerm(event.target.value)}
                   placeholder="Search inquiries..."
-                  className="pl-10"
+                  aria-label="Search inquiries"
+                  className="h-11 pl-10"
                 />
+
+                {searchTerm && (
+                  <button
+                    type="button"
+                    aria-label="Clear search"
+                    title="Clear search"
+                    onClick={() => setSearchTerm("")}
+                    className="
+                      absolute
+                      right-2.5
+                      top-1/2
+                      flex
+                      h-7
+                      w-7
+                      -translate-y-1/2
+                      items-center
+                      justify-center
+                      rounded-lg
+                      text-(--ink-faint)
+                      transition
+                      hover:bg-(--hover-bg)
+                      hover:text-(--foreground)
+                    "
+                  >
+                    <X size={15} />
+                  </button>
+                )}
               </div>
 
-              <Select
-                value={statusFilter}
-                onChange={(event) =>
-                  setStatusFilter(
-                    event.target.value as
-                      | "ALL"
-                      | InquiryStatus,
-                  )
-                }
-                className="h-10 sm:w-44"
+              {/* Filters */}
+              <DataFilters
+                activeFilters={activeFilters}
+                onClearAll={clearFilters}
               >
-                <option value="ALL">
-                  All statuses
-                </option>
+                <label className="grid gap-1.5 text-xs font-bold text-(--foreground-soft)">
+                  Branch
+                  <Select
+                    value={branchFilter}
+                    onChange={(event) => setBranchFilter(event.target.value)}
+                  >
+                    <option value="">All branches</option>
 
-                <option value="NEW">
-                  New
-                </option>
+                    {branchOptions.map((branch) => (
+                      <option key={branch} value={branch}>
+                        {branch}
+                      </option>
+                    ))}
+                  </Select>
+                </label>
 
-                <option value="CONTACTED">
-                  Contacted
-                </option>
+                <label className="grid gap-1.5 text-xs font-bold text-(--foreground-soft)">
+                  Training batch
+                  <Select
+                    value={batchFilter}
+                    onChange={(event) => setBatchFilter(event.target.value)}
+                  >
+                    <option value="">All batches</option>
 
-                <option value="ENROLLED">
-                  Enrolled
-                </option>
+                    {batchOptions.map((batch) => (
+                      <option key={batch} value={batch}>
+                        {batch}
+                      </option>
+                    ))}
+                  </Select>
+                </label>
 
-                <option value="CLOSED">
-                  Closed
-                </option>
-              </Select>
+                <label className="grid gap-1.5 text-xs font-bold text-(--foreground-soft)">
+                  Current belt
+                  <Select
+                    value={beltFilter}
+                    onChange={(event) => setBeltFilter(event.target.value)}
+                  >
+                    <option value="">All belts</option>
+
+                    {beltOptions.map((belt) => (
+                      <option key={belt} value={belt}>
+                        {belt}
+                      </option>
+                    ))}
+                  </Select>
+                </label>
+
+                <label className="grid gap-1.5 text-xs font-bold text-(--foreground-soft)">
+                  Experience
+                  <Select
+                    value={experienceFilter}
+                    onChange={(event) =>
+                      setExperienceFilter(event.target.value)
+                    }
+                  >
+                    <option value="">All experience levels</option>
+
+                    {experienceOptions.map((experience) => (
+                      <option key={experience} value={experience}>
+                        {experience}
+                      </option>
+                    ))}
+                  </Select>
+                </label>
+
+                <label className="grid gap-1.5 text-xs font-bold text-(--foreground-soft)">
+                  Status
+                  <Select
+                    value={statusFilter}
+                    onChange={(event) =>
+                      setStatusFilter(
+                        event.target.value as "ALL" | InquiryStatus,
+                      )
+                    }
+                  >
+                    <option value="ALL">All statuses</option>
+                    <option value="NEW">New</option>
+                    <option value="CONTACTED">Contacted</option>
+                    <option value="ENROLLED">Enrolled</option>
+                    <option value="CLOSED">Closed</option>
+                  </Select>
+                </label>
+
+                <label className="grid gap-1.5 text-xs font-bold text-(--foreground-soft)">
+                  Submitted from
+                  <Input
+                    type="date"
+                    value={submittedFrom}
+                    onChange={(event) => setSubmittedFrom(event.target.value)}
+                  />
+                </label>
+
+                <label className="grid gap-1.5 text-xs font-bold text-(--foreground-soft)">
+                  Submitted to
+                  <Input
+                    type="date"
+                    value={submittedTo}
+                    onChange={(event) => setSubmittedTo(event.target.value)}
+                  />
+                </label>
+              </DataFilters>
+
+              {/* Sort */}
+              <DataSort
+                value={sort}
+                onChange={(value) => setSort(value as InquirySort)}
+                options={[
+                  {
+                    value: "createdAt-desc",
+                    label: "Newest first",
+                  },
+                  {
+                    value: "createdAt-asc",
+                    label: "Oldest first",
+                  },
+                  {
+                    value: "name-asc",
+                    label: "Name: A to Z",
+                  },
+                  {
+                    value: "name-desc",
+                    label: "Name: Z to A",
+                  },
+                  {
+                    value: "status-asc",
+                    label: "Status: A to Z",
+                  },
+                  {
+                    value: "status-desc",
+                    label: "Status: Z to A",
+                  },
+                ]}
+              />
             </div>
           </div>
 
-          {(searchTerm ||
-            statusFilter !== "ALL") && (
-            <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-(--line) pt-4">
-              <span className="text-xs text-(--ink-muted)">
-                Active filters:
-              </span>
-
-              {searchTerm && (
-                <span className="rounded-full bg-(--accent-soft) px-3 py-1.5 text-xs font-semibold text-(--accent)">
-                  Search: {searchTerm}
-                </span>
-              )}
-
-              {statusFilter !== "ALL" && (
-                <span className="rounded-full bg-(--accent-soft) px-3 py-1.5 text-xs font-semibold text-(--accent)">
-                  Status:{" "}
-                  {
-                    STATUS_CONFIG[
-                      statusFilter
-                    ].label
-                  }
-                </span>
-              )}
-
-              <button
-                type="button"
-                onClick={clearFilters}
-                className="ml-1 text-xs font-semibold text-(--danger) hover:underline"
-              >
-                Clear all
-              </button>
-            </div>
-          )}
-        </Card>
-
-        {/* Inquiry table */}
-        <Card
-          padding="none"
-          className="overflow-hidden"
-        >
-          <div
-            className="
-              flex
-              flex-col
-              gap-3
-              border-b
-              border-(--line)
-              px-6
-              py-5
-              sm:flex-row
-              sm:items-center
-              sm:justify-between
-            "
-          >
-            <div>
-              <p className="text-sm font-semibold text-(--accent)">
-                Inquiry Directory
-              </p>
-
-              <h2 className="mt-1 text-lg font-black text-(--foreground)">
-                Prospective Students
-              </h2>
-
-              <p className="mt-1 text-sm text-(--ink-muted)">
-                {filteredInquiries.length} record
-                {filteredInquiries.length !==
-                1
-                  ? "s"
-                  : ""}{" "}
-                found
-              </p>
-            </div>
-
-            <span
+          {/* Active filters */}
+          {activeFilters.length > 0 && (
+            <div
               className="
-                w-fit
-                rounded-full
-                border
+                border-b
                 border-(--line)
-                bg-(--accent-soft)
-                px-3
-                py-1.5
-                text-xs
-                font-bold
-                text-(--accent)
+                px-5
+                py-3
+                sm:px-6
               "
             >
-              {filteredInquiries.length} Records
-            </span>
-          </div>
+              <div
+                className="
+                  flex
+                  flex-wrap
+                  items-center
+                  gap-2
+                "
+              >
+                <span
+                  className="
+                    text-xs
+                    font-medium
+                    text-(--ink-faint)
+                  "
+                >
+                  Active filters:
+                </span>
 
+                {activeFilters.map((filter) => (
+                  <button
+                    key={filter.id}
+                    type="button"
+                    onClick={filter.onClear}
+                    className="
+                      inline-flex
+                      items-center
+                      gap-1
+                      rounded-full
+                      border
+                      border-(--line)
+                      bg-(--surface)
+                      px-2.5
+                      py-1
+                      text-xs
+                      font-semibold
+                      text-(--foreground-soft)
+                      transition
+                      hover:border-(--line-strong)
+                      hover:bg-(--hover-bg)
+                    "
+                  >
+                    {filter.label}
+                    <X size={12} />
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Loading */}
           {isLoading ? (
-            <div className="flex min-h-[320px] items-center justify-center">
-              <div className="flex flex-col items-center gap-3 text-center">
+            <div
+              className="
+                flex
+                min-h-[320px]
+                items-center
+                justify-center
+              "
+            >
+              <div
+                className="
+                  flex
+                  flex-col
+                  items-center
+                  gap-3
+                  text-center
+                "
+              >
                 <div
                   className="
                     flex
@@ -1020,24 +1278,41 @@ export default function InquiriesPage() {
                     text-(--accent)
                   "
                 >
-                  <RefreshCw
-                    size={21}
-                    className="animate-spin"
-                  />
+                  <RefreshCw size={21} className="animate-spin" />
                 </div>
 
-                <p className="text-sm font-semibold text-(--foreground)">
+                <p
+                  className="
+                    text-sm
+                    font-semibold
+                    text-(--foreground)
+                  "
+                >
                   Loading inquiries...
                 </p>
 
-                <p className="text-xs text-(--ink-muted)">
+                <p
+                  className="
+                    text-xs
+                    text-(--ink-muted)
+                  "
+                >
                   Fetching the latest enquiry records.
                 </p>
               </div>
             </div>
-          ) : filteredInquiries.length ===
-            0 ? (
-            <div className="flex min-h-[320px] flex-col items-center justify-center px-6 text-center">
+          ) : filteredInquiries.length === 0 ? (
+            <div
+              className="
+                flex
+                min-h-[320px]
+                flex-col
+                items-center
+                justify-center
+                px-6
+                text-center
+              "
+            >
               <div
                 className="
                   flex
@@ -1053,359 +1328,531 @@ export default function InquiriesPage() {
                 <UserRound size={25} />
               </div>
 
-              <h3 className="mt-4 text-base font-bold text-(--foreground)">
+              <h3
+                className="
+                  mt-4
+                  text-base
+                  font-bold
+                  text-(--foreground)
+                "
+              >
                 No inquiries found
               </h3>
 
-              <p className="mt-1 max-w-sm text-sm text-(--ink-muted)">
-                Try changing the search term or
-                status filter. New student enquiries
-                will appear here automatically.
+              <p
+                className="
+                  mt-1
+                  max-w-sm
+                  text-sm
+                  text-(--ink-muted)
+                "
+              >
+                Try changing your search or filters. New student enquiries will
+                appear here automatically.
               </p>
 
-              {(searchTerm ||
-                statusFilter !== "ALL") && (
-                <Button
-                  variant="ghost"
-                  className="mt-4"
-                  onClick={clearFilters}
-                >
+              {activeFilters.length > 0 && (
+                <Button variant="ghost" className="mt-4" onClick={clearFilters}>
                   Clear filters
                 </Button>
               )}
             </div>
           ) : (
             <>
-              {/* Desktop */}
-              <div className="hidden overflow-x-auto lg:block">
-                <table className="min-w-[1050px] w-full text-left">
-                  <thead>
-                    <tr className="border-b border-(--line) bg-(--surface)">
-                      <TableHeading>
-                        Student
-                      </TableHeading>
-
-                      <TableHeading>
-                        Contact
-                      </TableHeading>
-
-                      <TableHeading>
-                        Training Preference
-                      </TableHeading>
-
-                      <TableHeading>
-                        Status
-                      </TableHeading>
-
-                      <TableHeading>
-                        Submitted
-                      </TableHeading>
-
-                      <TableHeading align="right">
-                        Action
-                      </TableHeading>
+              {/* Desktop table */}
+              <div
+                className="
+                  hidden
+                  overflow-x-auto
+                  md:block
+                "
+              >
+                <table
+                  className="
+                    w-full
+                    min-w-[1050px]
+                  "
+                >
+                  <thead
+                    className="
+                      border-b
+                      border-(--line)
+                      bg-(--surface)
+                    "
+                  >
+                    <tr>
+                      <TableHeading>Student</TableHeading>
+                      <TableHeading>Contact</TableHeading>
+                      <TableHeading>Training Preference</TableHeading>
+                      <TableHeading>Status</TableHeading>
+                      <TableHeading>Submitted</TableHeading>
+                      <TableHeading align="right">Action</TableHeading>
                     </tr>
                   </thead>
 
-                  <tbody>
-                    {filteredInquiries.map(
-                      (inquiry) => (
-                        <tr
-                          key={inquiry._id}
-                          className="
-                            border-b
-                            border-(--line)
-                            transition
-                            last:border-b-0
-                            hover:bg-(--hover-bg)
-                          "
-                        >
-                          <td className="px-6 py-5">
-                            <div className="flex items-center gap-3">
-                              <div
+                  <tbody
+                    className="
+                      divide-y
+                      divide-(--line)
+                    "
+                  >
+                    {paginatedInquiries.map((inquiry) => (
+                      <tr
+                        key={inquiry._id}
+                        className="
+                          group
+                          transition-colors
+                          duration-200
+                          hover:bg-(--surface)
+                        "
+                      >
+                        <td className="px-6 py-5">
+                          <button
+                            type="button"
+                            onClick={() => setSelectedInquiry(inquiry)}
+                            className="
+                              flex
+                              items-center
+                              gap-3
+                              text-left
+                            "
+                          >
+                            <div
+                              className="
+                                flex
+                                h-10
+                                w-10
+                                shrink-0
+                                items-center
+                                justify-center
+                                rounded-full
+                                border
+                                border-(--line)
+                                bg-(--sidebar-logo-bg)
+                                text-xs
+                                font-black
+                                text-(--gold)
+                              "
+                            >
+                              {getInitials(inquiry.fullName)}
+                            </div>
+
+                            <div className="min-w-0">
+                              <p
                                 className="
-                                  flex
-                                  h-10
-                                  w-10
-                                  shrink-0
-                                  items-center
-                                  justify-center
-                                  rounded-full
-                                  border
-                                  border-(--line)
-                                  bg-(--accent-soft)
-                                  text-sm
-                                  font-black
-                                  text-(--accent)
+                                  truncate
+                                  text-[15px]
+                                  leading-5
+                                  font-bold
+                                  text-(--foreground-soft)
+                                  transition-colors
+                                  group-hover:text-(--accent)
                                 "
                               >
-                                {getInitials(
-                                  inquiry.fullName,
-                                )}
-                              </div>
+                                {inquiry.fullName}
+                              </p>
 
-                              <div>
-                                <p className="font-bold text-(--foreground)">
-                                  {
-                                    inquiry.fullName
-                                  }
-                                </p>
-
-                                <p className="mt-1 text-xs text-(--ink-faint)">
-                                  {inquiry.age
-                                    ? `${inquiry.age} years`
-                                    : "Age not provided"}
-                                </p>
-                              </div>
+                              <p
+                                className="
+                                  mt-1
+                                  text-sm
+                                  leading-5
+                                  text-(--ink-muted)
+                                "
+                              >
+                                {inquiry.age
+                                  ? `${inquiry.age} years`
+                                  : "Age not provided"}
+                              </p>
                             </div>
-                          </td>
+                          </button>
+                        </td>
 
-                          <td className="px-6 py-5">
-                            <a
-                              href={`mailto:${inquiry.email}`}
-                              className="block max-w-[230px] truncate text-sm font-semibold text-(--foreground) hover:text-(--accent)"
-                            >
-                              {inquiry.email}
-                            </a>
+                        <td className="px-6 py-5">
+                          <a
+                            href={`mailto:${inquiry.email}`}
+                            className="
+                              block
+                              max-w-[230px]
+                              truncate
+                              text-[15px]
+                              leading-5
+                              font-semibold
+                              text-(--foreground-soft)
+                              hover:text-(--accent)
+                            "
+                          >
+                            {inquiry.email || "No email"}
+                          </a>
 
-                            <a
-                              href={`tel:${inquiry.phone}`}
-                              className="mt-1 block text-sm text-(--ink-muted) hover:text-(--accent)"
-                            >
-                              {inquiry.phone}
-                            </a>
-                          </td>
+                          <a
+                            href={`tel:${inquiry.phone}`}
+                            className="
+                              mt-1
+                              block
+                              text-sm
+                              leading-5
+                              text-(--ink-muted)
+                              hover:text-(--accent)
+                            "
+                          >
+                            {inquiry.phone || "No phone"}
+                          </a>
+                        </td>
 
-                          <td className="px-6 py-5">
-                            <p className="text-sm font-semibold text-(--foreground)">
-                              {inquiry.preferredBatch ||
-                                "Flexible"}
-                            </p>
+                        <td className="px-6 py-5">
+                          <p
+                            className="
+                              text-[15px]
+                              leading-5
+                              font-medium
+                              text-(--foreground-soft)
+                            "
+                          >
+                            {inquiry.preferredBatch || "Flexible"}
+                          </p>
 
-                            <p className="mt-1 max-w-[220px] truncate text-xs text-(--ink-muted)">
-                              {inquiry.preferredBranch ||
-                                "Branch not specified"}
-                            </p>
-                          </td>
+                          <p
+                            className="
+                              mt-1
+                              max-w-[220px]
+                              truncate
+                              text-sm
+                              leading-5
+                              text-(--ink-muted)
+                            "
+                          >
+                            {inquiry.preferredBranch || "Branch not specified"}
+                          </p>
+                        </td>
 
-                          <td className="px-6 py-5">
-                            <StatusBadge
-                              status={
-                                inquiry.status
-                              }
-                            />
-                          </td>
+                        <td className="px-6 py-5">
+                          <StatusBadge status={inquiry.status} />
+                        </td>
 
-                          <td className="whitespace-nowrap px-6 py-5">
-                            <p className="text-sm text-(--foreground)">
-                              {formatDate(
-                                inquiry.createdAt,
-                              )}
-                            </p>
+                        <td
+                          className="
+                            whitespace-nowrap
+                            px-6
+                            py-5
+                          "
+                        >
+                          <p
+                            className="
+                              text-[15px]
+                              leading-5
+                              text-(--foreground-soft)
+                            "
+                          >
+                            {formatDate(inquiry.createdAt)}
+                          </p>
 
-                            <p className="mt-1 text-xs text-(--ink-faint)">
-                              {getRelativeTime(
-                                inquiry.createdAt,
-                              )}
-                            </p>
-                          </td>
+                          <p
+                            className="
+                              mt-1
+                              text-sm
+                              leading-5
+                              text-(--ink-faint)
+                            "
+                          >
+                            {getRelativeTime(inquiry.createdAt)}
+                          </p>
+                        </td>
 
-                          <td className="px-6 py-5 text-right">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() =>
-                                setSelectedInquiry(
-                                  inquiry,
-                                )
-                              }
-                            >
-                              View
-                              <ArrowRight
-                                size={14}
-                              />
-                            </Button>
-                          </td>
-                        </tr>
-                      ),
-                    )}
+                        <td className="px-6 py-5 text-right">
+                          <IconButton
+                            label={`View ${inquiry.fullName}`}
+                            title={`View ${inquiry.fullName}`}
+                            onClick={() => setSelectedInquiry(inquiry)}
+                          >
+                            <Eye size={16} />
+                          </IconButton>
+                        </td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>
 
               {/* Mobile / tablet */}
-              <div className="divide-y divide-(--line) lg:hidden">
-                {filteredInquiries.map(
-                  (inquiry) => (
-                    <button
-                      key={inquiry._id}
-                      type="button"
-                      onClick={() =>
-                        setSelectedInquiry(
-                          inquiry,
-                        )
-                      }
+              <div
+                className="
+                  space-y-3
+                  p-4
+                  md:hidden
+                "
+              >
+                {paginatedInquiries.map((inquiry) => (
+                  <button
+                    key={inquiry._id}
+                    type="button"
+                    onClick={() => setSelectedInquiry(inquiry)}
+                    className="
+                      group
+                      block
+                      w-full
+                      rounded-2xl
+                      border
+                      border-(--line)
+                      bg-(--surface)
+                      p-4
+                      text-left
+                      transition-all
+                      duration-200
+                      hover:-translate-y-0.5
+                      hover:border-(--line-strong)
+                      hover:bg-(--card)
+                    "
+                  >
+                    <div
                       className="
-                        block
-                        w-full
-                        p-5
-                        text-left
-                        transition
-                        hover:bg-(--hover-bg)
+                        flex
+                        items-start
+                        justify-between
+                        gap-3
                       "
                     >
-                      <div className="flex items-start justify-between gap-4">
-                        <div className="flex min-w-0 items-center gap-3">
-                          <div
+                      <div
+                        className="
+                          flex
+                          min-w-0
+                          items-center
+                          gap-3
+                        "
+                      >
+                        <div
+                          className="
+                            flex
+                            h-10
+                            w-10
+                            shrink-0
+                            items-center
+                            justify-center
+                            rounded-full
+                            border
+                            border-(--line)
+                            bg-(--sidebar-logo-bg)
+                            text-xs
+                            font-black
+                            text-(--gold)
+                          "
+                        >
+                          {getInitials(inquiry.fullName)}
+                        </div>
+
+                        <div className="min-w-0">
+                          <p
                             className="
-                              flex
-                              h-11
-                              w-11
-                              shrink-0
-                              items-center
-                              justify-center
-                              rounded-full
-                              border
-                              border-(--line)
-                              bg-(--accent-soft)
+                              truncate
                               text-sm
-                              font-black
-                              text-(--accent)
+                              font-bold
+                              text-(--foreground-soft)
                             "
                           >
-                            {getInitials(
-                              inquiry.fullName,
-                            )}
-                          </div>
+                            {inquiry.fullName}
+                          </p>
 
-                          <div className="min-w-0">
-                            <p className="truncate font-bold text-(--foreground)">
-                              {
-                                inquiry.fullName
-                              }
-                            </p>
-
-                            <p className="mt-1 text-xs text-(--ink-muted)">
-                              {inquiry.age
-                                ? `${inquiry.age} years`
-                                : "Age not provided"}
-                            </p>
-                          </div>
+                          <p
+                            className="
+                              mt-1
+                              text-xs
+                              text-(--ink-muted)
+                            "
+                          >
+                            {inquiry.age
+                              ? `${inquiry.age} years`
+                              : "Age not provided"}
+                          </p>
                         </div>
+                      </div>
 
-                        <StatusBadge
-                          status={
-                            inquiry.status
-                          }
+                      <StatusBadge status={inquiry.status} />
+                    </div>
+
+                    <div
+                      className="
+                        mt-4
+                        grid
+                        gap-3
+                        sm:grid-cols-2
+                      "
+                    >
+                      <div
+                        className="
+                          flex
+                          min-w-0
+                          items-center
+                          gap-2
+                        "
+                      >
+                        <Mail
+                          size={15}
+                          className="
+                            shrink-0
+                            text-(--accent)
+                          "
                         />
-                      </div>
 
-                      <div className="mt-5 grid gap-3 sm:grid-cols-2">
-                        <div className="flex min-w-0 items-center gap-2">
-                          <Mail
-                            size={15}
-                            className="shrink-0 text-(--accent)"
-                          />
-
-                          <span className="truncate text-sm text-(--ink-muted)">
-                            {inquiry.email}
-                          </span>
-                        </div>
-
-                        <div className="flex items-center gap-2">
-                          <Phone
-                            size={15}
-                            className="shrink-0 text-(--accent)"
-                          />
-
-                          <span className="text-sm text-(--ink-muted)">
-                            {inquiry.phone}
-                          </span>
-                        </div>
-
-                        <div className="flex min-w-0 items-center gap-2">
-                          <MapPin
-                            size={15}
-                            className="shrink-0 text-(--accent)"
-                          />
-
-                          <span className="truncate text-sm text-(--ink-muted)">
-                            {inquiry.preferredBranch ||
-                              "Branch not specified"}
-                          </span>
-                        </div>
-
-                        <div className="flex items-center gap-2">
-                          <Clock3
-                            size={15}
-                            className="shrink-0 text-(--accent)"
-                          />
-
-                          <span className="text-sm text-(--ink-muted)">
-                            {inquiry.preferredBatch ||
-                              "Flexible"}
-                          </span>
-                        </div>
-                      </div>
-
-                      <div className="mt-4 flex items-center justify-between border-t border-(--line) pt-4">
-                        <span className="text-xs text-(--ink-faint)">
-                          {formatDateTime(
-                            inquiry.createdAt,
-                          )}
-                        </span>
-
-                        <span className="inline-flex items-center gap-1 text-xs font-bold text-(--accent)">
-                          View details
-                          <ArrowRight size={13} />
+                        <span
+                          className="
+                            truncate
+                            text-sm
+                            text-(--ink-muted)
+                          "
+                        >
+                          {inquiry.email || "No email"}
                         </span>
                       </div>
-                    </button>
-                  ),
-                )}
+
+                      <div
+                        className="
+                          flex
+                          items-center
+                          gap-2
+                        "
+                      >
+                        <Phone
+                          size={15}
+                          className="
+                            shrink-0
+                            text-(--accent)
+                          "
+                        />
+
+                        <span
+                          className="
+                            text-sm
+                            text-(--ink-muted)
+                          "
+                        >
+                          {inquiry.phone || "No phone"}
+                        </span>
+                      </div>
+
+                      <div
+                        className="
+                          flex
+                          min-w-0
+                          items-center
+                          gap-2
+                        "
+                      >
+                        <MapPin
+                          size={15}
+                          className="
+                            shrink-0
+                            text-(--accent)
+                          "
+                        />
+
+                        <span
+                          className="
+                            truncate
+                            text-sm
+                            text-(--ink-muted)
+                          "
+                        >
+                          {inquiry.preferredBranch || "Branch not specified"}
+                        </span>
+                      </div>
+
+                      <div
+                        className="
+                          flex
+                          items-center
+                          gap-2
+                        "
+                      >
+                        <Clock3
+                          size={15}
+                          className="
+                            shrink-0
+                            text-(--accent)
+                          "
+                        />
+
+                        <span
+                          className="
+                            text-sm
+                            text-(--ink-muted)
+                          "
+                        >
+                          {inquiry.preferredBatch || "Flexible"}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div
+                      className="
+                        mt-4
+                        flex
+                        items-center
+                        justify-between
+                        gap-3
+                        border-t
+                        border-(--line)
+                        pt-4
+                      "
+                    >
+                      <span
+                        className="
+                          text-xs
+                          text-(--ink-faint)
+                        "
+                      >
+                        {formatDateTime(inquiry.createdAt)}
+                      </span>
+
+                      <span
+                        className="
+                          inline-flex
+                          items-center
+                          gap-1
+                          text-xs
+                          font-bold
+                          text-(--accent)
+                        "
+                      >
+                        View details
+                        <ArrowRight size={13} />
+                      </span>
+                    </div>
+                  </button>
+                ))}
               </div>
             </>
           )}
 
+          {/* Pagination */}
           {!isLoading && (
-            <div className="border-t border-(--line) px-6 py-4">
-              <p className="text-xs text-(--ink-muted)">
-                Showing{" "}
-                <span className="font-bold text-(--foreground)">
-                  {filteredInquiries.length}
-                </span>{" "}
-                of{" "}
-                <span className="font-bold text-(--foreground)">
-                  {inquiries.length}
-                </span>{" "}
-                inquiries
-              </p>
-            </div>
+            <TablePagination
+              currentPage={currentPage}
+              totalPages={totalPages}
+              totalItems={totalFiltered}
+              visibleItems={filteredInquiries.length}
+              pageSize={pageSize}
+              entityLabel="inquiries"
+              onPrevious={() => setPage((current) => Math.max(1, current - 1))}
+              onNext={() => setPage((current) => Math.min(totalPages, current + 1))}
+              onPageSizeChange={setPageSize}
+            />
           )}
         </Card>
       </div>
 
-      {/* Details modal */}
+      {/* Inquiry details modal */}
       <Modal
         open={Boolean(selectedInquiry)}
         onClose={closeModal}
-        title={
-          selectedInquiry?.fullName ||
-          "Inquiry Details"
-        }
+        title={selectedInquiry?.fullName || "Inquiry Details"}
         description={
           selectedInquiry
-            ? `Submitted on ${formatDateTime(
-                selectedInquiry.createdAt,
-              )}`
+            ? `Submitted on ${formatDateTime(selectedInquiry.createdAt)}`
             : undefined
         }
         size="lg"
         footer={
-          <Button
-            variant="outline"
-            onClick={closeModal}
-          >
+          <Button variant="outline" onClick={closeModal}>
             Close
           </Button>
         }
@@ -1444,31 +1891,43 @@ export default function InquiriesPage() {
                     text-(--accent)
                   "
                 >
-                  {getInitials(
-                    selectedInquiry.fullName,
-                  )}
+                  {getInitials(selectedInquiry.fullName)}
                 </div>
 
                 <div>
-                  <p className="text-xl font-black text-(--foreground)">
+                  <p
+                    className="
+                      text-xl
+                      font-black
+                      text-(--foreground)
+                    "
+                  >
                     {selectedInquiry.fullName}
                   </p>
 
-                  <p className="mt-1 text-sm text-(--ink-muted)">
+                  <p
+                    className="
+                      mt-1
+                      text-sm
+                      text-(--ink-muted)
+                    "
+                  >
                     Prospective student
                   </p>
                 </div>
               </div>
 
-              <StatusBadge
-                status={
-                  selectedInquiry.status
-                }
-              />
+              <StatusBadge status={selectedInquiry.status} />
             </div>
 
             {/* Quick actions */}
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div
+              className="
+                grid
+                gap-3
+                sm:grid-cols-2
+              "
+            >
               <a
                 href={`tel:${selectedInquiry.phone}`}
                 className="
@@ -1537,23 +1996,23 @@ export default function InquiriesPage() {
                 Contact Information
               </p>
 
-              <div className="grid gap-5 sm:grid-cols-2">
+              <div
+                className="
+                  grid
+                  gap-5
+                  sm:grid-cols-2
+                "
+              >
                 <DetailItem
                   icon={Mail}
                   label="Email"
-                  value={
-                    selectedInquiry.email ||
-                    "Not provided"
-                  }
+                  value={selectedInquiry.email || "Not provided"}
                 />
 
                 <DetailItem
                   icon={Phone}
                   label="Phone"
-                  value={
-                    selectedInquiry.phone ||
-                    "Not provided"
-                  }
+                  value={selectedInquiry.phone || "Not provided"}
                 />
 
                 <DetailItem
@@ -1569,10 +2028,7 @@ export default function InquiriesPage() {
                 <DetailItem
                   icon={MapPin}
                   label="Preferred Branch"
-                  value={
-                    selectedInquiry.preferredBranch ||
-                    "Not specified"
-                  }
+                  value={selectedInquiry.preferredBranch || "Not specified"}
                 />
               </div>
             </section>
@@ -1592,29 +2048,26 @@ export default function InquiriesPage() {
                 Training Preferences
               </p>
 
-              <div className="grid gap-4 sm:grid-cols-3">
+              <div
+                className="
+                  grid
+                  gap-4
+                  sm:grid-cols-3
+                "
+              >
                 <InfoBox
                   label="Current Belt"
-                  value={
-                    selectedInquiry.currentBelt ||
-                    "Beginner"
-                  }
+                  value={selectedInquiry.currentBelt || "Beginner"}
                 />
 
                 <InfoBox
                   label="Experience"
-                  value={
-                    selectedInquiry.experience ||
-                    "Not specified"
-                  }
+                  value={selectedInquiry.experience || "Not specified"}
                 />
 
                 <InfoBox
                   label="Preferred Batch"
-                  value={
-                    selectedInquiry.preferredBatch ||
-                    "Flexible"
-                  }
+                  value={selectedInquiry.preferredBatch || "Flexible"}
                 />
               </div>
             </section>
@@ -1634,98 +2087,105 @@ export default function InquiriesPage() {
                 Inquiry Timeline
               </p>
 
-              <div className="rounded-2xl border border-(--line) bg-(--surface) p-5">
+              <div
+                className="
+                  rounded-2xl
+                  border
+                  border-(--line)
+                  bg-(--surface)
+                  p-5
+                "
+              >
                 <div className="space-y-5">
-                  {STATUS_ORDER.map(
-                    (status, index) => {
-                      const config =
-                        STATUS_CONFIG[status];
+                  {STATUS_ORDER.map((status, index) => {
+                    const config = STATUS_CONFIG[status];
 
-                      const Icon = config.icon;
+                    const Icon = config.icon;
 
-                      const currentIndex =
-                        STATUS_ORDER.indexOf(
-                          selectedInquiry.status,
-                        );
+                    const currentIndex = STATUS_ORDER.indexOf(
+                      selectedInquiry.status,
+                    );
 
-                      const itemIndex =
-                        STATUS_ORDER.indexOf(
-                          status,
-                        );
+                    const itemIndex = STATUS_ORDER.indexOf(status);
 
-                      const isCurrent =
-                        status ===
-                        selectedInquiry.status;
+                    const isCurrent = status === selectedInquiry.status;
 
-                      const isCompleted =
-                        itemIndex < currentIndex;
+                    const isCompleted = itemIndex < currentIndex;
 
-                      return (
-                        <div
-                          key={status}
-                          className="relative flex items-start gap-4"
-                        >
-                          {index <
-                            STATUS_ORDER.length -
-                              1 && (
-                            <div
-                              className="
-                                absolute
-                                left-4
-                                top-8
-                                h-8
-                                w-px
-                                bg-(--line)
-                              "
-                            />
-                          )}
-
+                    return (
+                      <div
+                        key={status}
+                        className="
+                          relative
+                          flex
+                          items-start
+                          gap-4
+                        "
+                      >
+                        {index < STATUS_ORDER.length - 1 && (
                           <div
-                            className={`
-                              relative
-                              z-10
-                              flex
+                            className="
+                              absolute
+                              left-4
+                              top-8
                               h-8
-                              w-8
-                              shrink-0
-                              items-center
-                              justify-center
-                              rounded-full
-                              border
+                              w-px
+                              bg-(--line)
+                            "
+                          />
+                        )}
+
+                        <div
+                          className={`
+                            relative
+                            z-10
+                            flex
+                            h-8
+                            w-8
+                            shrink-0
+                            items-center
+                            justify-center
+                            rounded-full
+                            border
+                            ${
+                              isCurrent || isCompleted
+                                ? "border-(--accent) bg-(--accent-soft) text-(--accent)"
+                                : "border-(--line) bg-(--background) text-(--ink-faint)"
+                            }
+                          `}
+                        >
+                          <Icon size={14} />
+                        </div>
+
+                        <div>
+                          <p
+                            className={`
+                              text-sm
+                              font-bold
                               ${
-                                isCurrent ||
-                                isCompleted
-                                  ? "border-(--accent) bg-(--accent-soft) text-(--accent)"
-                                  : "border-(--line) bg-(--background) text-(--ink-faint)"
+                                isCurrent
+                                  ? "text-(--accent)"
+                                  : "text-(--foreground)"
                               }
                             `}
                           >
-                            <Icon size={14} />
-                          </div>
+                            {config.label}
+                          </p>
 
-                          <div>
-                            <p
-                              className={`
-                                text-sm
-                                font-bold
-                                ${
-                                  isCurrent
-                                    ? "text-(--accent)"
-                                    : "text-(--foreground)"
-                                }
-                              `}
-                            >
-                              {config.label}
-                            </p>
-
-                            <p className="mt-1 text-xs leading-5 text-(--ink-muted)">
-                              {config.description}
-                            </p>
-                          </div>
+                          <p
+                            className="
+                              mt-1
+                              text-xs
+                              leading-5
+                              text-(--ink-muted)
+                            "
+                          >
+                            {config.description}
+                          </p>
                         </div>
-                      );
-                    },
-                  )}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             </section>
@@ -1740,65 +2200,75 @@ export default function InquiriesPage() {
                 p-5
               "
             >
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div
+                className="
+                  flex
+                  flex-col
+                  gap-4
+                  sm:flex-row
+                  sm:items-center
+                  sm:justify-between
+                "
+              >
                 <div>
-                  <p className="text-sm font-bold text-(--foreground)">
+                  <p
+                    className="
+                      text-sm
+                      font-bold
+                      text-(--foreground)
+                    "
+                  >
                     Inquiry Status
                   </p>
 
-                  <p className="mt-1 text-xs text-(--ink-muted)">
-                    Update the current follow-up
-                    stage.
+                  <p
+                    className="
+                      mt-1
+                      text-xs
+                      text-(--ink-muted)
+                    "
+                  >
+                    Update the current follow-up stage.
                   </p>
                 </div>
 
                 {canUpdateStatus ? (
                   <Select
-                    value={
-                      selectedInquiry.status
-                    }
-                    disabled={
-                      isUpdatingStatus
-                    }
+                    value={selectedInquiry.status}
+                    disabled={isUpdatingStatus}
                     onChange={(event) =>
                       void handleStatusUpdate(
-                        event.target
-                          .value as InquiryStatus,
+                        event.target.value as InquiryStatus,
                       )
                     }
-                    className="w-full sm:w-48"
+                    className="
+                      w-full
+                      sm:w-48
+                    "
                   >
-                    <option value="NEW">
-                      New
-                    </option>
-
-                    <option value="CONTACTED">
-                      Contacted
-                    </option>
-
-                    <option value="ENROLLED">
-                      Enrolled
-                    </option>
-
-                    <option value="CLOSED">
-                      Closed
-                    </option>
+                    <option value="NEW">New</option>
+                    <option value="CONTACTED">Contacted</option>
+                    <option value="ENROLLED">Enrolled</option>
+                    <option value="CLOSED">Closed</option>
                   </Select>
                 ) : (
-                  <StatusBadge
-                    status={
-                      selectedInquiry.status
-                    }
-                  />
+                  <StatusBadge status={selectedInquiry.status} />
                 )}
               </div>
 
               {isUpdatingStatus && (
-                <div className="mt-3 flex items-center gap-2 text-xs font-medium text-(--ink-muted)">
-                  <RefreshCw
-                    size={14}
-                    className="animate-spin"
-                  />
+                <div
+                  className="
+                    mt-3
+                    flex
+                    items-center
+                    gap-2
+                    text-xs
+                    font-medium
+                    text-(--ink-muted)
+                  "
+                >
+                  <RefreshCw size={14} className="animate-spin" />
                   Updating status...
                 </div>
               )}
@@ -1823,16 +2293,21 @@ export default function InquiriesPage() {
               )}
 
               {!canUpdateStatus && (
-                <p className="mt-3 text-xs text-(--ink-muted)">
-                  Only Super Admin and Branch Admin
-                  can update inquiry status.
+                <p
+                  className="
+                    mt-3
+                    text-xs
+                    text-(--ink-muted)
+                  "
+                >
+                  Your role does not include permission to update inquiry
+                  status.
                 </p>
               )}
             </section>
 
             {/* Enrolled notice */}
-            {selectedInquiry.status ===
-              "ENROLLED" && (
+            {selectedInquiry.status === "ENROLLED" && (
               <div
                 className="
                   rounded-2xl
@@ -1860,15 +2335,27 @@ export default function InquiriesPage() {
                   </div>
 
                   <div>
-                    <p className="text-sm font-bold text-green-700">
+                    <p
+                      className="
+                        text-sm
+                        font-bold
+                        text-green-700
+                      "
+                    >
                       Ready for admission conversion
                     </p>
 
-                    <p className="mt-1 text-xs leading-6 text-green-700">
-                      This inquiry is marked as
-                      enrolled. The next step is to
-                      connect it with the admission,
-                      registration and payment flow.
+                    <p
+                      className="
+                        mt-1
+                        text-xs
+                        leading-6
+                        text-green-700
+                      "
+                    >
+                      This inquiry is marked as enrolled. The next step is to
+                      connect it with the admission, registration and payment
+                      flow.
                     </p>
                   </div>
                 </div>
@@ -1914,12 +2401,17 @@ export default function InquiriesPage() {
                       text-(--accent)
                     "
                   >
-                    <MessageSquareText
-                      size={15}
-                    />
+                    <MessageSquareText size={15} />
                   </div>
 
-                  <p className="whitespace-pre-wrap text-sm leading-7 text-(--ink-muted)">
+                  <p
+                    className="
+                      whitespace-pre-wrap
+                      text-sm
+                      leading-7
+                      text-(--ink-muted)
+                    "
+                  >
                     {selectedInquiry.message ||
                       "No additional message provided."}
                   </p>
@@ -1928,19 +2420,24 @@ export default function InquiriesPage() {
             </section>
 
             {/* Metadata */}
-            <div className="grid gap-4 border-t border-(--line) pt-6 sm:grid-cols-2">
+            <div
+              className="
+                grid
+                gap-4
+                border-t
+                border-(--line)
+                pt-6
+                sm:grid-cols-2
+              "
+            >
               <InfoBox
                 label="Submitted"
-                value={formatDateTime(
-                  selectedInquiry.createdAt,
-                )}
+                value={formatDateTime(selectedInquiry.createdAt)}
               />
 
               <InfoBox
                 label="Last Updated"
-                value={formatDateTime(
-                  selectedInquiry.updatedAt,
-                )}
+                value={formatDateTime(selectedInquiry.updatedAt)}
               />
             </div>
           </div>

@@ -1,5 +1,8 @@
 "use client";
 
+import { fetchWithSession } from "@/lib/sessionFetch";
+import { confirmAction, toast } from "@/lib/toast";
+
 import { useEffect, useMemo, useState } from "react";
 
 import {
@@ -19,13 +22,21 @@ import {
   Badge,
   Button,
   Card,
+  DataFilters,
+  DataSort,
   EmptyState,
   ErrorState,
+  IconButton,
   Input,
   LoadingSpinner,
   Modal,
   PageHeader,
+  Select,
   SummaryCard,
+  TablePagination,
+  TableHeading,
+  Textarea,
+  type ActiveFilter,
 } from "@/components/ui";
 
 import {
@@ -35,10 +46,12 @@ import {
   scheduleMakeup,
   type BranchScheduleSlot,
   type Makeup,
+  type MakeupStudent,
   type MakeupDateAvailability,
   type MakeupStatus,
 } from "@/lib/makeupApi";
 import { getBranchMonthCalendar } from "@/lib/branchScheduleApi";
+import { PERMISSIONS, useCan } from "@/lib/permissions";
 
 type FilterStatus = "ALL" | MakeupStatus;
 
@@ -287,28 +300,18 @@ function getStatusConfig(status: MakeupStatus) {
    AUTH
 ====================================================== */
 
-function getToken() {
-  if (typeof window === "undefined") {
-    return "";
-  }
-
-  return localStorage.getItem("token") || "";
-}
 
 /* ======================================================
    HOLIDAYS
 ====================================================== */
 
 async function getHolidaysForMakeups(): Promise<Holiday[]> {
-  const token = getToken();
-
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api";
 
-  const response = await fetch(`${apiUrl}/holidays`, {
+  const response = await fetchWithSession(`${apiUrl}/holidays`, {
     method: "GET",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
     },
     cache: "no-store",
   });
@@ -410,6 +413,9 @@ function getHolidayForMakeup(makeup: Makeup, holidayMap: HolidayMap) {
 ====================================================== */
 
 export default function MakeupsPage() {
+  const canViewMakeups = useCan(PERMISSIONS.MAKEUP_VIEW);
+  const canManageMakeups = useCan(PERMISSIONS.MAKEUP_MANAGE);
+
   const [makeups, setMakeups] = useState<Makeup[]>([]);
 
   const [holidays, setHolidays] = useState<Holiday[]>([]);
@@ -425,16 +431,22 @@ export default function MakeupsPage() {
   const [search, setSearch] = useState("");
 
   const [statusFilter, setStatusFilter] = useState<FilterStatus>("ALL");
+  const [studentFilter, setStudentFilter] = useState("");
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+  const [pagination, setPagination] = useState({ page: 1, limit: 25, total: 0, pages: 1 });
+  const [sort, setSort] = useState("makeupDate-desc");
 
   const [actionLoading, setActionLoading] = useState("");
 
-  const [success, setSuccess] = useState("");
 
   const [showScheduleModal, setShowScheduleModal] = useState(false);
 
   const [scheduleTarget, setScheduleTarget] = useState<Makeup | null>(null);
 
   const [scheduleDate, setScheduleDate] = useState("");
+
+  const [scheduleSessionSlotId, setScheduleSessionSlotId] = useState("");
 
   const [scheduleNotes, setScheduleNotes] = useState("");
 
@@ -451,7 +463,16 @@ export default function MakeupsPage() {
      LOAD MAKEUPS
   ==================================================== */
 
-  const loadMakeups = async (showRefreshLoader = false) => {
+  const loadMakeups = async (showRefreshLoader = false, page = 1, limit = pagination.limit) => {
+    if (!canViewMakeups) {
+      setMakeups([]);
+      setHolidays([]);
+      setHolidayMap({});
+      setLoading(false);
+      setRefreshing(false);
+      return;
+    }
+
     try {
       if (showRefreshLoader) {
         setRefreshing(true);
@@ -462,7 +483,17 @@ export default function MakeupsPage() {
       setError("");
 
       const [makeupResponse, holidayResponse] = await Promise.all([
-        getMakeups(),
+        getMakeups({
+          status: statusFilter === "ALL" ? undefined : statusFilter,
+          student: studentFilter || undefined,
+          fromDate: fromDate || undefined,
+          toDate: toDate || undefined,
+          search: search.trim() || undefined,
+          page,
+          limit,
+          sortBy: sort.split("-")[0] as "makeupDate" | "originalDate" | "createdAt" | "updatedAt" | "status",
+          sortOrder: sort.endsWith("-asc") ? "asc" : "desc",
+        }),
         getHolidaysForMakeups(),
       ]);
 
@@ -471,6 +502,7 @@ export default function MakeupsPage() {
       const loadedHolidays = holidayResponse || [];
 
       setMakeups(loadedMakeups);
+      setPagination(makeupResponse.pagination || { page, limit, total: loadedMakeups.length, pages: 1 });
 
       setHolidays(loadedHolidays);
 
@@ -488,20 +520,9 @@ export default function MakeupsPage() {
   };
 
   useEffect(() => {
-    loadMakeups();
-  }, []);
-
-  useEffect(() => {
-    if (!success) {
-      return;
-    }
-
-    const timer = window.setTimeout(() => {
-      setSuccess("");
-    }, 4000);
-
+    const timer = window.setTimeout(() => void loadMakeups(false, 1), search ? 250 : 0);
     return () => window.clearTimeout(timer);
-  }, [success]);
+  }, [canViewMakeups, fromDate, search, sort, statusFilter, studentFilter, toDate]);
 
   /* ====================================================
      FILTER
@@ -543,6 +564,30 @@ export default function MakeupsPage() {
       return matchesStatus && matchesSearch;
     });
   }, [makeups, search, statusFilter, holidayMap]);
+
+  const filterStudents = useMemo(() => {
+    const seen = new Set<string>();
+    return makeups
+      .map((makeup) => (typeof makeup.student === "string" ? null : makeup.student))
+      .filter((student): student is MakeupStudent => Boolean(student && !seen.has(student._id) && seen.add(student._id)));
+  }, [makeups]);
+
+  const activeFilters = useMemo<ActiveFilter[]>(() => {
+    const filters: ActiveFilter[] = [];
+    const student = filterStudents.find((item) => item._id === studentFilter);
+    if (statusFilter !== "ALL") filters.push({ id: "status", label: statusFilter, onClear: () => setStatusFilter("ALL") });
+    if (student) filters.push({ id: "student", label: student.name, onClear: () => setStudentFilter("") });
+    if (fromDate) filters.push({ id: "from-date", label: `From ${fromDate}`, onClear: () => setFromDate("") });
+    if (toDate) filters.push({ id: "to-date", label: `To ${toDate}`, onClear: () => setToDate("") });
+    return filters;
+  }, [filterStudents, fromDate, statusFilter, studentFilter, toDate]);
+
+  const clearFilters = () => {
+    setStatusFilter("ALL");
+    setStudentFilter("");
+    setFromDate("");
+    setToDate("");
+  };
 
   /* ====================================================
      SUMMARY
@@ -639,6 +684,13 @@ export default function MakeupsPage() {
 
       setDateAvailability(availability);
 
+      const targetProgramId = typeof target.sessionTypeId === "object" ? target.sessionTypeId?._id : target.sessionTypeId;
+      const compatibleSlots = activeSlots.filter((slot) => {
+        const slotProgramId = slot.sessionTypeId || "";
+        return Boolean(slot._id && slotProgramId && (!targetProgramId || String(slotProgramId) === String(targetProgramId)));
+      });
+      setScheduleSessionSlotId((current) => compatibleSlots.some((slot) => slot._id === current) ? current : compatibleSlots[0]?._id || "");
+
       setScheduleHoliday(holiday);
 
       /*
@@ -697,6 +749,8 @@ export default function MakeupsPage() {
   ==================================================== */
 
   const openScheduleModal = async (makeup: Makeup) => {
+    if (!canManageMakeups) return;
+
     const existingDate = getCalendarDate(makeup.makeupDate);
     const minimumDate = getMinimumMakeupDate(
       getCalendarDate(makeup.originalDate),
@@ -711,6 +765,7 @@ export default function MakeupsPage() {
     setScheduleTarget(makeup);
 
     setScheduleDate(defaultDate);
+    setScheduleSessionSlotId(makeup.sessionSlotId || "");
 
     setScheduleNotes(makeup.notes || "");
 
@@ -741,6 +796,7 @@ export default function MakeupsPage() {
     setScheduleTarget(null);
 
     setScheduleDate("");
+    setScheduleSessionSlotId("");
 
     setScheduleNotes("");
 
@@ -763,6 +819,7 @@ export default function MakeupsPage() {
     setScheduleHoliday(null);
 
     setDateAvailability(null);
+    setScheduleSessionSlotId("");
 
     if (!value || !scheduleTarget) {
       return;
@@ -791,6 +848,8 @@ export default function MakeupsPage() {
   ==================================================== */
 
   const handleSchedule = async () => {
+    if (!canManageMakeups) return;
+
     if (!scheduleTarget) {
       return;
     }
@@ -867,27 +926,23 @@ export default function MakeupsPage() {
 
       setError("");
 
-      setSuccess("");
 
       await scheduleMakeup(scheduleTarget._id, {
         makeupDate: scheduleDate,
+        sessionSlotId: scheduleSessionSlotId,
         notes: scheduleNotes.trim() || undefined,
       });
 
       closeScheduleModal();
 
-      setSuccess("Makeup class scheduled successfully.");
+      toast.success("Makeup class scheduled successfully.");
 
       await loadMakeups();
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Failed to schedule makeup class.";
 
-      /*
-       * Keep backend validation
-       * visible inside the modal.
-       */
-      setScheduleError(message);
+      toast.error(message, "Unable to schedule makeup");
     } finally {
       setActionLoading("");
     }
@@ -898,21 +953,17 @@ export default function MakeupsPage() {
   ==================================================== */
 
   const handleComplete = async (makeup: Makeup) => {
+    if (!canManageMakeups) return;
+
     const holiday = getHolidayForMakeup(makeup, holidayMap);
 
     if (makeup.status === "SCHEDULED" && holiday) {
-      setError(
-        `"${holiday.name}" is a holiday on ${formatDate(
-          makeup.makeupDate,
-        )}. Reschedule this makeup before completing it.`,
-      );
+      toast.warning(`"${holiday.name}" is a holiday on ${formatDate(makeup.makeupDate)}. Reschedule this makeup before completing it.`);
 
       return;
     }
 
-    const confirmed = window.confirm(
-      `Mark ${getStudentName(makeup)}'s makeup class as completed?`,
-    );
+    const confirmed = await confirmAction({ title: "Complete makeup class?", message: `Mark ${getStudentName(makeup)}'s makeup class as completed?`, confirmLabel: "Mark complete" });
 
     if (!confirmed) {
       return;
@@ -923,11 +974,10 @@ export default function MakeupsPage() {
 
       setError("");
 
-      setSuccess("");
 
       await completeMakeup(makeup._id);
 
-      setSuccess("Makeup class marked as completed successfully.");
+      toast.success("Makeup class marked as completed successfully.");
 
       await loadMakeups();
     } catch (err) {
@@ -936,11 +986,7 @@ export default function MakeupsPage() {
       const message =
         err instanceof Error ? err.message : "Failed to complete makeup class.";
 
-      if (message.toLowerCase().includes("holiday")) {
-        setError(`${message} Please reschedule the makeup.`);
-      } else {
-        setError(message);
-      }
+      toast.error(message.toLowerCase().includes("holiday") ? `${message} Please reschedule the makeup.` : message);
     } finally {
       setActionLoading("");
     }
@@ -951,9 +997,9 @@ export default function MakeupsPage() {
   ==================================================== */
 
   const handleCancel = async (makeup: Makeup) => {
-    const confirmed = window.confirm(
-      `Cancel ${getStudentName(makeup)}'s makeup class?`,
-    );
+    if (!canManageMakeups) return;
+
+    const confirmed = await confirmAction({ title: "Cancel makeup class?", message: `Cancel ${getStudentName(makeup)}'s makeup class?`, confirmLabel: "Cancel makeup", destructive: true });
 
     if (!confirmed) {
       return;
@@ -964,19 +1010,16 @@ export default function MakeupsPage() {
 
       setError("");
 
-      setSuccess("");
 
       await cancelMakeup(makeup._id);
 
-      setSuccess("Makeup class cancelled successfully.");
+      toast.success("Makeup class cancelled successfully.");
 
       await loadMakeups();
     } catch (err) {
       console.error(err);
 
-      setError(
-        err instanceof Error ? err.message : "Failed to cancel makeup class.",
-      );
+      toast.error(err instanceof Error ? err.message : "Failed to cancel makeup class.");
     } finally {
       setActionLoading("");
     }
@@ -991,6 +1034,20 @@ export default function MakeupsPage() {
       <main>
         <div className="df-page">
           <LoadingSpinner fullPage size="lg" text="Loading makeup classes..." />
+        </div>
+      </main>
+    );
+  }
+
+  if (!canViewMakeups) {
+    return (
+      <main>
+        <div className="df-page">
+          <PageHeader
+            eyebrow="Authorization"
+            title="Makeup Classes"
+            description="Your role does not include permission to view makeup classes."
+          />
         </div>
       </main>
     );
@@ -1035,19 +1092,6 @@ export default function MakeupsPage() {
           </div>
         )}
 
-        {success && (
-          <div
-            className="
-              mt-5 flex items-center gap-3
-              rounded-xl border border-(--success)/20
-              bg-(--success-soft) px-4 py-3
-            "
-          >
-            <CheckCircle2 size={18} className="text-(--success)" />
-
-            <p className="text-sm font-semibold text-(--success)">{success}</p>
-          </div>
-        )}
 
         <MakeupSummary
           total={makeups.length}
@@ -1151,35 +1195,42 @@ export default function MakeupsPage() {
                 )}
               </div>
 
-              <div className="flex flex-wrap gap-2">
-                <FilterButton
-                  active={statusFilter === "ALL"}
-                  onClick={() => setStatusFilter("ALL")}
-                >
-                  All
-                </FilterButton>
-
-                <FilterButton
-                  active={statusFilter === "SCHEDULED"}
-                  onClick={() => setStatusFilter("SCHEDULED")}
-                >
-                  Scheduled
-                </FilterButton>
-
-                <FilterButton
-                  active={statusFilter === "COMPLETED"}
-                  onClick={() => setStatusFilter("COMPLETED")}
-                >
-                  Completed
-                </FilterButton>
-
-                <FilterButton
-                  active={statusFilter === "CANCELLED"}
-                  onClick={() => setStatusFilter("CANCELLED")}
-                >
-                  Cancelled
-                </FilterButton>
-              </div>
+              <DataFilters activeFilters={activeFilters} onClearAll={clearFilters}>
+                <label className="grid gap-1.5 text-xs font-bold text-(--foreground-soft)">
+                  Status
+                  <Select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as FilterStatus)}>
+                    <option value="ALL">All statuses</option>
+                    <option value="SCHEDULED">Scheduled</option>
+                    <option value="COMPLETED">Completed</option>
+                    <option value="CANCELLED">Cancelled</option>
+                  </Select>
+                </label>
+                <label className="grid gap-1.5 text-xs font-bold text-(--foreground-soft)">
+                  Student
+                  <Select value={studentFilter} onChange={(event) => setStudentFilter(event.target.value)}>
+                    <option value="">All students</option>
+                    {filterStudents.map((student) => <option key={student._id} value={student._id}>{student.name}</option>)}
+                  </Select>
+                </label>
+                <label className="grid gap-1.5 text-xs font-bold text-(--foreground-soft)">
+                  From date
+                  <Input type="date" value={fromDate} onChange={(event) => setFromDate(event.target.value)} />
+                </label>
+                <label className="grid gap-1.5 text-xs font-bold text-(--foreground-soft)">
+                  To date
+                  <Input type="date" value={toDate} onChange={(event) => setToDate(event.target.value)} />
+                </label>
+              </DataFilters>
+              <DataSort
+                value={sort}
+                onChange={setSort}
+                options={[
+                  { value: "makeupDate-desc", label: "Makeup date: newest" },
+                  { value: "makeupDate-asc", label: "Makeup date: oldest" },
+                  { value: "createdAt-desc", label: "Recently created" },
+                  { value: "status-asc", label: "Status: A to Z" },
+                ]}
+              />
             </div>
           </div>
 
@@ -1193,6 +1244,7 @@ export default function MakeupsPage() {
                   onSchedule={openScheduleModal}
                   onComplete={handleComplete}
                   onCancel={handleCancel}
+                  canManage={canManageMakeups}
                 />
               </div>
 
@@ -1205,29 +1257,24 @@ export default function MakeupsPage() {
                   onSchedule={openScheduleModal}
                   onComplete={handleComplete}
                   onCancel={handleCancel}
+                  canManage={canManageMakeups}
                 />
               </div>
             </>
           )}
 
           {!loading && !error && filteredMakeups.length > 0 && (
-            <div
-              className="
-                  border-t border-(--line)
-                  px-5 py-4
-                  sm:px-6
-                "
-            >
-              <p
-                className="
-                    text-xs font-medium
-                    text-(--ink-faint)
-                  "
-              >
-                Showing {filteredMakeups.length} of {makeups.length} makeup
-                classes
-              </p>
-            </div>
+            <TablePagination
+              currentPage={pagination.page}
+              pageSize={pagination.limit}
+              totalItems={pagination.total}
+              totalPages={pagination.pages}
+              visibleItems={filteredMakeups.length}
+              entityLabel="makeup classes"
+              onPrevious={() => void loadMakeups(false, pagination.page - 1)}
+              onNext={() => void loadMakeups(false, pagination.page + 1)}
+              onPageSizeChange={(pageSize) => void loadMakeups(false, 1, pageSize)}
+            />
           )}
         </Card>
       </div>
@@ -1265,6 +1312,7 @@ export default function MakeupsPage() {
                 !dateAvailability ||
                 dateAvailability.date !== scheduleDate ||
                 !dateAvailability.isOpen ||
+                !scheduleSessionSlotId ||
                 scheduleLoading
               }
             >
@@ -1345,6 +1393,21 @@ export default function MakeupsPage() {
               />
             )}
 
+            {dateAvailability?.isOpen && scheduleTarget && (
+              <label className="grid gap-2 text-xs font-bold text-(--foreground-soft)">
+                Program session
+                <Select value={scheduleSessionSlotId} onChange={(event) => setScheduleSessionSlotId(event.target.value)}>
+                  <option value="">Select a session</option>
+                  {(dateAvailability.slots || []).filter((slot) => {
+                    const slotProgram = typeof slot.sessionTypeId === "object" ? slot.sessionTypeId?._id : slot.sessionTypeId;
+                    const makeupProgram = typeof scheduleTarget.sessionTypeId === "object" ? scheduleTarget.sessionTypeId?._id : scheduleTarget.sessionTypeId;
+                    return slot._id && slotProgram && (!makeupProgram || String(slotProgram) === String(makeupProgram));
+                  }).map((slot) => <option key={slot._id} value={slot._id}>{slot.sessionName} ({slot.startTime}–{slot.endTime})</option>)}
+                </Select>
+                <span className="font-normal text-(--ink-muted)">Choose an active session for the same program as the missed class.</span>
+              </label>
+            )}
+
             {/* NOTES */}
             <div>
               <label
@@ -1358,14 +1421,13 @@ export default function MakeupsPage() {
                 Notes
               </label>
 
-              <textarea
+              <Textarea
                 id="makeup-notes"
                 value={scheduleNotes}
                 onChange={(event) => setScheduleNotes(event.target.value)}
                 rows={4}
                 placeholder="Optional notes..."
                 className="
-                  df-input
                   min-h-[110px]
                   resize-none
                 "
@@ -1673,31 +1735,6 @@ function MakeupSummary({
 }
 
 /* ======================================================
-   FILTER BUTTON
-====================================================== */
-
-function FilterButton({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <Button
-      type="button"
-      size="sm"
-      variant={active ? "primary" : "outline"}
-      onClick={onClick}
-    >
-      {children}
-    </Button>
-  );
-}
-
-/* ======================================================
    TABLE
 ====================================================== */
 
@@ -1708,6 +1745,7 @@ function MakeupTable({
   onSchedule,
   onComplete,
   onCancel,
+  canManage,
 }: {
   makeups: Makeup[];
   holidayMap: HolidayMap;
@@ -1715,6 +1753,7 @@ function MakeupTable({
   onSchedule: (makeup: Makeup) => void;
   onComplete: (makeup: Makeup) => void;
   onCancel: (makeup: Makeup) => void;
+  canManage: boolean;
 }) {
   return (
     <table className="w-full min-w-[1150px]">
@@ -1762,6 +1801,7 @@ function MakeupTable({
               onSchedule={onSchedule}
               onComplete={onComplete}
               onCancel={onCancel}
+              canManage={canManage}
             />
           ))
         )}
@@ -1781,6 +1821,7 @@ function MakeupTableRow({
   onSchedule,
   onComplete,
   onCancel,
+  canManage,
 }: {
   makeup: Makeup;
   holidayMap: HolidayMap;
@@ -1788,6 +1829,7 @@ function MakeupTableRow({
   onSchedule: (makeup: Makeup) => void;
   onComplete: (makeup: Makeup) => void;
   onCancel: (makeup: Makeup) => void;
+  canManage: boolean;
 }) {
   const name = getStudentName(makeup);
 
@@ -1822,8 +1864,8 @@ function MakeupTableRow({
           <div className="min-w-0">
             <p
               className="
-                truncate text-sm
-                font-bold
+                truncate text-[15px]
+                font-semibold leading-5
                 text-(--foreground-soft)
                 transition-colors
                 group-hover:text-(--accent)
@@ -1834,7 +1876,7 @@ function MakeupTableRow({
 
             <p
               className="
-                mt-1 text-xs
+                mt-1 text-sm leading-5
                 text-(--ink-muted)
               "
             >
@@ -1847,11 +1889,11 @@ function MakeupTableRow({
       </td>
 
       <td className="px-6 py-5">
-        <p className="text-sm font-medium text-(--foreground-soft)">
+        <p className="text-[15px] font-medium leading-5 text-(--foreground-soft)">
           {formatDate(makeup.originalDate)}
         </p>
 
-        <p className="mt-1 max-w-[230px] truncate text-xs text-(--ink-muted)">
+        <p className="mt-1 max-w-[230px] truncate text-sm leading-5 text-(--ink-muted)">
           {makeup.curriculumTitle || "Curriculum step"}
         </p>
       </td>
@@ -1862,16 +1904,16 @@ function MakeupTableRow({
             <div className="flex items-center gap-2">
               <CalendarOff size={15} className="text-(--danger)" />
 
-              <p className="text-sm font-bold text-(--danger)">
+              <p className="text-[15px] font-semibold leading-5 text-(--danger)">
                 {formatDate(makeup.makeupDate)}
               </p>
             </div>
 
-            <p className="mt-1 text-xs font-semibold text-(--danger)">
+            <p className="mt-1 text-sm font-semibold leading-5 text-(--danger)">
               {holiday?.name}
             </p>
 
-            <p className="mt-1 text-xs text-(--ink-muted)">
+            <p className="mt-1 text-sm leading-5 text-(--ink-muted)">
               Reschedule required
             </p>
           </div>
@@ -1879,7 +1921,7 @@ function MakeupTableRow({
           <>
             <p
               className={`
-                text-sm font-medium
+                text-[15px] font-medium leading-5
                 ${isOverdue ? "text-(--danger)" : "text-(--foreground-soft)"}
               `}
             >
@@ -1887,7 +1929,7 @@ function MakeupTableRow({
             </p>
 
             {isOverdue && (
-              <p className="mt-1 text-xs font-semibold text-(--danger)">
+              <p className="mt-1 text-sm font-semibold leading-5 text-(--danger)">
                 Overdue
               </p>
             )}
@@ -1896,11 +1938,11 @@ function MakeupTableRow({
       </td>
 
       <td className="px-6 py-5">
-        <p className="text-sm font-medium text-(--foreground-soft)">
+        <p className="text-[15px] font-medium leading-5 text-(--foreground-soft)">
           Day {makeup.planDay}
         </p>
 
-        <p className="mt-1 text-xs text-(--ink-muted)">
+        <p className="mt-1 text-sm leading-5 text-(--ink-muted)">
           {getBranchName(makeup)}
         </p>
       </td>
@@ -1929,7 +1971,7 @@ function MakeupTableRow({
       </td>
 
       <td className="px-6 py-5 text-right">
-        {makeup.status === "SCHEDULED" ? (
+        {makeup.status === "SCHEDULED" && canManage ? (
           <div className="flex items-center justify-end gap-2">
             <Button
               size="sm"
@@ -1958,15 +2000,14 @@ function MakeupTableRow({
               </Button>
             )}
 
-            <Button
-              size="sm"
+            <IconButton
               variant="ghost"
+              label={`Cancel makeup for ${name}`}
               disabled={isLoading}
               onClick={() => onCancel(makeup)}
-              aria-label={`Cancel makeup for ${name}`}
             >
               <X size={16} />
-            </Button>
+            </IconButton>
           </div>
         ) : (
           <span className="text-xs text-(--ink-faint)">—</span>
@@ -1988,6 +2029,7 @@ function MakeupMobileList({
   onSchedule,
   onComplete,
   onCancel,
+  canManage,
 }: {
   makeups: Makeup[];
   totalMakeups: number;
@@ -1996,6 +2038,7 @@ function MakeupMobileList({
   onSchedule: (makeup: Makeup) => void;
   onComplete: (makeup: Makeup) => void;
   onCancel: (makeup: Makeup) => void;
+  canManage: boolean;
 }) {
   if (makeups.length === 0) {
     return (
@@ -2022,6 +2065,7 @@ function MakeupMobileList({
           onSchedule={onSchedule}
           onComplete={onComplete}
           onCancel={onCancel}
+          canManage={canManage}
         />
       ))}
     </>
@@ -2035,6 +2079,7 @@ function MakeupMobileCard({
   onSchedule,
   onComplete,
   onCancel,
+  canManage,
 }: {
   makeup: Makeup;
   holidayMap: HolidayMap;
@@ -2042,6 +2087,7 @@ function MakeupMobileCard({
   onSchedule: (makeup: Makeup) => void;
   onComplete: (makeup: Makeup) => void;
   onCancel: (makeup: Makeup) => void;
+  canManage: boolean;
 }) {
   const name = getStudentName(makeup);
 
@@ -2158,7 +2204,7 @@ function MakeupMobileCard({
         />
       </div>
 
-      {makeup.status === "SCHEDULED" && (
+      {makeup.status === "SCHEDULED" && canManage && (
         <div
           className="
             mt-4 flex flex-wrap
@@ -2235,31 +2281,6 @@ function MakeupAvatar({ name }: { name: string }) {
 /* ======================================================
    TABLE HEADING
 ====================================================== */
-
-function TableHeading({
-  children,
-  align = "left",
-}: {
-  children: React.ReactNode;
-  align?: "left" | "right";
-}) {
-  return (
-    <th
-      scope="col"
-      className={`
-        px-6 py-4
-        text-[10px]
-        font-black
-        uppercase
-        tracking-[0.16em]
-        text-(--ink-faint)
-        ${align === "right" ? "text-right" : "text-left"}
-      `}
-    >
-      {children}
-    </th>
-  );
-}
 
 /* ======================================================
    MOBILE DETAIL
