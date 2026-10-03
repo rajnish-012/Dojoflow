@@ -148,8 +148,8 @@ app.use(
   }),
 );
 
-// SameSite=Lax blocks cross-site cookies; enforce the configured app origin
-// on cookie-authenticated unsafe browser requests as an additional CSRF guard.
+// Cross-site session cookies require explicit app-origin validation on
+// cookie-authenticated unsafe browser requests as an additional CSRF guard.
 app.use("/api", (req, res, next) => {
   if (["GET", "HEAD", "OPTIONS"].includes(req.method) || !req.headers.origin) return next();
   const allowedOrigins = getClientOrigins();
