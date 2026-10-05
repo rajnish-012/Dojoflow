@@ -1,9 +1,10 @@
-const bcrypt = require("bcryptjs");
 const mongoose = require("mongoose");
 
 const User = require("../models/User");
 const Branch = require("../models/Branch");
 const Role = require("../models/Role");
+const { validatePassword, sessionInvalidationTime } = require("../utils/passwordPolicy");
+const { normalizePhone } = require("../utils/phone");
 
 const SUPER_ADMIN_ROLE = "SUPER_ADMIN";
 
@@ -231,15 +232,17 @@ const getStaffUsers = async (req, res) => {
  */
 const createStaffUser = async (req, res) => {
   try {
-    const { name, email, password, role, branch } = req.body;
+    const { name, email, phone, password, role, branch } = req.body;
 
-    if (!name || !email || !password || !role) {
-      return sendError(res, 400, "Name, email, password and role are required");
+    if (!name || !email || !phone || !password || !role) {
+      return sendError(res, 400, "Name, email, phone, password and role are required");
     }
 
-    if (String(password).length < 6) {
-      return sendError(res, 400, "Password must contain at least 6 characters");
-    }
+    const normalizedPhone = normalizePhone(phone);
+    if (!normalizedPhone) return sendError(res, 400, "Enter a valid phone number with its country code.");
+
+    const passwordError = validatePassword(password);
+    if (passwordError) return sendError(res, 400, passwordError);
 
     const roleResult = await validateStaffRole(role);
 
@@ -275,11 +278,12 @@ const createStaffUser = async (req, res) => {
       return sendError(res, 409, "A user with this email already exists");
     }
 
-    const hashedPassword = await bcrypt.hash(String(password), 10);
+    const hashedPassword = String(password);
 
     const user = await User.create({
       name: String(name).trim(),
       email: normalizedEmail,
+      phone: normalizedPhone,
       password: hashedPassword,
       role: selectedRole.key,
       branch: branchResult.branch ? branchResult.branch._id : null,
@@ -308,7 +312,7 @@ const updateStaffUser = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const { name, email, password, role, branch } = req.body;
+    const { name, email, phone, password, role, branch } = req.body;
 
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return sendError(res, 400, "Invalid staff user ID");
@@ -332,9 +336,12 @@ const updateStaffUser = async (req, res) => {
       return sendError(res, 403, "You can only manage staff in your own branch");
     }
 
-    if (!name || !email || !role) {
-      return sendError(res, 400, "Name, email and role are required");
+    if (!name || !email || !phone || !role) {
+      return sendError(res, 400, "Name, email, phone and role are required");
     }
+
+    const normalizedPhone = normalizePhone(phone);
+    if (!normalizedPhone) return sendError(res, 400, "Enter a valid phone number with its country code.");
 
     const roleResult = await validateStaffRole(role);
 
@@ -376,6 +383,7 @@ const updateStaffUser = async (req, res) => {
     user.name = String(name).trim();
 
     user.email = normalizedEmail;
+    user.phone = normalizedPhone;
 
     user.role = selectedRole.key;
 
@@ -385,23 +393,18 @@ const updateStaffUser = async (req, res) => {
      * Password is optional during edit.
      */
     if (password && String(password).trim().length > 0) {
-      const nextPassword = String(password).trim();
+      const nextPassword = String(password);
+      const passwordError = validatePassword(nextPassword);
+      if (passwordError) return sendError(res, 400, passwordError);
 
-      if (nextPassword.length < 6) {
-        return sendError(
-          res,
-          400,
-          "Password must contain at least 6 characters",
-        );
-      }
-
-      user.password = await bcrypt.hash(nextPassword, 10);
+      user.password = nextPassword;
 
       /*
        * Existing password-session invalidation
        * remains intact.
        */
-      user.passwordChangedAt = new Date();
+      user.passwordChangedAt = sessionInvalidationTime();
+      user.mustResetPassword = false;
     }
 
     await user.save();

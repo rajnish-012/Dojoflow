@@ -216,6 +216,29 @@ const DEFAULT_MODULES = [
     allowedRoles: ["SUPER_ADMIN", "BRANCH_ADMIN"],
   },
 
+  {
+    key: "reports",
+    label: "Reports",
+    href: "/reports",
+    icon: "FileText",
+    order: 98,
+    requiredPermission: "report.view",
+    allowedRoles: ["SUPER_ADMIN", "BRANCH_ADMIN"],
+    isSystem: true,
+  },
+
+  {
+    key: "fees",
+    label: "Fees & Payments",
+    href: "/fees",
+    icon: "WalletCards",
+    order: 97,
+    group: "reports",
+    requiredPermission: "finance.view",
+    allowedRoles: ["SUPER_ADMIN", "BRANCH_ADMIN"],
+    isSystem: true,
+  },
+
   // =========================================================
   // SYSTEM / ADMINISTRATION
   // =========================================================
@@ -231,6 +254,50 @@ const DEFAULT_MODULES = [
 
     allowedRoles: ["SUPER_ADMIN"],
 
+    isSystem: true,
+  },
+
+  {
+    key: "settings-branding",
+    label: "Academy Branding",
+    href: "/settings/branding",
+    icon: "Building2",
+    order: 115,
+    requiredPermission: "settings.view",
+    allowedRoles: [],
+    isSystem: true,
+  },
+
+  {
+    key: "settings-staff",
+    label: "Staff Management",
+    href: "/settings/staff",
+    icon: "Users",
+    order: 116,
+    requiredPermission: "user.view",
+    allowedRoles: [],
+    isSystem: true,
+  },
+
+  {
+    key: "settings-maintenance",
+    label: "Maintenance",
+    href: "/settings/maintenance",
+    icon: "ShieldCheck",
+    order: 117,
+    requiredPermission: "maintenance.view",
+    allowedRoles: [],
+    isSystem: true,
+  },
+
+  {
+    key: "settings-email",
+    label: "Email System",
+    href: "/settings/email",
+    icon: "Mail",
+    order: 118,
+    requiredPermission: "settings.manage",
+    allowedRoles: [],
     isSystem: true,
   },
 
@@ -300,6 +367,12 @@ const REQUIRED_MODULE_KEYS = [
   "holidays",
   "branch-schedules",
   "training-session-types",
+  "reports",
+  "fees",
+  "settings-branding",
+  "settings-staff",
+  "settings-maintenance",
+  "settings-email",
 ];
 
 /*
@@ -401,6 +474,15 @@ const ensureDefaultModules = async () => {
           upsert: true,
         },
       );
+
+      // Required system modules cannot be disabled through the admin UI.
+      // Repair legacy database rows that predate this invariant.
+      if (module.isSystem) {
+        await Module.updateOne(
+          { key: module.key },
+          { $set: { isSystem: true, isActive: true } },
+        );
+      }
     }
 
     console.log("Default ForceStrike modules verified");

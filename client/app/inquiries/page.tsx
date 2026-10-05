@@ -47,10 +47,23 @@ type Inquiry = {
   email: string;
   phone: string;
   age?: number;
-  currentBelt?: string;
-  experience?: string;
   preferredBatch?: string;
   preferredBranch?: string;
+  programName?: string;
+  planName?: string;
+  preferredWeeklySessions?: {
+    dayName?: string;
+    sessionName?: string;
+    sessionTypeName?: string;
+    startTime?: string;
+    endTime?: string;
+  }[];
+  preferredSession?: {
+    sessionName?: string;
+    sessionTypeName?: string;
+    startTime?: string;
+    endTime?: string;
+  };
   message?: string;
   status: InquiryStatus;
   createdAt: string;
@@ -360,10 +373,6 @@ export default function InquiriesPage() {
 
   const [batchFilter, setBatchFilter] = useState("");
 
-  const [beltFilter, setBeltFilter] = useState("");
-
-  const [experienceFilter, setExperienceFilter] = useState("");
-
   const [submittedFrom, setSubmittedFrom] = useState("");
 
   const [submittedTo, setSubmittedTo] = useState("");
@@ -433,8 +442,6 @@ export default function InquiriesPage() {
     statusFilter,
     branchFilter,
     batchFilter,
-    beltFilter,
-    experienceFilter,
     submittedFrom,
     submittedTo,
     sort,
@@ -470,30 +477,6 @@ export default function InquiriesPage() {
     [inquiries],
   );
 
-  const beltOptions = useMemo(
-    () =>
-      Array.from(
-        new Set(
-          inquiries
-            .map((inquiry) => inquiry.currentBelt?.trim())
-            .filter((value): value is string => Boolean(value)),
-        ),
-      ).sort((a, b) => a.localeCompare(b)),
-    [inquiries],
-  );
-
-  const experienceOptions = useMemo(
-    () =>
-      Array.from(
-        new Set(
-          inquiries
-            .map((inquiry) => inquiry.experience?.trim())
-            .filter((value): value is string => Boolean(value)),
-        ),
-      ).sort((a, b) => a.localeCompare(b)),
-    [inquiries],
-  );
-
   const filteredInquiries = useMemo(() => {
     const search = searchTerm.trim().toLowerCase();
 
@@ -514,9 +497,9 @@ export default function InquiriesPage() {
         inquiry.email.toLowerCase().includes(search) ||
         inquiry.phone.toLowerCase().includes(search) ||
         Boolean(inquiry.preferredBranch?.toLowerCase().includes(search)) ||
-        Boolean(inquiry.currentBelt?.toLowerCase().includes(search)) ||
         Boolean(inquiry.preferredBatch?.toLowerCase().includes(search)) ||
-        Boolean(inquiry.experience?.toLowerCase().includes(search));
+        Boolean(inquiry.programName?.toLowerCase().includes(search)) ||
+        Boolean(inquiry.planName?.toLowerCase().includes(search));
 
       const matchesStatus =
         statusFilter === "ALL" || inquiry.status === statusFilter;
@@ -526,11 +509,6 @@ export default function InquiriesPage() {
 
       const matchesBatch =
         !batchFilter || inquiry.preferredBatch === batchFilter;
-
-      const matchesBelt = !beltFilter || inquiry.currentBelt === beltFilter;
-
-      const matchesExperience =
-        !experienceFilter || inquiry.experience === experienceFilter;
 
       const matchesSubmittedFrom =
         fromTimestamp === null || createdTimestamp >= fromTimestamp;
@@ -543,8 +521,6 @@ export default function InquiriesPage() {
         matchesStatus &&
         matchesBranch &&
         matchesBatch &&
-        matchesBelt &&
-        matchesExperience &&
         matchesSubmittedFrom &&
         matchesSubmittedTo
       );
@@ -586,8 +562,6 @@ export default function InquiriesPage() {
     statusFilter,
     branchFilter,
     batchFilter,
-    beltFilter,
-    experienceFilter,
     submittedFrom,
     submittedTo,
     sort,
@@ -652,22 +626,6 @@ export default function InquiriesPage() {
       });
     }
 
-    if (beltFilter) {
-      filters.push({
-        id: "belt",
-        label: `Belt: ${beltFilter}`,
-        onClear: () => setBeltFilter(""),
-      });
-    }
-
-    if (experienceFilter) {
-      filters.push({
-        id: "experience",
-        label: `Experience: ${experienceFilter}`,
-        onClear: () => setExperienceFilter(""),
-      });
-    }
-
     if (statusFilter !== "ALL") {
       filters.push({
         id: "status",
@@ -697,8 +655,6 @@ export default function InquiriesPage() {
     searchTerm,
     branchFilter,
     batchFilter,
-    beltFilter,
-    experienceFilter,
     statusFilter,
     submittedFrom,
     submittedTo,
@@ -709,8 +665,6 @@ export default function InquiriesPage() {
     setStatusFilter("ALL");
     setBranchFilter("");
     setBatchFilter("");
-    setBeltFilter("");
-    setExperienceFilter("");
     setSubmittedFrom("");
     setSubmittedTo("");
     setPage(1);
@@ -1077,40 +1031,6 @@ export default function InquiriesPage() {
                     {batchOptions.map((batch) => (
                       <option key={batch} value={batch}>
                         {batch}
-                      </option>
-                    ))}
-                  </Select>
-                </label>
-
-                <label className="grid gap-1.5 text-xs font-bold text-(--foreground-soft)">
-                  Current belt
-                  <Select
-                    value={beltFilter}
-                    onChange={(event) => setBeltFilter(event.target.value)}
-                  >
-                    <option value="">All belts</option>
-
-                    {beltOptions.map((belt) => (
-                      <option key={belt} value={belt}>
-                        {belt}
-                      </option>
-                    ))}
-                  </Select>
-                </label>
-
-                <label className="grid gap-1.5 text-xs font-bold text-(--foreground-soft)">
-                  Experience
-                  <Select
-                    value={experienceFilter}
-                    onChange={(event) =>
-                      setExperienceFilter(event.target.value)
-                    }
-                  >
-                    <option value="">All experience levels</option>
-
-                    {experienceOptions.map((experience) => (
-                      <option key={experience} value={experience}>
-                        {experience}
                       </option>
                     ))}
                   </Select>
@@ -2003,38 +1923,34 @@ export default function InquiriesPage() {
                   sm:grid-cols-2
                 "
               >
-                <DetailItem
+                {selectedInquiry.email && <DetailItem
                   icon={Mail}
                   label="Email"
-                  value={selectedInquiry.email || "Not provided"}
-                />
+                  value={selectedInquiry.email}
+                />}
 
-                <DetailItem
+                {selectedInquiry.phone && <DetailItem
                   icon={Phone}
                   label="Phone"
-                  value={selectedInquiry.phone || "Not provided"}
-                />
+                  value={selectedInquiry.phone}
+                />}
 
-                <DetailItem
+                {selectedInquiry.age != null && <DetailItem
                   icon={UserRound}
                   label="Age"
-                  value={
-                    selectedInquiry.age
-                      ? `${selectedInquiry.age} years`
-                      : "Not provided"
-                  }
-                />
+                  value={`${selectedInquiry.age} years`}
+                />}
 
-                <DetailItem
+                {selectedInquiry.preferredBranch && <DetailItem
                   icon={MapPin}
                   label="Preferred Branch"
-                  value={selectedInquiry.preferredBranch || "Not specified"}
-                />
+                  value={selectedInquiry.preferredBranch}
+                />}
               </div>
             </section>
 
             {/* Training */}
-            <section>
+            {(selectedInquiry.programName || selectedInquiry.planName || selectedInquiry.preferredWeeklySessions?.length || selectedInquiry.preferredSession) && <section>
               <p
                 className="
                   mb-4
@@ -2052,25 +1968,15 @@ export default function InquiriesPage() {
                 className="
                   grid
                   gap-4
-                  sm:grid-cols-3
+                  sm:grid-cols-2
                 "
               >
-                <InfoBox
-                  label="Current Belt"
-                  value={selectedInquiry.currentBelt || "Beginner"}
-                />
-
-                <InfoBox
-                  label="Experience"
-                  value={selectedInquiry.experience || "Not specified"}
-                />
-
-                <InfoBox
-                  label="Preferred Batch"
-                  value={selectedInquiry.preferredBatch || "Flexible"}
-                />
+                {selectedInquiry.programName && <InfoBox label="Program" value={selectedInquiry.programName} />}
+                {selectedInquiry.planName && <InfoBox label="Training Plan" value={selectedInquiry.planName} />}
+                {selectedInquiry.preferredSession && <InfoBox label="Preferred Session" value={`${selectedInquiry.preferredSession.sessionName || selectedInquiry.preferredSession.sessionTypeName || "Training"}${selectedInquiry.preferredSession.startTime ? ` · ${selectedInquiry.preferredSession.startTime}` : ""}${selectedInquiry.preferredSession.endTime ? `–${selectedInquiry.preferredSession.endTime}` : ""}`} />}
+                {!!selectedInquiry.preferredWeeklySessions?.length && <InfoBox label="Weekly Schedule" value={selectedInquiry.preferredWeeklySessions.map((item) => `${item.dayName}: ${item.sessionName || item.sessionTypeName} (${item.startTime}–${item.endTime})`).join(" · ")} />}
               </div>
-            </section>
+            </section>}
 
             {/* Timeline */}
             <section>
@@ -2363,7 +2269,7 @@ export default function InquiriesPage() {
             )}
 
             {/* Message */}
-            <section>
+            {selectedInquiry.message?.trim() && <section>
               <p
                 className="
                   mb-4
@@ -2412,12 +2318,11 @@ export default function InquiriesPage() {
                       text-(--ink-muted)
                     "
                   >
-                    {selectedInquiry.message ||
-                      "No additional message provided."}
+                    {selectedInquiry.message}
                   </p>
                 </div>
               </div>
-            </section>
+            </section>}
 
             {/* Metadata */}
             <div

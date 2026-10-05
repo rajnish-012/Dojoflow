@@ -59,9 +59,20 @@ const PERMISSIONS = Object.freeze({
   REPORT_VIEW: "report.view",
   REPORT_EXPORT: "report.export",
 
+  // Financial records. Student permission is limited to their linked profile.
+  FINANCE_VIEW: "finance.view",
+  FINANCE_MANAGE: "finance.manage",
+  FINANCE_COLLECT: "finance.collect",
+  FINANCE_REFUND: "finance.refund",
+  FINANCE_REPORT: "finance.report",
+  STUDENT_FINANCE_VIEW: "student.finance.view",
+
   // Inquiries
   INQUIRY_VIEW: "inquiry.view",
   INQUIRY_UPDATE: "inquiry.update",
+
+  // Notifications
+  NOTIFICATION_VIEW: "notification.view",
 
   // Branches
   BRANCH_VIEW: "branch.view",
@@ -137,28 +148,35 @@ const PERMISSION_MODULE_KEYS = Object.freeze({
   "promotion.manage": "promotions",
   "report.view": "reports",
   "report.export": "reports",
+  "finance.view": "fees",
+  "finance.manage": "fees",
+  "finance.collect": "fees",
+  "finance.refund": "fees",
+  "finance.report": "fees",
+  "student.finance.view": "student-dashboard",
   "inquiry.view": "inquiries",
   "inquiry.update": "inquiries",
+  "notification.view": "notifications",
   "branch.view": "branches",
   "branch.manage": "branches",
-  "user.view": "settings",
-  "user.create": "settings",
-  "user.update": "settings",
-  "user.delete": "settings",
+  "user.view": "settings-staff",
+  "user.create": "settings-staff",
+  "user.update": "settings-staff",
+  "user.delete": "settings-staff",
   "role.view": "roles",
   "role.manage": "roles",
   "module.view": "modules",
   "module.manage": "modules",
-  "settings.view": "settings",
-  "settings.manage": "settings",
-  "maintenance.view": "settings",
-  "maintenance.health": "settings",
-  "maintenance.mode": "settings",
-  "maintenance.backup": "settings",
-  "maintenance.restore": "settings",
-  "maintenance.cleanup": "settings",
-  "maintenance.cache": "settings",
-  "maintenance.logs": "settings",
+  "settings.view": "settings-branding",
+  "settings.manage": "settings-email",
+  "maintenance.view": "settings-maintenance",
+  "maintenance.health": "settings-maintenance",
+  "maintenance.mode": "settings-maintenance",
+  "maintenance.backup": "settings-maintenance",
+  "maintenance.restore": "settings-maintenance",
+  "maintenance.cleanup": "settings-maintenance",
+  "maintenance.cache": "settings-maintenance",
+  "maintenance.logs": "settings-maintenance",
   "website.view": "website-homepage",
   "website.manage": "website-homepage",
 });
@@ -213,8 +231,16 @@ const DEFAULT_ROLE_PERMISSIONS = Object.freeze({
     PERMISSIONS.REPORT_VIEW,
     PERMISSIONS.REPORT_EXPORT,
 
+    PERMISSIONS.FINANCE_VIEW,
+    PERMISSIONS.FINANCE_MANAGE,
+    PERMISSIONS.FINANCE_COLLECT,
+    PERMISSIONS.FINANCE_REFUND,
+    PERMISSIONS.FINANCE_REPORT,
+
     PERMISSIONS.INQUIRY_VIEW,
     PERMISSIONS.INQUIRY_UPDATE,
+
+    PERMISSIONS.NOTIFICATION_VIEW,
 
     PERMISSIONS.BRANCH_VIEW,
     PERMISSIONS.BRANCH_MANAGE,
@@ -252,9 +278,11 @@ const DEFAULT_ROLE_PERMISSIONS = Object.freeze({
 
     PERMISSIONS.REPORT_VIEW,
 
+    PERMISSIONS.NOTIFICATION_VIEW,
+
   ],
 
-  STUDENT: [],
+  STUDENT: [PERMISSIONS.STUDENT_FINANCE_VIEW],
 });
 
 module.exports = {

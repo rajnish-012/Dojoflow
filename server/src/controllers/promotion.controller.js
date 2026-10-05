@@ -6,6 +6,7 @@ const BeltHistory = require("../models/BeltHistory");
 const CoachStudentAssignment = require("../models/CoachStudentAssignment");
 const { getProgramLearningProgress } = require("../services/programProgress.service");
 const { resolveProgramCurriculum } = require("../services/curriculumResolver.service");
+const { safelyNotify } = require("../services/notification.service");
 
 /* ======================================================
    HELPERS
@@ -35,7 +36,6 @@ function isBranchScopedUser(user) {
   }
 
   return (
-    Boolean(user.branch) &&
     String(user.dataScope || "BRANCH").toUpperCase() !== "ALL"
   );
 }
@@ -337,6 +337,21 @@ const getEligiblePromotions = async (req, res) => {
       }
     }
 
+    for (const candidate of eligible) {
+      await safelyNotify({
+        type: "PROMOTION_ELIGIBLE",
+        title: "Promotion eligibility reached",
+        message: `${candidate.student.name} is eligible for the ${candidate.milestone.belt} belt promotion.`,
+        severity: "SUCCESS",
+        branch: candidate.branch?._id || candidate.branch,
+        student: candidate.student._id,
+        entityType: "STUDENT",
+        entityId: candidate.student._id,
+        eventKey: `promotion-eligible:${candidate.student._id}:${candidate.program._id}:${candidate.milestone.day}:${candidate.milestone.belt}`,
+        actionUrl: "/promotions",
+      });
+    }
+
     return res.status(200).json({
       success: true,
       count: eligible.length,
@@ -520,6 +535,19 @@ const promoteStudent = async (req, res) => {
       .populate("branch", "name address")
       .populate("plan", "name")
       .populate("approvedBy", "name email role");
+
+    await safelyNotify({
+      type: "PROMOTION_COMPLETED",
+      title: "Student promoted",
+      message: `${student.name} has been promoted to ${milestone.belt}.`,
+      severity: "SUCCESS",
+      branch: student.branch?._id || student.branch,
+      student: student._id,
+      entityType: "PROMOTION",
+      entityId: history._id,
+      eventKey: `promotion:${history._id}:completed`,
+      actionUrl: "/promotions",
+    });
 
     return res.status(201).json({
       success: true,

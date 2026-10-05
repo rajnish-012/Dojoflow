@@ -9,8 +9,9 @@ const sendError = (res, status, message) => res.status(status).json({ success: f
 
 async function list(req, res) {
   try {
-    const types = await TrainingSessionType.find({}).sort({ displayOrder: 1, name: 1 }).lean();
-    if (req.path === "/public") return res.json({ success: true, types });
+    const isPublicRequest = req.path === "/public";
+    const types = await TrainingSessionType.find(isPublicRequest ? { isActive: true } : {}).sort({ displayOrder: 1, name: 1 }).lean();
+    if (isPublicRequest) return res.json({ success: true, types: types.map(({ createdBy, updatedAt, __v, ...type }) => type) });
     const ids = types.map((type) => type._id);
     const [weekly, overrides] = await Promise.all([
       BranchSchedule.aggregate([{ $unwind: "$weeklySchedule" }, { $unwind: "$weeklySchedule.slots" }, { $match: { "weeklySchedule.slots.sessionTypeId": { $in: ids } } }, { $group: { _id: "$weeklySchedule.slots.sessionTypeId", count: { $sum: 1 } } }]),

@@ -17,11 +17,13 @@ import {
   Download,
   GraduationCap,
   RefreshCw,
-  TrendingDown,
   TrendingUp,
   Users,
   UserRound,
+  Printer,
+  RotateCcw,
 } from "lucide-react";
+import Link from "next/link";
 
 import {
   Badge,
@@ -53,6 +55,8 @@ import {
   type SkillReport,
   type TopPerformer,
 } from "@/lib/reportsApi";
+import { useAcademyBrand } from "@/components/settings/AcademyBrandProvider";
+import { AttendanceDistribution, AttendanceRateChart, MonthlyAttendanceChart } from "@/components/reports/ReportsCharts";
 
 import { PERMISSIONS, useCan } from "@/lib/permissions";
 import { toast } from "@/lib/toast";
@@ -174,287 +178,34 @@ type ChartPoint = {
   value: number;
 };
 
-type DualChartPoint = {
-  label: string;
-  first: number;
-  second: number;
-};
-
-function buildLinePoints(
-  values: number[],
-  width: number,
-  height: number,
-  paddingX = 20,
-  paddingY = 18,
-) {
-  if (!values.length) {
-    return [];
-  }
-
+function buildLinePoints(values: number[], width: number, height: number, paddingX = 20, paddingY = 18) {
+  if (!values.length) return [];
   const max = Math.max(1, ...values);
-  const min = 0;
-
   const chartWidth = width - paddingX * 2;
   const chartHeight = height - paddingY * 2;
-
-  return values.map((value, index) => {
-    const x =
-      values.length === 1
-        ? width / 2
-        : paddingX + (index / (values.length - 1)) * chartWidth;
-
-    const normalized = (value - min) / Math.max(1, max - min);
-    const y = height - paddingY - normalized * chartHeight;
-
-    return {
-      x,
-      y,
-    };
-  });
+  return values.map((value, index) => ({
+    x: values.length === 1 ? width / 2 : paddingX + (index / (values.length - 1)) * chartWidth,
+    y: height - paddingY - (value / max) * chartHeight,
+  }));
 }
 
 function createSmoothPath(points: { x: number; y: number }[]) {
-  if (!points.length) {
-    return "";
-  }
-
-  if (points.length === 1) {
-    return `M ${points[0].x} ${points[0].y}`;
-  }
-
+  if (points.length < 2) return "";
   let path = `M ${points[0].x} ${points[0].y}`;
-
-  for (let index = 1; index < points.length; index += 1) {
-    const previous = points[index - 1];
-    const current = points[index];
-
-    const controlX = (previous.x + current.x) / 2;
-
-    path += ` C ${controlX} ${previous.y}, ${controlX} ${current.y}, ${current.x} ${current.y}`;
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const previous = points[Math.max(0, index - 1)];
+    const start = points[index];
+    const end = points[index + 1];
+    const next = points[Math.min(points.length - 1, index + 2)];
+    const lowY = Math.min(start.y, end.y);
+    const highY = Math.max(start.y, end.y);
+    const c1x = start.x + (end.x - previous.x) / 6;
+    const c2x = end.x - (next.x - start.x) / 6;
+    const c1y = Math.max(lowY, Math.min(highY, start.y + (end.y - previous.y) / 6));
+    const c2y = Math.max(lowY, Math.min(highY, end.y - (next.y - start.y) / 6));
+    path += ` C ${c1x} ${c1y}, ${c2x} ${c2y}, ${end.x} ${end.y}`;
   }
-
   return path;
-}
-
-function AnalyticsLineChart({
-  data,
-  firstLabel,
-  secondLabel,
-  firstValues,
-  secondValues,
-}: {
-  data: DualChartPoint[];
-  firstLabel: string;
-  secondLabel: string;
-  firstValues: number[];
-  secondValues: number[];
-}) {
-  if (!data.length) {
-    return (
-      <div className="flex h-72 items-center justify-center">
-        <EmptyState
-          title="No trend data"
-          description="There is not enough data to display this chart."
-        />
-      </div>
-    );
-  }
-
-  const width = 900;
-  const height = 300;
-  const paddingX = 28;
-  const paddingY = 24;
-
-  const allValues = [...firstValues, ...secondValues];
-  const maxValue = Math.max(1, ...allValues);
-
-  const chartHeight = height - paddingY * 2;
-
-  const firstPoints = buildLinePoints(
-    firstValues.map((value) => (value / maxValue) * 100),
-    width,
-    height,
-    paddingX,
-    paddingY,
-  );
-
-  const secondPoints = buildLinePoints(
-    secondValues.map((value) => (value / maxValue) * 100),
-    width,
-    height,
-    paddingX,
-    paddingY,
-  );
-
-  const firstPath = createSmoothPath(firstPoints);
-  const secondPath = createSmoothPath(secondPoints);
-
-  const firstArea =
-    firstPoints.length > 0
-      ? `${firstPath} L ${firstPoints[firstPoints.length - 1].x} ${
-          height - paddingY
-        } L ${firstPoints[0].x} ${height - paddingY} Z`
-      : "";
-
-  const secondArea =
-    secondPoints.length > 0
-      ? `${secondPath} L ${secondPoints[secondPoints.length - 1].x} ${
-          height - paddingY
-        } L ${secondPoints[0].x} ${height - paddingY} Z`
-      : "";
-
-  const gridRows = 4;
-
-  return (
-    <div className="mt-6">
-      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap items-center gap-4">
-          <div className="flex items-center gap-2 text-xs font-medium text-[var(--text-secondary)]">
-            <span className="h-2.5 w-2.5 rounded-full bg-[var(--accent)]" />
-            {firstLabel}
-          </div>
-
-          <div className="flex items-center gap-2 text-xs font-medium text-[var(--text-secondary)]">
-            <span className="h-2.5 w-2.5 rounded-full bg-[var(--danger)]" />
-            {secondLabel}
-          </div>
-        </div>
-
-        <span className="text-xs text-[var(--text-muted)]">
-          Monthly activity
-        </span>
-      </div>
-
-      <div className="overflow-hidden rounded-2xl border border-[var(--line)] bg-[var(--surface-muted)]/40 p-3 sm:p-5">
-        <div className="relative h-[300px] w-full">
-          <svg
-            viewBox={`0 0 ${width} ${height}`}
-            className="h-full w-full overflow-visible"
-            preserveAspectRatio="none"
-            role="img"
-            aria-label={`${firstLabel} and ${secondLabel} trend`}
-          >
-            {Array.from({ length: gridRows + 1 }).map((_, index) => {
-              const y =
-                paddingY + (index / gridRows) * chartHeight;
-
-              const value = Math.round(
-                maxValue - (index / gridRows) * maxValue,
-              );
-
-              return (
-                <g key={`grid-${index}`}>
-                  <line
-                    x1={paddingX}
-                    x2={width - paddingX}
-                    y1={y}
-                    y2={y}
-                    stroke="var(--line)"
-                    strokeWidth="1"
-                    strokeDasharray="4 6"
-                  />
-
-                  <text
-                    x={4}
-                    y={y + 4}
-                    fill="var(--text-muted)"
-                    fontSize="11"
-                  >
-                    {value}
-                  </text>
-                </g>
-              );
-            })}
-
-            {firstArea && (
-              <path
-                d={firstArea}
-                fill="var(--accent)"
-                opacity="0.07"
-              />
-            )}
-
-            {secondArea && (
-              <path
-                d={secondArea}
-                fill="var(--danger)"
-                opacity="0.05"
-              />
-            )}
-
-            <path
-              d={firstPath}
-              fill="none"
-              stroke="var(--accent)"
-              strokeWidth="3"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-
-            <path
-              d={secondPath}
-              fill="none"
-              stroke="var(--danger)"
-              strokeWidth="3"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              opacity="0.85"
-            />
-
-            {data.map((item, index) => {
-              const firstPoint = firstPoints[index];
-              const secondPoint = secondPoints[index];
-
-              if (!firstPoint || !secondPoint) {
-                return null;
-              }
-
-              return (
-                <g key={item.label}>
-                  <circle
-                    cx={firstPoint.x}
-                    cy={firstPoint.y}
-                    r="4"
-                    fill="var(--surface)"
-                    stroke="var(--accent)"
-                    strokeWidth="2"
-                  >
-                    <title>
-                      {item.label}: {firstLabel} {item.first}
-                    </title>
-                  </circle>
-
-                  <circle
-                    cx={secondPoint.x}
-                    cy={secondPoint.y}
-                    r="4"
-                    fill="var(--surface)"
-                    stroke="var(--danger)"
-                    strokeWidth="2"
-                  >
-                    <title>
-                      {item.label}: {secondLabel} {item.second}
-                    </title>
-                  </circle>
-                </g>
-              );
-            })}
-          </svg>
-
-          <div className="absolute bottom-0 left-0 right-0 flex justify-between px-6">
-            {data.map((item) => (
-              <span
-                key={item.label}
-                className="max-w-[60px] truncate text-[10px] font-medium text-[var(--text-muted)] sm:text-xs"
-              >
-                {item.label}
-              </span>
-            ))}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
 }
 
 function SingleLineChart({
@@ -480,12 +231,11 @@ function SingleLineChart({
   const width = 900;
   const height = 300;
   const paddingX = 28;
-  const paddingY = 24;
+  const paddingY = 38;
 
   const values = data.map((item) => Number(item.value) || 0);
   const maxValue = Math.max(1, ...values);
 
-  const chartWidth = width - paddingX * 2;
   const chartHeight = height - paddingY * 2;
 
   const points = buildLinePoints(
@@ -520,8 +270,8 @@ function SingleLineChart({
         </span>
       </div>
 
-      <div className="overflow-hidden rounded-2xl border border-[var(--line)] bg-[var(--surface-muted)]/40 p-3 sm:p-5">
-        <div className="relative h-[300px] w-full">
+      <div className="overflow-x-auto rounded-2xl border border-(--line) bg-(--surface-muted)/40 p-3 sm:p-5">
+        <div className="relative h-[320px] min-w-[800px] w-full">
           <svg
             viewBox={`0 0 ${width} ${height}`}
             className="h-full w-full overflow-visible"
@@ -576,6 +326,8 @@ function SingleLineChart({
               strokeWidth="3"
               strokeLinecap="round"
               strokeLinejoin="round"
+              pathLength={1}
+              className="report-chart-line"
             />
 
             {data.map((item, index) => {
@@ -604,11 +356,11 @@ function SingleLineChart({
             })}
           </svg>
 
-          <div className="absolute bottom-0 left-0 right-0 flex justify-between px-6">
+          <div className="absolute bottom-0 left-0 right-0 grid px-6 text-center" style={{ gridTemplateColumns: `repeat(${data.length}, minmax(0, 1fr))` }}>
             {data.map((item) => (
               <span
                 key={item.label}
-                className="max-w-[60px] truncate text-[10px] font-medium text-[var(--text-muted)] sm:text-xs"
+                className="truncate text-[10px] font-medium text-(--ink-muted) sm:text-xs"
               >
                 {item.label}
               </span>
@@ -653,7 +405,8 @@ function MiniBarChart({
         </span>
       </div>
 
-      <div className="grid h-64 grid-cols-12 items-end gap-1.5 sm:gap-3">
+      <div className="overflow-x-auto pb-2">
+      <div className="grid h-64 min-w-[800px] items-end gap-2 sm:gap-3" style={{ gridTemplateColumns: `repeat(${data.length}, minmax(42px, 1fr))` }}>
         {data.map((item) => {
           const height = (item.value / maxValue) * 100;
 
@@ -662,13 +415,13 @@ function MiniBarChart({
               key={item.label}
               className="group flex h-full min-w-0 flex-col items-center justify-end"
             >
-              <div className="mb-2 min-h-4 text-[10px] font-semibold text-[var(--text-primary)] opacity-0 transition-opacity group-hover:opacity-100">
+              <div className="mb-2 min-h-4 text-[10px] font-semibold text-(--foreground)">
                 {item.value}
               </div>
 
               <div className="flex h-44 w-full items-end justify-center">
                 <div
-                  className="w-full max-w-8 rounded-t-lg bg-[var(--accent)] transition-all duration-500 group-hover:opacity-80"
+                  className="w-full max-w-8 rounded-t-lg bg-(--accent) transition-[height,opacity] duration-700 ease-out group-hover:opacity-80"
                   style={{
                     height: `${Math.max(
                       item.value > 0 ? 5 : 0,
@@ -686,6 +439,7 @@ function MiniBarChart({
           );
         })}
       </div>
+      </div>
     </div>
   );
 }
@@ -697,6 +451,7 @@ function MiniBarChart({
 */
 
 export default function ReportsPage() {
+  const { settings: academySettings } = useAcademyBrand();
   const canViewReports = useCan(PERMISSIONS.REPORT_VIEW);
 
   const canExportReports = useCan(PERMISSIONS.REPORT_EXPORT);
@@ -733,6 +488,7 @@ export default function ReportsPage() {
   const [refreshing, setRefreshing] = useState(false);
 
   const [error, setError] = useState("");
+  const needsAttentionThreshold = 75;
 
   /*
   |--------------------------------------------------------------------------
@@ -742,6 +498,8 @@ export default function ReportsPage() {
 
   const loadReports = useCallback(
     async (refresh = false) => {
+      await Promise.resolve();
+
       if (!canViewReports) {
         setLoading(false);
         return;
@@ -756,15 +514,7 @@ export default function ReportsPage() {
 
         setError("");
 
-        const [
-          summaryData,
-          branchesData,
-          coachesData,
-          beltsData,
-          topData,
-          skillData,
-          admissionData,
-        ] = await Promise.all([
+        const results = await Promise.allSettled([
           getReportsSummary(year, branch || undefined),
           getBranchReports(year, branch || undefined),
           getCoachReports(year, branch || undefined),
@@ -773,14 +523,16 @@ export default function ReportsPage() {
           getSkillCompletion(year, branch || undefined),
           getAdmissionReports(year, branch || undefined),
         ]);
-
-        setSummary(summaryData);
-        setBranchReports(branchesData);
-        setCoachReports(coachesData);
-        setBeltReports(beltsData);
-        setTopPerformers(topData);
-        setSkills(skillData);
-        setAdmissions(admissionData);
+        const [summaryResult, branchesResult, coachesResult, beltsResult, topResult, skillsResult, admissionsResult] = results;
+        setSummary(summaryResult.status === "fulfilled" ? summaryResult.value : null);
+        setBranchReports(branchesResult.status === "fulfilled" ? branchesResult.value : []);
+        setCoachReports(coachesResult.status === "fulfilled" ? coachesResult.value : []);
+        setBeltReports(beltsResult.status === "fulfilled" ? beltsResult.value : null);
+        setTopPerformers(topResult.status === "fulfilled" ? topResult.value : []);
+        setSkills(skillsResult.status === "fulfilled" ? skillsResult.value : []);
+        setAdmissions(admissionsResult.status === "fulfilled" ? admissionsResult.value : null);
+        const failures = results.flatMap((result) => result.status === "rejected" ? [result.reason instanceof Error ? result.reason.message : "A report section failed to load."] : []);
+        setError(failures.length ? `${failures.length} report section(s) could not be loaded. ${failures[0]}` : "");
       } catch (err) {
         const message = err instanceof Error ? err.message : "Failed to load reports.";
         if (refresh) {
@@ -804,7 +556,6 @@ export default function ReportsPage() {
 
   useEffect(() => {
     if (!canViewReports) {
-      setBranches([]);
       return;
     }
 
@@ -828,8 +579,29 @@ export default function ReportsPage() {
   */
 
   useEffect(() => {
-    void loadReports();
+    let cancelled = false;
+    void Promise.resolve().then(() => {
+      if (!cancelled) void loadReports();
+    });
+
+    return () => {
+      cancelled = true;
+    };
   }, [loadReports]);
+
+  const printReport = useCallback(() => window.print(), []);
+
+  useEffect(() => {
+    const handlePrintShortcut = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "p") return;
+      const target = event.target;
+      if (target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName))) return;
+      event.preventDefault();
+      printReport();
+    };
+    window.addEventListener("keydown", handlePrintShortcut);
+    return () => window.removeEventListener("keydown", handlePrintShortcut);
+  }, [printReport]);
 
   /*
   |--------------------------------------------------------------------------
@@ -849,16 +621,6 @@ export default function ReportsPage() {
       ) / branchReports.length
     );
   }, [branchReports]);
-
-  const attendanceChartData = useMemo<DualChartPoint[]>(() => {
-    return (
-      summary?.attendance.trend?.map((item) => ({
-        label: item.month,
-        first: item.present,
-        second: item.absent,
-      })) || []
-    );
-  }, [summary]);
 
   const admissionChartData = useMemo<ChartPoint[]>(() => {
     return (
@@ -885,7 +647,8 @@ export default function ReportsPage() {
       return null;
     }
 
-    const latest = trend[trend.length - 1];
+    const latest = [...trend].reverse().find((item) => item.total > 0);
+    if (!latest) return null;
 
     const total = latest.present + latest.absent;
 
@@ -898,16 +661,13 @@ export default function ReportsPage() {
   const previousAttendance = useMemo(() => {
     const trend = summary?.attendance.trend || [];
 
-    if (trend.length < 2) {
-      return null;
-    }
-
-    const previous = trend[trend.length - 2];
+    const previous = [...trend].reverse().find((item) => item.total > 0 && item.month !== latestAttendance?.month);
+    if (!previous) return null;
 
     const total = previous.present + previous.absent;
 
     return total > 0 ? (previous.present / total) * 100 : 0;
-  }, [summary]);
+  }, [summary, latestAttendance]);
 
   const attendanceChange = useMemo(() => {
     if (!latestAttendance || previousAttendance === null) {
@@ -945,7 +705,8 @@ export default function ReportsPage() {
 
     const rows: string[][] = [];
 
-    rows.push(["ForceStrike Reports", "", "", ""]);
+    const academyName = academySettings.academyName.trim() || "Academy";
+    rows.push([`${academyName} Reports`, "", "", ""]);
 
     rows.push([
       "Year",
@@ -1131,7 +892,11 @@ export default function ReportsPage() {
 
     link.href = url;
 
-    link.download = `forcestrike-report-${year}.csv`;
+    const fileName = academyName
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "") || "academy";
+    link.download = `${fileName}-report-${year}.csv`;
 
     document.body.appendChild(link);
 
@@ -1153,7 +918,7 @@ export default function ReportsPage() {
       <div className="df-page">
         <PageHeader
           eyebrow="Authorization"
-          title="Reports & Analytics"
+          title="Reports & Insights"
           description="You do not have permission to view reports."
         />
 
@@ -1187,7 +952,7 @@ export default function ReportsPage() {
       <div className="df-page">
         <PageHeader
           eyebrow="Analytics"
-          title="Reports & Analytics"
+          title="Reports & Insights"
           description="A complete view of academy performance, attendance, students, coaches, branches and belt progression."
         />
 
@@ -1206,12 +971,12 @@ export default function ReportsPage() {
   |--------------------------------------------------------------------------
   */
 
-  if (error && !summary) {
+  if (error && !summary && !branchReports.length && !coachReports.length && !beltReports && !topPerformers.length && !skills.length && !admissions) {
     return (
       <div className="df-page">
         <PageHeader
           eyebrow="Analytics"
-          title="Reports & Analytics"
+          title="Reports & Insights"
           description="A complete view of academy performance, attendance, students, coaches, branches and belt progression."
           actions={
             <Button
@@ -1239,13 +1004,22 @@ export default function ReportsPage() {
   */
 
   return (
-    <div className="df-page">
+    <div className="df-page reports-print-root">
+      <div className="reports-print-only mb-5 border-b border-black pb-4 text-black">
+        <h1 className="text-2xl font-bold">{academySettings.academyName.trim() || "Academy"} — Reports &amp; Insights</h1>
+        <p className="mt-1 text-sm">Reporting period: 1 Jan–31 Dec {year} · Branch: {branch ? branches.find((item) => item._id === branch)?.name || "Selected branch" : "All accessible branches"}</p>
+        <p className="text-xs">Generated {new Intl.DateTimeFormat("en-IN", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Kolkata" }).format(new Date())} (India Standard Time)</p>
+      </div>
       <PageHeader
         eyebrow="Analytics"
-        title="Reports & Analytics"
-        description="A complete view of academy performance, attendance, students, coaches, branches and belt progression."
+        title="Reports & Insights"
+        description="Review attendance, student progress, admissions, branches and academy performance in one place."
         actions={
-          <div className="flex flex-wrap gap-2">
+          <div className="reports-print-hide flex flex-wrap gap-2">
+            <Button variant="outline" onClick={printReport} title="Print report (Ctrl+P)">
+              <Printer size={16} />
+              Print
+            </Button>
             {canExportReports && (
               <Button variant="outline" onClick={exportCSV}>
                 <Download size={16} />
@@ -1267,7 +1041,7 @@ export default function ReportsPage() {
 
       {/* Filters */}
 
-      <Card className="mb-6">
+      <Card className="reports-print-hide">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <p className="text-sm font-semibold text-[var(--text-primary)]">
@@ -1332,12 +1106,13 @@ export default function ReportsPage() {
                 ))}
               </Select>
             </label>
+            {(year !== currentYear() || branch) && <Button variant="outline" onClick={() => { setYear(currentYear()); setBranch(""); }}><RotateCcw size={15} />Reset</Button>}
           </div>
         </div>
       </Card>
 
       {error && (
-        <div className="mb-6 rounded-xl border border-[var(--danger)]/20 bg-[var(--danger-soft)] px-4 py-3 text-sm text-[var(--danger)]">
+        <div className="rounded-xl border border-(--danger)/20 bg-(--danger-soft) px-4 py-3 text-sm text-(--danger)">
           {error}
         </div>
       )}
@@ -1416,7 +1191,7 @@ export default function ReportsPage() {
 
       {/* Attendance Analytics */}
 
-      <section className="mt-8">
+      <section>
         <Card>
           <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
             <SectionTitle
@@ -1477,7 +1252,8 @@ export default function ReportsPage() {
             </div>
           </div>
 
-          <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4 2xl:grid-cols-7">
+            <StatBox label="Total Attendance" value={summary?.attendance.total ?? 0} />
             <StatBox
               label="Present Records"
               value={summary?.attendance.present ?? 0}
@@ -1487,59 +1263,39 @@ export default function ReportsPage() {
               label="Absent Records"
               value={summary?.attendance.absent ?? 0}
             />
-
+            <StatBox label="Attendance Rate" value={percentage(summary?.attendance.attendanceRate ?? 0)} />
+            <StatBox label="Makeups Pending" value={summary?.makeups.pending ?? 0} />
+            <StatBox label="Makeups Booked" value={summary?.makeups.booked ?? 0} />
+            <StatBox label="Makeups Completed" value={summary?.makeups.completed ?? 0} />
             <StatBox
-              label="Makeups Scheduled"
-              value={summary?.makeups.scheduled ?? 0}
-            />
-
-            <StatBox
-              label="Makeups Completed"
-              value={summary?.makeups.completed ?? 0}
+              label="Makeups Cancelled"
+              value={summary?.makeups.cancelled ?? 0}
             />
           </div>
 
-          {summary && summary.attendance.total > 0 && (
-            <div className="mt-5 rounded-xl border border-[var(--line)] bg-[var(--surface-muted)] p-4 sm:p-5">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <p className="text-sm font-semibold text-[var(--text-primary)]">Attendance breakdown</p>
-                  <p className="mt-1 text-xs text-[var(--text-muted)]">Based on recorded attendance statuses for {year}.</p>
-                </div>
-                <span className="text-xs font-medium text-[var(--text-secondary)]">{summary.attendance.total.toLocaleString()} records</span>
-              </div>
-              <div
-                className="mt-4 flex h-3 overflow-hidden rounded-full bg-[var(--line)]"
-                role="img"
-                aria-label={`${summary.attendance.present} present and ${summary.attendance.absent} absent attendance records`}
-              >
-                <div className="h-full bg-[var(--accent)]" style={{ width: `${Math.min(100, (summary.attendance.present / summary.attendance.total) * 100)}%` }} />
-                <div className="h-full bg-[var(--danger)]" style={{ width: `${Math.min(100, (summary.attendance.absent / summary.attendance.total) * 100)}%` }} />
-              </div>
-              <div className="mt-3 flex flex-wrap gap-x-6 gap-y-2 text-xs">
-                <span className="inline-flex items-center gap-2 text-[var(--text-secondary)]"><span className="h-2.5 w-2.5 rounded-full bg-[var(--accent)]" />Present <strong className="text-[var(--text-primary)]">{summary.attendance.present.toLocaleString()}</strong></span>
-                <span className="inline-flex items-center gap-2 text-[var(--text-secondary)]"><span className="h-2.5 w-2.5 rounded-full bg-[var(--danger)]" />Absent <strong className="text-[var(--text-primary)]">{summary.attendance.absent.toLocaleString()}</strong></span>
-              </div>
-            </div>
-          )}
+          <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.6fr)_minmax(280px,0.8fr)]">
+            <div className="min-w-0 rounded-xl border border-(--line) p-4"><h3 className="text-sm font-semibold">Monthly attendance</h3><MonthlyAttendanceChart data={summary?.attendance.trend || []} /></div>
+            <div className="min-w-0 rounded-xl border border-(--line) p-4"><h3 className="text-sm font-semibold">Attendance distribution</h3><AttendanceDistribution present={summary?.attendance.present ?? 0} absent={summary?.attendance.absent ?? 0} /></div>
+          </div>
+          <div className="mt-5 rounded-xl border border-(--line) p-4"><h3 className="text-sm font-semibold">Monthly attendance rate</h3><AttendanceRateChart data={summary?.attendance.trend || []} /></div>
+        </Card>
+      </section>
 
-          <AnalyticsLineChart
-            data={attendanceChartData}
-            firstLabel="Present"
-            secondLabel="Absent"
-            firstValues={attendanceChartData.map(
-              (item) => item.first,
-            )}
-            secondValues={attendanceChartData.map(
-              (item) => item.second,
-            )}
-          />
+      <section>
+        <Card padding="none">
+          <div className="border-b border-(--line) p-5"><SectionTitle icon={<Users size={18} />} title="Student Attendance Performance" description={`Regular attendance for ${year}, ordered from lowest attendance rate. Below ${needsAttentionThreshold}% needs attention.`} /></div>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[760px] text-left text-sm">
+              <thead><tr className="border-b border-(--line) bg-(--surface-muted) text-xs uppercase tracking-wide text-(--ink-muted)"><th className="px-5 py-3">Student</th><th className="px-4 py-3">Branch</th><th className="px-4 py-3">Plan</th><th className="px-4 py-3">Present</th><th className="px-4 py-3">Absent</th><th className="px-4 py-3">Rate</th><th className="px-4 py-3">Pending makeup</th><th className="px-4 py-3">Status</th></tr></thead>
+              <tbody>{(summary?.studentAttendance || []).length ? summary!.studentAttendance.map((student) => <tr key={student._id} className="border-b border-(--line) last:border-0"><td className="px-5 py-3 font-semibold"><Link className="text-(--accent) hover:underline" href={`/students/${student._id}`}>{student.name}</Link></td><td className="px-4 py-3">{student.branch?.name || "-"}</td><td className="px-4 py-3">{student.plan?.name || "-"}</td><td className="px-4 py-3">{student.present}</td><td className="px-4 py-3">{student.absent}</td><td className="px-4 py-3 font-semibold">{percentage(student.attendanceRate)}</td><td className="px-4 py-3">{student.pendingMakeup}</td><td className="px-4 py-3"><Badge variant={student.attendanceRate < needsAttentionThreshold ? "danger" : "success"}>{student.attendanceRate < needsAttentionThreshold ? "Needs attention" : "On track"}</Badge></td></tr>) : <tr><td className="px-5 py-10 text-center text-(--ink-muted)" colSpan={8}>No student attendance recorded for this period.</td></tr>}</tbody>
+            </table>
+          </div>
         </Card>
       </section>
 
       {/* Student Analytics */}
 
-      <section className="mt-8">
+      <section>
         <Card>
           <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
             <SectionTitle
@@ -1565,7 +1321,7 @@ export default function ReportsPage() {
             )}
           </div>
 
-          <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
             <StatBox
               label="Total Students"
               value={summary?.students.total ?? 0}
@@ -1579,6 +1335,11 @@ export default function ReportsPage() {
             <StatBox
               label="Inactive"
               value={summary?.students.inactive ?? 0}
+            />
+
+            <StatBox
+              label="Completed"
+              value={summary?.students.completed ?? 0}
             />
 
             <StatBox
@@ -1598,7 +1359,7 @@ export default function ReportsPage() {
 
       {/* Top Performers */}
 
-      <section className="mt-8">
+      <section>
         <Card padding="none">
           <div className="px-6 py-5">
             <SectionTitle
@@ -1625,6 +1386,7 @@ export default function ReportsPage() {
                     <TableHeading>Belt</TableHeading>
                     <TableHeading>Performance</TableHeading>
                     <TableHeading>Attendance</TableHeading>
+                    <TableHeading>Skills Completed</TableHeading>
                     <TableHeading>Evaluations</TableHeading>
                     <TableHeading>Score</TableHeading>
                   </tr>
@@ -1670,6 +1432,10 @@ export default function ReportsPage() {
                         {percentage(item.attendanceRate)}
                       </td>
 
+                      <td className="px-6 py-5 text-[15px] font-semibold leading-5 text-[var(--text-primary)]">
+                        {item.skillsCompleted}
+                      </td>
+
                       <td className="px-6 py-5 text-[15px] leading-5 text-[var(--text-secondary)]">
                         {item.evaluations}
                       </td>
@@ -1690,7 +1456,7 @@ export default function ReportsPage() {
 
       {/* Skill Completion */}
 
-      <section className="mt-8">
+      <section>
         <Card>
           <SectionTitle
             icon={<CheckCircle2 size={18} />}
@@ -1744,14 +1510,15 @@ export default function ReportsPage() {
 
                   {item.skills.length > 0 && (
                     <div className="mt-5 space-y-3">
-                      {item.skills.slice(0, 5).map((skill) => (
+                      {item.skills.map((skill) => (
                         <div key={skill.skill}>
                           <div className="mb-1 flex justify-between gap-3">
-                            <span className="truncate text-xs text-[var(--text-secondary)]">
-                              {skill.skill}
-                            </span>
+                            <div className="min-w-0">
+                              <span className="block truncate text-xs text-[var(--text-secondary)]">{skill.skill}</span>
+                              <span className="text-[10px] text-(--ink-muted)">{skill.completed} of {skill.evaluations} evaluations at 4+</span>
+                            </div>
 
-                            <span className="text-xs font-semibold text-[var(--text-primary)]">
+                            <span className="shrink-0 text-xs font-semibold text-[var(--text-primary)]">
                               {percentage(skill.completionRate)}
                             </span>
                           </div>
@@ -1772,7 +1539,7 @@ export default function ReportsPage() {
 
       {/* Belt Analytics */}
 
-      <section className="mt-8 grid gap-6 xl:grid-cols-2">
+      <section className="grid gap-6 xl:grid-cols-2">
         <Card>
           <SectionTitle
             icon={<Award size={18} />}
@@ -1821,6 +1588,20 @@ export default function ReportsPage() {
               />
             )}
           </div>
+
+          {beltReports?.transitions.length ? (
+            <div className="mt-7 border-t border-(--line) pt-5">
+              <h3 className="text-sm font-semibold text-(--foreground)">Belt transitions</h3>
+              <div className="mt-3 space-y-2">
+                {beltReports.transitions.map((transition) => (
+                  <div key={`${transition.from}-${transition.to}`} className="flex items-center justify-between gap-3 rounded-xl bg-(--surface-muted) px-3 py-2.5 text-sm">
+                    <span className="min-w-0 truncate text-(--ink-muted)">{transition.from} <span aria-hidden="true">→</span> {transition.to}</span>
+                    <Badge variant="info">{transition.count}</Badge>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
         </Card>
 
         <Card>
@@ -1873,7 +1654,7 @@ export default function ReportsPage() {
 
       {/* Branch Reports */}
 
-      <section className="mt-8">
+      <section>
         <Card padding="none">
           <div className="px-6 py-5">
             <SectionTitle
@@ -1923,7 +1704,7 @@ export default function ReportsPage() {
                         </p>
 
                         <p className="mt-1 text-sm leading-5 text-[var(--text-muted)]">
-                          {item.students.total} total
+                          {item.students.inactive} inactive · {item.students.total} total
                         </p>
                       </td>
 
@@ -1938,6 +1719,10 @@ export default function ReportsPage() {
                           )}
                         </p>
 
+                        <p className="mt-1 text-xs text-(--ink-muted)">
+                          {item.attendance.present} present · {item.attendance.absent} absent · {item.attendance.total} records
+                        </p>
+
                         <div className="mt-2 w-28">
                           <ProgressBar
                             value={item.attendance.attendanceRate}
@@ -1946,7 +1731,8 @@ export default function ReportsPage() {
                       </td>
 
                       <td className="px-6 py-5 text-[15px] font-semibold leading-5 text-[var(--text-primary)]">
-                        {rating(item.performance.averageRating)}
+                        <p>{rating(item.performance.averageRating)}</p>
+                        <p className="mt-1 text-xs font-normal text-(--ink-muted)">{item.performance.evaluations} evaluations</p>
                       </td>
 
                       <td className="px-6 py-5">
@@ -1956,8 +1742,8 @@ export default function ReportsPage() {
                       </td>
 
                       <td className="px-6 py-5 text-[15px] leading-5 text-[var(--text-secondary)]">
-                        {item.makeups.completed} /{" "}
-                        {item.makeups.scheduled}
+                        <span>{item.makeups.completed} / {item.makeups.scheduled} completed</span>
+                        <p className="mt-1 text-xs text-(--ink-muted)">{item.makeups.cancelled} cancelled</p>
                       </td>
                     </tr>
                   ))}
@@ -1979,7 +1765,7 @@ export default function ReportsPage() {
 
       {/* Coach Reports */}
 
-      <section className="mt-8">
+      <section>
         <Card padding="none">
           <div className="px-6 py-5">
             <SectionTitle
@@ -2038,10 +1824,13 @@ export default function ReportsPage() {
                         {item.branch?.name || "—"}
                       </td>
 
-                      <td className="px-6 py-5 text-[15px] font-semibold leading-5 text-[var(--text-primary)]">
-                        {percentage(
-                          item.attendance.attendanceRate,
-                        )}
+                      <td className="px-6 py-5">
+                        <p className="text-[15px] font-semibold leading-5 text-[var(--text-primary)]">
+                          {percentage(item.attendance.attendanceRate)}
+                        </p>
+                        <p className="mt-1 text-xs text-(--ink-muted)">
+                          {item.attendance.present} present · {item.attendance.absent} absent of {item.attendance.total}
+                        </p>
                       </td>
 
                       <td className="px-6 py-5 text-[15px] font-semibold leading-5 text-[var(--text-primary)]">
@@ -2076,7 +1865,7 @@ export default function ReportsPage() {
 
       {/* Admission Analytics */}
 
-      <section className="mt-8">
+      <section>
         <Card>
           <SectionTitle
             icon={<TrendingUp size={18} />}
@@ -2132,37 +1921,6 @@ export default function ReportsPage() {
         </Card>
       </section>
 
-      {/* Footer Snapshot */}
-
-      <section className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <SummaryCard
-          title="Present"
-          value={summary?.attendance.present ?? 0}
-          subtitle="Attendance records"
-          icon={<CheckCircle2 size={20} />}
-        />
-
-        <SummaryCard
-          title="Absent"
-          value={summary?.attendance.absent ?? 0}
-          subtitle="Attendance records"
-          icon={<TrendingDown size={20} />}
-        />
-
-        <SummaryCard
-          title="Makeups Completed"
-          value={summary?.makeups.completed ?? 0}
-          subtitle="Completed missed classes"
-          icon={<RefreshCw size={20} />}
-        />
-
-        <SummaryCard
-          title="New Admissions"
-          value={summary?.overview.newAdmissions ?? 0}
-          subtitle={`Students joined in ${year}`}
-          icon={<Users size={20} />}
-        />
-      </section>
     </div>
   );
 }

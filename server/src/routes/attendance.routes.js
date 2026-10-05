@@ -8,6 +8,7 @@ const {
   getDailyAttendanceSheet,
   markAttendance,
   markAllAttendancePresent,
+  undoAttendance,
 } = require("../controllers/attendance.controller");
 
 const protect = require("../middleware/auth.middleware");
@@ -77,6 +78,13 @@ router.post(
   protect,
   authorizePermission("attendance.manage"),
   markAllAttendancePresent,
+);
+
+router.post(
+  "/:id/undo",
+  protect,
+  authorizePermission("attendance.manage"),
+  undoAttendance,
 );
 
 module.exports = router;

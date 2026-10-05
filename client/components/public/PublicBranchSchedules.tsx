@@ -10,10 +10,13 @@ import {
   Phone,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Badge, Button, Card } from "@/components/ui";
-import { getPublicTrainingSessionTypes, type TrainingSessionTypeRecord } from "@/lib/trainingSessionTypeApi";
+import {
+  getPublicTrainingSessionTypes,
+  type TrainingSessionTypeRecord,
+} from "@/lib/trainingSessionTypeApi";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api";
 
@@ -48,6 +51,16 @@ type PublicBranch = {
   isActive?: boolean;
 };
 
+export type PublicSessionPreference = {
+  date: string;
+  dayName: string;
+  sessionName: string;
+  sessionTypeId: string;
+  sessionTypeName: string;
+  startTime: string;
+  endTime: string;
+};
+
 type BranchScheduleRecord = {
   branch: PublicBranch;
   schedule: BranchSchedule | null;
@@ -71,6 +84,7 @@ type CalendarDay = {
   openingTime: string | null;
   closingTime: string | null;
   reason: string;
+  noMatchingSession?: boolean;
 };
 
 type CalendarResponse = {
@@ -136,6 +150,10 @@ function getStatus(day: CalendarDay) {
     return "closed";
   }
 
+  if (day.noMatchingSession) {
+    return "filtered";
+  }
+
   if (day.isTrainingDay) {
     return "available";
   }
@@ -158,6 +176,10 @@ function getStatusLabel(day: CalendarDay) {
     return "Training Available";
   }
 
+  if (status === "filtered") {
+    return "No plan session";
+  }
+
   return "No Session";
 }
 
@@ -174,6 +196,10 @@ function getStatusClass(day: CalendarDay) {
 
   if (status === "available") {
     return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  }
+
+  if (status === "filtered") {
+    return "border-(--line) bg-(--background) text-(--ink-faint)";
   }
 
   return "border-(--line) bg-(--surface) text-(--ink-muted)";
@@ -199,11 +225,21 @@ function buildCalendarCells(year: number, month: number, days: CalendarDay[]) {
 
 export default function PublicBranchSchedules({
   onSelectBranch,
+  onEnquireAtBranch,
+  onSelectSession,
+  onClearSession,
+  planProgramIds,
 }: {
-  onSelectBranch?: (branchId: string) => void;
+  onSelectBranch?: (branchId: string, branchName: string) => void;
+  onEnquireAtBranch?: (branchId: string, branchName: string) => void;
+  onSelectSession?: (selection: PublicSessionPreference) => void;
+  onClearSession?: () => void;
+  planProgramIds?: string[];
 }) {
   const [branches, setBranches] = useState<BranchScheduleRecord[]>([]);
-  const [sessionTypes, setSessionTypes] = useState<TrainingSessionTypeRecord[]>([]);
+  const [sessionTypes, setSessionTypes] = useState<TrainingSessionTypeRecord[]>(
+    [],
+  );
   const [selectedTypeId, setSelectedTypeId] = useState("");
 
   const [isLoading, setIsLoading] = useState(true);
@@ -219,6 +255,19 @@ export default function PublicBranchSchedules({
   const [calendarError, setCalendarError] = useState("");
 
   const [selectedDate, setSelectedDate] = useState<CalendarDay | null>(null);
+  const [preferredSessionKey, setPreferredSessionKey] = useState("");
+
+  const matchesPlan = (slot: TrainingSlot) =>
+    !planProgramIds ||
+    planProgramIds.length === 0 ||
+    Boolean(
+      slot.sessionTypeId && planProgramIds.includes(String(slot.sessionTypeId)),
+    );
+
+  const matchesFilter = (slot: TrainingSlot) =>
+    slot.isActive !== false &&
+    matchesPlan(slot) &&
+    (!selectedTypeId || slot.sessionTypeId === selectedTypeId);
 
   const [monthDate, setMonthDate] = useState(() => {
     const now = new Date();
@@ -316,6 +365,8 @@ export default function PublicBranchSchedules({
   function openBranchCalendar(branchId: string) {
     setSelectedBranchId(branchId);
     setSelectedDate(null);
+    onClearSession?.();
+    setPreferredSessionKey("");
 
     const selectedBranch = branches.find(
       (item) => item.branch._id === branchId,
@@ -325,7 +376,7 @@ export default function PublicBranchSchedules({
       return;
     }
 
-    onSelectBranch?.(branchId);
+    onSelectBranch?.(branchId, selectedBranch.branch.name);
 
     void loadCalendar(branchId, monthDate);
   }
@@ -334,6 +385,8 @@ export default function PublicBranchSchedules({
     setSelectedBranchId(null);
     setCalendar(null);
     setSelectedDate(null);
+    setPreferredSessionKey("");
+    onClearSession?.();
     setCalendarError("");
   }
 
@@ -350,6 +403,8 @@ export default function PublicBranchSchedules({
 
     setMonthDate(nextDate);
     setSelectedDate(null);
+    setPreferredSessionKey("");
+    onClearSession?.();
 
     await loadCalendar(selectedBranchId, nextDate);
   }
@@ -365,21 +420,57 @@ export default function PublicBranchSchedules({
 
     setMonthDate(currentMonth);
     setSelectedDate(null);
+    setPreferredSessionKey("");
+    onClearSession?.();
 
     void loadCalendar(selectedBranchId, currentMonth);
   }
 
-  const calendarCells = useMemo(() => {
-    if (!calendar) {
-      return [];
-    }
+  const calendarCells = calendar
+    ? buildCalendarCells(
+        calendar.calendar.year,
+        calendar.calendar.month,
+        calendar.days.map((day) => ({
+          ...day,
+          noMatchingSession:
+            day.isTrainingDay && !day.slots.some(matchesFilter),
+        })),
+      )
+    : [];
 
-    return buildCalendarCells(
-      calendar.calendar.year,
-      calendar.calendar.month,
-      calendar.days,
+  const planAvailableDays =
+    calendar?.days.filter(
+      (day) => !day.isHoliday && !day.isClosed && day.slots.some(matchesFilter),
+    ).length ?? 0;
+
+  function isSelectableDay(day: CalendarDay) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const localDate = new Date(`${day.date}T00:00:00`);
+    return (
+      localDate >= today &&
+      !day.isHoliday &&
+      !day.isClosed &&
+      day.slots.some(matchesFilter)
     );
-  }, [calendar]);
+  }
+
+  function selectSession(day: CalendarDay, slot: TrainingSlot, index: number) {
+    const typeId = String(slot.sessionTypeId || "");
+    const type = sessionTypes.find((item) => item._id === typeId);
+    const preference: PublicSessionPreference = {
+      date: day.date,
+      dayName: day.dayName,
+      sessionName: slot.sessionName || "Training Session",
+      sessionTypeId: typeId,
+      sessionTypeName:
+        type?.name || slot.sessionType?.replaceAll("_", " ") || "Training",
+      startTime: slot.startTime,
+      endTime: slot.endTime,
+    };
+    setPreferredSessionKey(`${day.date}-${slot._id || index}`);
+    onSelectSession?.(preference);
+  }
 
   if (isLoading) {
     return (
@@ -451,190 +542,238 @@ export default function PublicBranchSchedules({
           </Card>
         ) : (
           <>
-          {sessionTypes.some((type) => type.isActive) && <div className="mx-auto mt-8 flex max-w-4xl flex-wrap justify-center gap-2" aria-label="Filter by training type">
-            <Button variant={selectedTypeId === "" ? "secondary" : "outline"} onClick={() => setSelectedTypeId("")}>All</Button>
-            {sessionTypes.filter((type) => type.isActive).map((type) => <Button key={type._id} variant={selectedTypeId === type._id ? "secondary" : "outline"} onClick={() => setSelectedTypeId(type._id)}>{type.name}</Button>)}
-          </div>}
-          <div className="mt-8 grid gap-6 lg:grid-cols-2">
-            {branches.map((record) => {
-              const { branch, schedule, hasSchedule } = record;
+            {sessionTypes.some(
+              (type) =>
+                type.isActive &&
+                (!planProgramIds || planProgramIds.includes(type._id)),
+            ) && (
+              <div
+                className="mx-auto mt-8 flex max-w-4xl flex-wrap justify-center gap-2"
+                aria-label="Filter by training type"
+              >
+                <Button
+                  variant={selectedTypeId === "" ? "secondary" : "outline"}
+                  onClick={() => setSelectedTypeId("")}
+                >
+                  All
+                </Button>
+                {sessionTypes
+                  .filter(
+                    (type) =>
+                      type.isActive &&
+                      (!planProgramIds || planProgramIds.includes(type._id)),
+                  )
+                  .map((type) => (
+                    <Button
+                      key={type._id}
+                      variant={
+                        selectedTypeId === type._id ? "secondary" : "outline"
+                      }
+                      onClick={() => setSelectedTypeId(type._id)}
+                    >
+                      {type.name}
+                    </Button>
+                  ))}
+              </div>
+            )}
+            <div className="mt-8 grid gap-6 lg:grid-cols-2">
+              {branches.map((record) => {
+                const { branch, schedule, hasSchedule } = record;
 
-              const activeDays =
-                schedule?.weeklySchedule?.filter(
-                  (day) =>
-                    !day.isClosed &&
-                    day.slots.some((slot) => slot.isActive !== false && (!selectedTypeId || slot.sessionTypeId === selectedTypeId)),
-                ) || [];
+                const activeDays =
+                  schedule?.weeklySchedule?.filter(
+                    (day) => !day.isClosed && day.slots.some(matchesFilter),
+                  ) || [];
 
-              return (
-                <Card key={branch._id} className="overflow-hidden p-0">
-                  <div className="border-b border-(--line) p-6 sm:p-7">
-                    <div className="flex items-start justify-between gap-4">
-                      <div>
-                        <p className="text-xs font-bold uppercase tracking-[0.18em] text-(--accent)">
-                          Available branch
-                        </p>
+                return (
+                  <Card key={branch._id} className="overflow-hidden p-0">
+                    <div className="border-b border-(--line) p-6 sm:p-7">
+                      <div className="flex items-start justify-between gap-4">
+                        <div>
+                          <p className="text-xs font-bold uppercase tracking-[0.18em] text-(--accent)">
+                            Available branch
+                          </p>
 
-                        <h3 className="mt-2 text-2xl font-bold text-(--foreground)">
-                          {branch.name}
-                        </h3>
+                          <h3 className="mt-2 text-2xl font-bold text-(--foreground)">
+                            {branch.name}
+                          </h3>
 
-                        {branch.address && (
-                          <div className="mt-3 flex items-start gap-2 text-sm text-(--ink-muted)">
-                            <MapPin className="mt-0.5 h-4 w-4 shrink-0" />
-                            <span>{branch.address}</span>
-                          </div>
-                        )}
+                          {branch.address && (
+                            <div className="mt-3 flex items-start gap-2 text-sm text-(--ink-muted)">
+                              <MapPin className="mt-0.5 h-4 w-4 shrink-0" />
+                              <span>{branch.address}</span>
+                            </div>
+                          )}
 
-                        {branch.phone && (
-                          <div className="mt-2 flex items-center gap-2 text-sm text-(--ink-muted)">
-                            <Phone className="h-4 w-4 shrink-0" />
-                            <span>{branch.phone}</span>
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-(--accent-soft) text-(--accent)">
-                        <CalendarDays className="h-5 w-5" />
-                      </div>
-                    </div>
-
-                    {hasSchedule && schedule ? (
-                      <div className="mt-6 rounded-xl border border-(--line) bg-(--surface) p-4">
-                        <div className="flex items-center gap-2 text-sm font-semibold text-(--foreground)">
-                          <Clock3 className="h-4 w-4 text-(--gold)" />
-                          Branch hours
+                          {branch.phone && (
+                            <div className="mt-2 flex items-center gap-2 text-sm text-(--ink-muted)">
+                              <Phone className="h-4 w-4 shrink-0" />
+                              <span>{branch.phone}</span>
+                            </div>
+                          )}
                         </div>
 
-                        <p className="mt-2 text-sm text-(--ink-muted)">
-                          {formatTime(schedule.openingTime)} –{" "}
-                          {formatTime(schedule.closingTime)}
-                        </p>
+                        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-(--accent-soft) text-(--accent)">
+                          <CalendarDays className="h-5 w-5" />
+                        </div>
                       </div>
-                    ) : (
-                      <div className="mt-6 rounded-xl border border-amber-200 bg-amber-50 p-4">
-                        <p className="text-sm font-semibold text-amber-800">
-                          Training schedule is being updated.
-                        </p>
 
-                        <p className="mt-1 text-xs text-amber-700">
-                          Please contact the academy for current batch timings.
-                        </p>
-                      </div>
-                    )}
-                  </div>
+                      {hasSchedule && schedule ? (
+                        <div className="mt-6 rounded-xl border border-(--line) bg-(--surface) p-4">
+                          <div className="flex items-center gap-2 text-sm font-semibold text-(--foreground)">
+                            <Clock3 className="h-4 w-4 text-(--gold)" />
+                            Branch hours
+                          </div>
 
-                  {hasSchedule && schedule && activeDays.length > 0 && (
-                    <div className="p-6 sm:p-7">
-                      <h4 className="text-sm font-bold text-(--foreground)">
-                        Weekly training sessions
-                      </h4>
+                          <p className="mt-2 text-sm text-(--ink-muted)">
+                            {formatTime(schedule.openingTime)} –{" "}
+                            {formatTime(schedule.closingTime)}
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="mt-6 rounded-xl border border-amber-200 bg-amber-50 p-4">
+                          <p className="text-sm font-semibold text-amber-800">
+                            Training schedule is being updated.
+                          </p>
 
-                      <div className="mt-4 space-y-3">
-                        {schedule.weeklySchedule.filter((day) => !selectedTypeId || (!day.isClosed && day.slots.some((slot) => slot.isActive !== false && slot.sessionTypeId === selectedTypeId))).map((day) => {
-                          const activeSlots = day.slots.filter(
-                            (slot) => slot.isActive !== false && (!selectedTypeId || slot.sessionTypeId === selectedTypeId),
-                          );
+                          <p className="mt-1 text-xs text-amber-700">
+                            Please contact the academy for current batch
+                            timings.
+                          </p>
+                        </div>
+                      )}
+                    </div>
 
-                          if (day.isClosed || activeSlots.length === 0) {
-                            return (
-                              <div
-                                key={day.dayOfWeek}
-                                className="flex items-center justify-between gap-4 rounded-xl border border-(--line) bg-(--surface) px-4 py-3"
-                              >
-                                <span className="text-sm font-semibold text-(--foreground)">
-                                  {DAY_NAMES[day.dayOfWeek]}
-                                </span>
+                    {hasSchedule && schedule && activeDays.length > 0 && (
+                      <div className="p-6 sm:p-7">
+                        <h4 className="text-sm font-bold text-(--foreground)">
+                          Weekly training sessions
+                        </h4>
 
-                                <span className="text-xs font-medium text-(--ink-faint)">
-                                  Closed
-                                </span>
-                              </div>
-                            );
-                          }
+                        <div className="mt-4 space-y-3">
+                          {schedule.weeklySchedule
+                            .filter(
+                              (day) =>
+                                !selectedTypeId ||
+                                (!day.isClosed &&
+                                  day.slots.some(matchesFilter)),
+                            )
+                            .map((day) => {
+                              const activeSlots =
+                                day.slots.filter(matchesFilter);
 
-                          return (
-                            <div
-                              key={day.dayOfWeek}
-                              className="rounded-xl border border-(--line) bg-(--surface) px-4 py-3"
-                            >
-                              <div className="flex items-center justify-between gap-4">
-                                <span className="text-sm font-semibold text-(--foreground)">
-                                  {DAY_NAMES[day.dayOfWeek]}
-                                </span>
-
-                                <span className="text-xs font-semibold text-(--accent)">
-                                  {activeSlots.length}{" "}
-                                  {activeSlots.length === 1
-                                    ? "session"
-                                    : "sessions"}
-                                </span>
-                              </div>
-
-                              <div className="mt-3 flex flex-wrap gap-2">
-                {activeSlots.map((slot, index) => (
-                                  <span
-                                    key={
-                                      slot._id || `${day.dayOfWeek}-${index}`
-                                    }
-                                    className="rounded-lg border border-(--line) bg-(--card) px-3 py-2 text-xs text-(--ink-muted)"
+                              if (day.isClosed || activeSlots.length === 0) {
+                                return (
+                                  <div
+                                    key={day.dayOfWeek}
+                                    className="flex items-center justify-between gap-4 rounded-xl border border-(--line) bg-(--surface) px-4 py-3"
                                   >
-                                    <span className="font-semibold text-(--foreground)">
-                                      {slot.sessionName || "Training Session"}
+                                    <span className="text-sm font-semibold text-(--foreground)">
+                                      {DAY_NAMES[day.dayOfWeek]}
                                     </span>
 
-                                    <Badge variant={slot.sessionTypeId || slot.sessionType ? "accent" : "neutral"} className="mx-1.5 align-middle">
-                                      {sessionTypes.find((type) => type._id === slot.sessionTypeId)?.name || slot.sessionType?.replaceAll("_", " ") || "General (legacy)"}
-                                    </Badge>
+                                    <span className="text-xs font-medium text-(--ink-faint)">
+                                      Closed
+                                    </span>
+                                  </div>
+                                );
+                              }
 
-                                    <span className="mx-1">·</span>
+                              return (
+                                <div
+                                  key={day.dayOfWeek}
+                                  className="rounded-xl border border-(--line) bg-(--surface) px-4 py-3"
+                                >
+                                  <div className="flex items-center justify-between gap-4">
+                                    <span className="text-sm font-semibold text-(--foreground)">
+                                      {DAY_NAMES[day.dayOfWeek]}
+                                    </span>
 
-                                    {formatTimeRange(
-                                      slot.startTime,
-                                      slot.endTime,
-                                    )}
-                                  </span>
-                                ))}
-                              </div>
-                            </div>
-                          );
-                        })}
+                                    <span className="text-xs font-semibold text-(--accent)">
+                                      {activeSlots.length}{" "}
+                                      {activeSlots.length === 1
+                                        ? "session"
+                                        : "sessions"}
+                                    </span>
+                                  </div>
+
+                                  <div className="mt-3 flex flex-wrap gap-2">
+                                    {activeSlots.map((slot, index) => (
+                                      <span
+                                        key={
+                                          slot._id ||
+                                          `${day.dayOfWeek}-${index}`
+                                        }
+                                        className="rounded-lg border border-(--line) bg-(--card) px-3 py-2 text-xs text-(--ink-muted)"
+                                      >
+                                        <span className="font-semibold text-(--foreground)">
+                                          {slot.sessionName ||
+                                            "Training Session"}
+                                        </span>
+
+                                        <Badge
+                                          variant={
+                                            slot.sessionTypeId ||
+                                            slot.sessionType
+                                              ? "accent"
+                                              : "neutral"
+                                          }
+                                          className="mx-1.5 align-middle"
+                                        >
+                                          {sessionTypes.find(
+                                            (type) =>
+                                              type._id === slot.sessionTypeId,
+                                          )?.name ||
+                                            slot.sessionType?.replaceAll(
+                                              "_",
+                                              " ",
+                                            ) ||
+                                            "General (legacy)"}
+                                        </Badge>
+
+                                        <span className="mx-1">·</span>
+
+                                        {formatTimeRange(
+                                          slot.startTime,
+                                          slot.endTime,
+                                        )}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                        </div>
                       </div>
+                    )}
+
+                    <div className="border-t border-(--line) bg-(--surface) p-5">
+                      <Button
+                        type="button"
+                        fullWidth
+                        onClick={() => openBranchCalendar(branch._id)}
+                        className="bg-(--sidebar-logo-bg) text-(--gold) hover:bg-(--gold) hover:text-(--sidebar-active-text)"
+                      >
+                        <CalendarDays className="h-4 w-4" />
+                        View Monthly Availability
+                      </Button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onSelectBranch?.(branch._id, branch.name);
+                          onEnquireAtBranch?.(branch._id, branch.name);
+                        }}
+                        className="mt-3 w-full text-center text-sm font-semibold text-(--accent) transition hover:opacity-80"
+                      >
+                        Enquire at this branch →
+                      </button>
                     </div>
-                  )}
-
-                  <div className="border-t border-(--line) bg-(--surface) p-5">
-                    <Button
-                      type="button"
-                      fullWidth
-                      onClick={() => openBranchCalendar(branch._id)}
-                      className="bg-(--sidebar-logo-bg) text-(--gold) hover:bg-(--gold) hover:text-(--sidebar-active-text)"
-                    >
-                      <CalendarDays className="h-4 w-4" />
-                      View Monthly Availability
-                    </Button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onSelectBranch?.(branch._id);
-
-                        const form = document.getElementById("inquiry-form");
-
-                        form?.scrollIntoView({
-                          behavior: "smooth",
-                          block: "start",
-                        });
-                      }}
-                      className="mt-3 w-full text-center text-sm font-semibold text-(--accent) transition hover:opacity-80"
-                    >
-                      Enquire at this branch →
-                    </button>
-                  </div>
-                </Card>
-              );
-            })}
-          </div></>
+                  </Card>
+                );
+              })}
+            </div>
+          </>
         )}
 
         {selectedBranchId && (
@@ -730,10 +869,7 @@ export default function PublicBranchSchedules({
                   </div>
 
                   <div className="grid grid-cols-2 border-b border-(--line) sm:grid-cols-4">
-                    <SummaryItem
-                      label="Available"
-                      value={calendar.summary.availableDays}
-                    />
+                    <SummaryItem label="Available" value={planAvailableDays} />
 
                     <SummaryItem
                       label="Holidays"
@@ -778,7 +914,13 @@ export default function PublicBranchSchedules({
                           <button
                             type="button"
                             key={day.date}
-                            onClick={() => setSelectedDate(day)}
+                            onClick={() => {
+                              if (!isSelectableDay(day)) return;
+                              setSelectedDate(day);
+                              setPreferredSessionKey("");
+                              onClearSession?.();
+                            }}
+                            disabled={!isSelectableDay(day)}
                             className={`min-h-28 border-r border-b p-2 text-left transition hover:shadow-inner sm:p-3 ${getStatusClass(
                               day,
                             )} ${
@@ -799,9 +941,10 @@ export default function PublicBranchSchedules({
                               {getStatusLabel(day)}
                             </span>
 
-                            {day.isTrainingDay && day.slots.length > 0 && (
+                            {day.slots.some(matchesFilter) && (
                               <div className="mt-2 space-y-1">
                                 {day.slots
+                                  .filter(matchesFilter)
                                   .slice(0, 2)
                                   .map((slot, slotIndex) => (
                                     <p
@@ -813,9 +956,11 @@ export default function PublicBranchSchedules({
                                     </p>
                                   ))}
 
-                                {day.slots.length > 2 && (
+                                {day.slots.filter(matchesFilter).length > 2 && (
                                   <p className="text-[10px] font-semibold">
-                                    +{day.slots.length - 2} more
+                                    +
+                                    {day.slots.filter(matchesFilter).length - 2}{" "}
+                                    more
                                   </p>
                                 )}
                               </div>
@@ -837,6 +982,13 @@ export default function PublicBranchSchedules({
                       <Legend label="Holiday" className="text-amber-600" />
 
                       <Legend label="Closed" className="text-red-600" />
+
+                      {planProgramIds?.length ? (
+                        <Legend
+                          label="No matching plan session"
+                          className="text-(--ink-faint)"
+                        />
+                      ) : null}
 
                       <Legend
                         label="No Session"
@@ -891,27 +1043,61 @@ export default function PublicBranchSchedules({
                           </p>
                         </div>
                       ) : selectedDate.isTrainingDay &&
-                        selectedDate.slots.filter((slot) => !selectedTypeId || slot.sessionTypeId === selectedTypeId).length > 0 ? (
+                        selectedDate.slots.filter(matchesFilter).length > 0 ? (
                         <div className="mt-5 grid gap-3 sm:grid-cols-2">
-                          {selectedDate.slots.filter((slot) => !selectedTypeId || slot.sessionTypeId === selectedTypeId).map((slot, index) => (
-                            <div
-                              key={slot._id || index}
-                              className="rounded-xl border border-(--line) bg-(--card) p-4"
-                            >
-                              <p className="text-sm font-bold text-(--foreground)">
-                                {slot.sessionName || "Training Session"}
-                              </p>
+                          {selectedDate.slots
+                            .filter(matchesFilter)
+                            .map((slot, index) => {
+                              const sessionKey = `${selectedDate.date}-${slot._id || index}`;
+                              const isPreferred =
+                                preferredSessionKey === sessionKey;
+                              return (
+                                <button
+                                  type="button"
+                                  key={slot._id || index}
+                                  onClick={() =>
+                                    selectSession(selectedDate, slot, index)
+                                  }
+                                  className={`rounded-xl border bg-(--card) p-4 text-left transition ${isPreferred ? "border-(--accent) ring-2 ring-(--accent)/20" : "border-(--line) hover:border-(--accent)"}`}
+                                >
+                                  <p className="text-sm font-bold text-(--foreground)">
+                                    {slot.sessionName || "Training Session"}
+                                  </p>
 
-                              <Badge variant={slot.sessionTypeId || slot.sessionType ? "accent" : "neutral"} className="mt-2">
-                                {sessionTypes.find((type) => type._id === slot.sessionTypeId)?.name || slot.sessionType?.replaceAll("_", " ") || "General (legacy)"}
-                              </Badge>
+                                  <Badge
+                                    variant={
+                                      slot.sessionTypeId || slot.sessionType
+                                        ? "accent"
+                                        : "neutral"
+                                    }
+                                    className="mt-2"
+                                  >
+                                    {sessionTypes.find(
+                                      (type) => type._id === slot.sessionTypeId,
+                                    )?.name ||
+                                      slot.sessionType?.replaceAll("_", " ") ||
+                                      "General (legacy)"}
+                                  </Badge>
 
-                              <p className="mt-2 text-sm text-(--ink-muted)">
-                                <Clock3 className="mr-1 inline h-4 w-4" />
-                                {formatTimeRange(slot.startTime, slot.endTime)}
-                              </p>
-                            </div>
-                          ))}
+                                  <p className="mt-2 text-sm text-(--ink-muted)">
+                                    <Clock3 className="mr-1 inline h-4 w-4" />
+                                    {formatTimeRange(
+                                      slot.startTime,
+                                      slot.endTime,
+                                    )}
+                                  </p>
+                                  <span className="mt-3 inline-flex rounded-full bg-(--accent-soft) px-3 py-1 text-xs font-semibold text-(--accent)">
+                                    {isPreferred
+                                      ? "Selected preference"
+                                      : "Choose this session"}
+                                  </span>
+                                </button>
+                              );
+                            })}
+                          <p className="text-xs leading-5 text-(--ink-faint) sm:col-span-2">
+                            Your selection is a preference for the inquiry only.
+                            It does not reserve or book a class.
+                          </p>
                         </div>
                       ) : (
                         <p className="mt-5 text-sm text-(--ink-muted)">

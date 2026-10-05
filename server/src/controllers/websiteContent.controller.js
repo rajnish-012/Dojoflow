@@ -719,28 +719,28 @@ const getPublicWebsiteHome = async (req, res) => {
     const [heroes, sections, statistics, features] = await Promise.all([
       WebsiteHero.find({
         isActive: true,
-      }).sort({
+      }).select("title subtitle description badge image mobileImage primaryButtonText primaryButtonUrl secondaryButtonText secondaryButtonUrl sortOrder isActive startDate endDate").sort({
         sortOrder: 1,
         createdAt: -1,
       }),
 
       WebsiteSection.find({
         isPublished: true,
-      }).sort({
+      }).select("key title subtitle description content image secondaryImage ctaText ctaUrl highlights sortOrder isPublished").sort({
         sortOrder: 1,
         createdAt: -1,
       }),
 
       WebsiteStatistic.find({
         isActive: true,
-      }).sort({
+      }).select("label value suffix description icon sortOrder isActive").sort({
         sortOrder: 1,
         createdAt: -1,
       }),
 
       WebsiteFeature.find({
         isActive: true,
-      }).sort({
+      }).select("title description icon image linkText linkUrl sortOrder isActive").sort({
         sortOrder: 1,
         createdAt: -1,
       }),

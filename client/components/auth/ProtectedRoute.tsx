@@ -1,9 +1,6 @@
 "use client";
 
-import {
-  type ReactNode,
-  useEffect,
-} from "react";
+import { type ReactNode, useEffect } from "react";
 
 import { usePathname, useRouter } from "next/navigation";
 
@@ -61,23 +58,13 @@ export default function ProtectedRoute({
   const router = useRouter();
   const pathname = usePathname();
 
-  const {
-    user,
-    isLoading,
-    isAuthenticated,
-  } = useAuth();
+  const { user, isLoading, isAuthenticated } = useAuth();
 
-  const hasSinglePermission = useCan(
-    permission ?? "",
-  );
+  const hasSinglePermission = useCan(permission ?? "");
 
-  const hasAnyPermission = useCanAny(
-    anyOf ?? [],
-  );
+  const hasAnyPermission = useCanAny(anyOf ?? []);
 
-  const hasAllPermissions = useCanAll(
-    allOf ?? [],
-  );
+  const hasAllPermissions = useCanAll(allOf ?? []);
 
   let authorized = false;
 
@@ -85,24 +72,14 @@ export default function ProtectedRoute({
    * If no permission requirement is provided,
    * authentication alone protects the route.
    */
-  if (
-    !permission &&
-    !anyOf?.length &&
-    !allOf?.length
-  ) {
+  if (!permission && !anyOf?.length && !allOf?.length) {
     authorized = isAuthenticated;
   } else if (permission) {
-    authorized =
-      isAuthenticated &&
-      hasSinglePermission;
+    authorized = isAuthenticated && hasSinglePermission;
   } else if (anyOf?.length) {
-    authorized =
-      isAuthenticated &&
-      hasAnyPermission;
+    authorized = isAuthenticated && hasAnyPermission;
   } else if (allOf?.length) {
-    authorized =
-      isAuthenticated &&
-      hasAllPermissions;
+    authorized = isAuthenticated && hasAllPermissions;
   }
 
   useEffect(() => {
@@ -113,9 +90,7 @@ export default function ProtectedRoute({
     if (!isAuthenticated || !user) {
       const loginUrl =
         pathname && pathname !== "/login"
-          ? `/login?redirect=${encodeURIComponent(
-              pathname,
-            )}`
+          ? `/login?redirect=${encodeURIComponent(pathname)}`
           : "/login";
 
       router.replace(loginUrl);
@@ -130,14 +105,7 @@ export default function ProtectedRoute({
     if (!authorized) {
       router.replace("/unauthorized");
     }
-  }, [
-    isLoading,
-    isAuthenticated,
-    user,
-    authorized,
-    pathname,
-    router,
-  ]);
+  }, [isLoading, isAuthenticated, user, authorized, pathname, router]);
 
   /*
    * Do not render protected content while authentication

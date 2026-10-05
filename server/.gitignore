@@ -1,4 +1,5 @@
 node_modules/
+backups/
 .env
 .env.local
 .env.*.local

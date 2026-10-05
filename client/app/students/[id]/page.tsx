@@ -51,6 +51,8 @@ import {
   SummaryCard,
   Select,
 } from "@/components/ui";
+import InternationalPhoneInput, { isValidPhoneNumber } from "@/components/ui/InternationalPhoneInput";
+import StudentFinancePanel from "@/components/finance/StudentFinancePanel";
 
 type Student = {
   _id: string;
@@ -116,6 +118,9 @@ type AttendanceRecord = {
   _id: string;
   status: string;
   date: string;
+  sessionName?: string;
+  sessionStartTime?: string;
+  sessionEndTime?: string;
   planDay?: number;
   curriculumTitle?: string;
   makeupRequired?: boolean;
@@ -230,6 +235,14 @@ function formatDate(date?: string) {
     month: "short",
     year: "numeric",
   });
+}
+
+function formatTime(value?: string) {
+  if (!value) return "";
+  const [rawHour, minute] = value.split(":");
+  const hour = Number(rawHour);
+  if (!Number.isInteger(hour) || !minute) return value;
+  return `${String(hour % 12 || 12).padStart(2, "0")}:${minute} ${hour >= 12 ? "PM" : "AM"}`;
 }
 
 function getInitials(name?: string) {
@@ -772,6 +785,11 @@ export default function StudentDetailsPage() {
     if (Number(editForm.age) < 1) {
       setEditError("Age must be greater than zero.");
 
+      return;
+    }
+
+    if (!isValidPhoneNumber(editForm.phone, "IN")) {
+      setEditError("Enter a valid phone number with its country code.");
       return;
     }
 
@@ -1550,6 +1568,8 @@ export default function StudentDetailsPage() {
           </Card>
         </div>
 
+        <StudentFinancePanel studentId={studentId} />
+
         {/* Current Curriculum */}
         <Card padding="lg">
           <SectionHeading
@@ -1986,6 +2006,15 @@ export default function StudentDetailsPage() {
                           >
                             {formatDate(record.date)}
                           </p>
+                          {(record.sessionName || record.sessionStartTime || record.sessionEndTime) && (
+                            <p className="mt-1 flex items-center gap-1 text-xs font-medium text-(--accent)">
+                              <Clock3 size={12} />
+                              <span>
+                                {record.sessionName || "Training session"}
+                                {(record.sessionStartTime || record.sessionEndTime) && ` · ${formatTime(record.sessionStartTime)} – ${formatTime(record.sessionEndTime)}`}
+                              </span>
+                            </p>
+                          )}
                         </div>
                       </div>
 
@@ -2213,13 +2242,10 @@ export default function StudentDetailsPage() {
             </FormField>
 
             <FormField label="Phone number" htmlFor="edit-phone" required>
-              <Input
+              <InternationalPhoneInput
                 id="edit-phone"
-                name="phone"
                 value={editForm.phone}
-                onChange={handleEditChange}
-                placeholder="Phone number"
-                autoComplete="tel"
+                onChange={(phone) => setEditForm((current) => ({ ...current, phone }))}
                 required
               />
             </FormField>

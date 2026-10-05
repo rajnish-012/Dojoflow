@@ -215,7 +215,7 @@ const getPublicFAQs = async (req, res) => {
   try {
     const faqs = await FAQ.find({
       isPublished: true,
-    }).sort({
+    }).select("question answer category sortOrder isPublished").sort({
       sortOrder: 1,
       createdAt: -1,
     });

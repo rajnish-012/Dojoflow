@@ -30,6 +30,7 @@ export interface MakeupBranch {
 
 export interface MakeupAttendance {
   _id: string;
+  attendanceType?: "REGULAR" | "MAKEUP";
   date: string;
   planDay: number;
   curriculumTitle?: string;

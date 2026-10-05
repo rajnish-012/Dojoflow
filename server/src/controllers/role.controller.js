@@ -277,7 +277,7 @@ const createRole = async (req, res) => {
     }
 
     if (error.name === "ValidationError") {
-      return sendError(res, 400, error.message);
+      return sendError(res, 400, process.env.NODE_ENV === "production" ? "Invalid role data." : error.message);
     }
 
     console.error("Create role error:", error);

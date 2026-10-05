@@ -67,5 +67,7 @@ const performanceSchema = new mongoose.Schema(
 );
 
 performanceSchema.index({ attendance: 1, skill: 1 }, { unique: true, partialFilterExpression: { attendance: { $type: "objectId" } } });
+performanceSchema.index({ branch: 1, evaluationDate: -1 });
+performanceSchema.index({ student: 1, evaluationDate: -1 });
 
 module.exports = mongoose.model("Performance", performanceSchema);

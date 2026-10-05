@@ -4,6 +4,7 @@ const Makeup = require("../models/Makeup");
 const Attendance = require("../models/Attendance");
 const Student = require("../models/Student");
 const CoachStudentAssignment = require("../models/CoachStudentAssignment");
+const { safelyNotify } = require("../services/notification.service");
 const {
   validateMakeupDate: validateCentralMakeupDate,
 } = require("../services/branchSchedule.service");
@@ -613,6 +614,19 @@ const createMakeup = async (req, res) => {
       });
     }
 
+    if (attendance.attendanceType === "MAKEUP") {
+      return res.status(400).json({ success: false, message: "A makeup can only recover a regular absent attendance record" });
+    }
+    const planDay = Number(attendance.planDay);
+    const curriculumTitle = String(attendance.curriculumTitle || "").trim();
+    if (!Number.isInteger(planDay) || planDay < 1 || !curriculumTitle) {
+      return res.status(409).json({
+        success: false,
+        code: "MAKEUP_CURRICULUM_SNAPSHOT_MISSING",
+        message: "This absence does not contain a reliable curriculum snapshot. Update the original attendance record before scheduling a makeup.",
+      });
+    }
+
     /*
      * Central date + holiday + schedule validation.
      */
@@ -683,11 +697,18 @@ const createMakeup = async (req, res) => {
      */
     const makeup = await Makeup.create({
       student,
+      enrollment: attendance.enrollment || null,
+      plan: attendance.plan || studentRecord.plan || null,
+      sessionTypeId: attendance.sessionTypeId || null,
+      sessionSlotId: attendance.sessionSlotId || null,
       branch: studentRecord.branch,
       originalAttendance,
+      planDay,
       originalDate: attendance.date,
       makeupDate: selectedStart,
       status: "SCHEDULED",
+      curriculumTitle,
+      curriculumSkill: attendance.curriculumSkill || "",
       notes: notes || "",
       markedBy: req.user._id,
     });
@@ -695,15 +716,48 @@ const createMakeup = async (req, res) => {
     /*
      * Synchronize attendance.
      */
-    await Attendance.findByIdAndUpdate(originalAttendance, {
-      $set: {
-        makeupRequired: true,
-        makeupCompleted: false,
-        makeup: makeup._id,
-      },
-    });
+    try {
+      const updatedOriginal = await Attendance.findByIdAndUpdate(originalAttendance, {
+        $set: {
+          makeupRequired: true,
+          makeupCompleted: false,
+          makeup: makeup._id,
+        },
+        },
+        { returnDocument: "after" },
+      );
+      if (!updatedOriginal) throw new Error("Original attendance record was removed while creating the makeup");
+    } catch (writeError) {
+      await Makeup.deleteOne({ _id: makeup._id });
+      throw writeError;
+    }
 
     const populatedMakeup = await populateMakeup(Makeup.findById(makeup._id));
+
+    await safelyNotify({
+      type: "MAKEUP_CREATED",
+      title: "Makeup class required",
+      message: `${studentRecord.name} missed Training Day ${planDay}. A makeup class has been created.`,
+      severity: "WARNING",
+      branch: studentRecord.branch,
+      student: studentRecord._id,
+      entityType: "MAKEUP",
+      entityId: makeup._id,
+      eventKey: `makeup:${makeup._id}:created`,
+      actionUrl: "/makeups",
+    });
+    await safelyNotify({
+      type: "MAKEUP_SCHEDULED",
+      title: "Makeup class scheduled",
+      message: `${studentRecord.name}'s makeup for Training Day ${planDay} is scheduled for ${String(makeupDate)}.`,
+      severity: "INFO",
+      branch: studentRecord.branch,
+      student: studentRecord._id,
+      entityType: "MAKEUP",
+      entityId: makeup._id,
+      eventKey: `makeup:${makeup._id}:scheduled:${String(makeupDate)}:${makeup.sessionSlotId}`,
+      actionUrl: "/makeups",
+    });
 
     return res.status(201).json({
       success: true,
@@ -713,6 +767,10 @@ const createMakeup = async (req, res) => {
     });
   } catch (error) {
     console.error("Create makeup error:", error);
+
+    if (error?.code === 11000) {
+      return res.status(409).json({ success: false, code: "MAKEUP_ALREADY_EXISTS", message: "A makeup already exists for this attendance record." });
+    }
 
     return res.status(500).json({
       success: false,
@@ -930,6 +988,19 @@ const scheduleMakeup = async (req, res) => {
 
     const populatedMakeup = await populateMakeup(Makeup.findById(makeup._id));
 
+    await safelyNotify({
+      type: "MAKEUP_SCHEDULED",
+      title: "Makeup class scheduled",
+      message: `${studentRecord.name}'s makeup for Training Day ${makeup.planDay} is scheduled for ${String(makeupDate)}.`,
+      severity: "INFO",
+      branch: makeup.branch,
+      student: makeup.student,
+      entityType: "MAKEUP",
+      entityId: makeup._id,
+      eventKey: `makeup:${makeup._id}:scheduled:${String(makeupDate)}:${makeup.sessionSlotId}`,
+      actionUrl: "/makeups",
+    });
+
     return res.status(200).json({
       success: true,
       message: "Makeup class scheduled successfully",
@@ -1028,9 +1099,10 @@ const completeMakeup = async (req, res) => {
      * that was scheduled before the branch
      * schedule/holiday system existed.
      */
+    const makeupDateKey = formatDate(makeup.makeupDate);
     const availability = await validateMakeupAvailability(
       makeup.branch,
-      makeup.makeupDate,
+      makeupDateKey,
       makeup.originalDate,
       { allowPast: true },
     );
@@ -1052,9 +1124,9 @@ const completeMakeup = async (req, res) => {
       return res.status(409).json({ success: false, message: "The selected makeup session is no longer available for this program. Reschedule the makeup." });
     }
 
-    const dayStart = getStartOfDay(formatDate(makeup.makeupDate));
-    const dayEnd = getEndOfDay(formatDate(makeup.makeupDate));
-    const existingAttendance = await Attendance.findOne({ student: makeup.student, date: { $gte: dayStart, $lte: dayEnd }, sessionSlotId: makeup.sessionSlotId }).select("_id");
+    const dayStart = getStartOfDay(makeupDateKey);
+    const dayEnd = getEndOfDay(makeupDateKey);
+    const existingAttendance = await Attendance.findOne({ student: makeup.student, attendanceType: "REGULAR", date: { $gte: dayStart, $lte: dayEnd }, sessionSlotId: makeup.sessionSlotId }).select("_id");
     if (existingAttendance) {
       return res.status(409).json({ success: false, message: "Attendance is already recorded for this student in the selected session" });
     }
@@ -1093,10 +1165,13 @@ const completeMakeup = async (req, res) => {
       branch: makeup.branch,
       date: dayStart,
       status: "PRESENT",
+      attendanceType: "MAKEUP",
       markedBy: req.user._id,
       sessionTypeId: makeup.sessionTypeId,
       sessionSlotId: makeup.sessionSlotId,
       sessionName: sessionSlot.sessionName || "",
+      sessionStartTime: sessionSlot.startTime || "",
+      sessionEndTime: sessionSlot.endTime || "",
       enrollment: enrollment?._id || makeup.enrollment || null,
       plan: enrollment?.plan || makeup.plan || student.plan,
       planDay: makeup.planDay,
@@ -1107,26 +1182,47 @@ const completeMakeup = async (req, res) => {
       makeupCompleted: false,
     });
 
-    makeup.status = "COMPLETED";
-    makeup.makeupAttendance = makeupAttendance._id;
+    try {
+      makeup.status = "COMPLETED";
+      makeup.makeupAttendance = makeupAttendance._id;
+      makeup.completedBy = req.user._id;
+      makeup.completedAt = new Date();
+      await makeup.save();
 
-    makeup.completedBy = req.user._id;
-
-    makeup.completedAt = new Date();
-
-    await makeup.save();
-
-    /*
-     * Synchronize original attendance.
-     */
-    await Attendance.findByIdAndUpdate(makeup.originalAttendance, {
-      $set: {
-        makeupCompleted: true,
-        makeupAttendance: makeupAttendance._id,
-      },
-    });
+      const updatedOriginal = await Attendance.findByIdAndUpdate(makeup.originalAttendance, {
+        $set: {
+          makeupCompleted: true,
+          makeupAttendance: makeupAttendance._id,
+        },
+        },
+        { returnDocument: "after" },
+      );
+      if (!updatedOriginal) throw new Error("Original attendance record was removed while completing the makeup");
+    } catch (writeError) {
+      await Promise.all([
+        Attendance.deleteOne({ _id: makeupAttendance._id }),
+        Makeup.updateOne({ _id: makeup._id }, {
+          $set: { status: "SCHEDULED", makeupAttendance: null, completedBy: null, completedAt: null },
+        }),
+      ]);
+      throw writeError;
+    }
 
     const populatedMakeup = await populateMakeup(Makeup.findById(makeup._id));
+
+    const completedStudent = await Student.findById(makeup.student).select("name").lean();
+    await safelyNotify({
+      type: "MAKEUP_COMPLETED",
+      title: "Makeup class completed",
+      message: `${completedStudent?.name || "A student"} completed the makeup for Training Day ${makeup.planDay}.`,
+      severity: "SUCCESS",
+      branch: makeup.branch,
+      student: makeup.student,
+      entityType: "MAKEUP",
+      entityId: makeup._id,
+      eventKey: `makeup:${makeup._id}:completed`,
+      actionUrl: "/makeups",
+    });
 
     return res.status(200).json({
       success: true,

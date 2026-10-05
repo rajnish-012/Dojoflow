@@ -35,7 +35,7 @@ export interface ReportSummary {
       present: number;
       absent: number;
       total: number;
-      attendanceRate: number;
+      attendanceRate: number | null;
     }[];
   };
 
@@ -55,6 +55,8 @@ export interface ReportSummary {
   };
 
   makeups: {
+    pending: number;
+    booked: number;
     scheduled: number;
     completed: number;
     cancelled: number;
@@ -68,6 +70,20 @@ export interface ReportSummary {
     newAdmissions: number;
     retentionRate: number;
   };
+
+  studentAttendance: StudentAttendanceReport[];
+}
+
+export interface StudentAttendanceReport {
+  _id: string;
+  name: string;
+  branch: { _id: string; name: string } | null;
+  plan: { _id: string; name: string } | null;
+  total: number;
+  present: number;
+  absent: number;
+  attendanceRate: number;
+  pendingMakeup: number;
 }
 
 export interface BranchReport {

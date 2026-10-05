@@ -678,11 +678,7 @@ export default function LoginPage() {
 
                       <button
                         type="button"
-                        onClick={() =>
-                          setError(
-                            "Please contact your academy administrator to reset your password.",
-                          )
-                        }
+                        onClick={() => router.push("/forgot-password")}
                         className="text-xs font-semibold text-(--accent)"
                       >
                         Forgot password?

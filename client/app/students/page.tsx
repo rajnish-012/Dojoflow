@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 
 import { getStudents, getBranches, getPlans, createStudent } from "@/lib/api";
+import InternationalPhoneInput, { isValidPhoneNumber } from "@/components/ui/InternationalPhoneInput";
 
 import { useCan } from "@/lib/permissions";
 
@@ -108,7 +109,6 @@ type FormData = {
 
 type FieldErrors = {
   age?: string;
-  phone?: string;
   email?: string;
   loginEmail?: string;
 };
@@ -151,7 +151,6 @@ const initialForm: FormData = {
 };
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const PHONE_PATTERN = /^[0-9]{10}$/;
 
 export default function StudentsPage() {
   const canCreateStudent = useCan("student.create");
@@ -298,7 +297,7 @@ export default function StudentsPage() {
   };
 
   const handleDigitsOnlyChange =
-    (field: "age" | "phone") =>
+    (field: "age") =>
     (event: React.ChangeEvent<HTMLInputElement>) => {
       const digitsOnly = event.target.value.replace(/\D/g, "");
 
@@ -323,22 +322,6 @@ export default function StudentsPage() {
     setFieldErrors((current) => ({
       ...current,
       age: isValid ? undefined : "Age must be between 1 and 120.",
-    }));
-  };
-
-  const handlePhoneBlur = (event: React.FocusEvent<HTMLInputElement>) => {
-    const value = event.target.value.trim();
-
-    if (!value) {
-      setFieldErrors((current) => ({ ...current, phone: undefined }));
-      return;
-    }
-
-    setFieldErrors((current) => ({
-      ...current,
-      phone: PHONE_PATTERN.test(value)
-        ? undefined
-        : "Phone number must be exactly 10 digits.",
     }));
   };
 
@@ -415,10 +398,8 @@ export default function StudentsPage() {
       return;
     }
 
-    if (!PHONE_PATTERN.test(trimmedPhone)) {
-      setFormError(
-        "Please enter a valid 10-digit phone number (numbers only).",
-      );
+    if (!isValidPhoneNumber(trimmedPhone, "IN")) {
+      setFormError("Enter a valid phone number with its country code.");
       return;
     }
 
@@ -903,22 +884,13 @@ export default function StudentsPage() {
 
             <FormField
               label="Phone number"
-              htmlFor="phone"
+              htmlFor="student-phone"
               required
-              error={fieldErrors.phone}
             >
-              <Input
-                id="phone"
-                name="phone"
-                type="tel"
-                inputMode="numeric"
-                pattern="[0-9]{10}"
-                maxLength={10}
+              <InternationalPhoneInput
+                id="student-phone"
                 value={form.phone}
-                onChange={handleDigitsOnlyChange("phone")}
-                onBlur={handlePhoneBlur}
-                placeholder="10-digit phone number"
-                autoComplete="tel"
+                onChange={(phone) => setForm((current) => ({ ...current, phone }))}
                 required
               />
             </FormField>

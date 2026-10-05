@@ -16,9 +16,7 @@ type ThemeContextType = {
   setTheme: (theme: Theme) => void;
 };
 
-const ThemeContext = createContext<ThemeContextType | undefined>(
-  undefined
-);
+const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
 const STORAGE_KEY = "dojoflow-theme";
 
@@ -89,9 +87,7 @@ export function useTheme() {
   const context = useContext(ThemeContext);
 
   if (!context) {
-    throw new Error(
-      "useTheme must be used inside ThemeProvider"
-    );
+    throw new Error("useTheme must be used inside ThemeProvider");
   }
 
   return context;

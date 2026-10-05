@@ -22,6 +22,7 @@ import {
   getAttendanceDailySheet,
   markAllAttendancePresent,
   markAttendance,
+  undoAttendance,
 } from "@/lib/attendanceApi";
 import { PERMISSIONS, useCan } from "@/lib/permissions";
 
@@ -155,7 +156,8 @@ export default function AttendancePage() {
   const [formError, setFormError] = useState("");
   const [confirmMarkAllOpen, setConfirmMarkAllOpen] = useState(false);
   const [markingAll, setMarkingAll] = useState(false);
-
+  const [undoRow, setUndoRow] = useState<DailyAttendanceRow | null>(null);
+  const [undoing, setUndoing] = useState(false);
 
   /* ==========================================
      LOAD ATTENDANCE SHEET
@@ -227,13 +229,35 @@ export default function AttendancePage() {
 
   function handleDateChange(value: string) {
     if (value > today) {
-      toast.warning("Attendance can only be marked for today or previous dates.");
+      toast.warning(
+        "Attendance can only be marked for today or previous dates.",
+      );
 
       return;
     }
 
     setError("");
     setSelectedDate(value);
+  }
+
+  async function confirmUndoAttendance() {
+    const attendanceId = undoRow?.attendance?._id;
+    if (!canManageAttendance || !attendanceId || undoing) return;
+    setUndoing(true);
+    setSavingStudentId(undoRow.student._id);
+    try {
+      await undoAttendance(attendanceId);
+      setUndoRow(null);
+      await loadSheet();
+      toast.success("Attendance undone.");
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Could not undo attendance.",
+      );
+    } finally {
+      setSavingStudentId(null);
+      setUndoing(false);
+    }
   }
 
   /* ==========================================
@@ -257,11 +281,15 @@ export default function AttendancePage() {
       return;
     }
 
-    const availableSlots = (row.branchSchedule?.slots || []).filter((slot) => slot.entitled && slot.curriculumAvailable && !slot.attendance);
+    const availableSlots = (row.branchSchedule?.slots || []).filter(
+      (slot) => slot.entitled && slot.curriculumAvailable && !slot.attendance,
+    );
     if (availableSlots.length === 0) {
-      setFormError(row.curriculumComplete
-        ? "This program's curriculum is complete. Add the next curriculum day before recording more attendance."
-        : "This student has no scheduled program session with an available curriculum day on this date.");
+      setFormError(
+        row.curriculumComplete
+          ? "This program's curriculum is complete. Add the next curriculum day before recording more attendance."
+          : "This student has no scheduled program session with an available curriculum day on this date.",
+      );
       return;
     }
 
@@ -477,7 +505,8 @@ export default function AttendancePage() {
         }
       }
 
-      const message = err instanceof Error ? err.message : "Failed to mark attendance.";
+      const message =
+        err instanceof Error ? err.message : "Failed to mark attendance.";
       if (message.toLowerCase().includes("completed this program curriculum")) {
         setSelectedRow(null);
         setSelectedStatus(null);
@@ -864,6 +893,7 @@ export default function AttendancePage() {
           savingStudentId={savingStudentId}
           canManage={canManageAttendance}
           onMark={openMarkModal}
+          onUndo={setUndoRow}
         />
 
         {/* ==================================
@@ -886,6 +916,22 @@ export default function AttendancePage() {
         />
 
         <ConfirmationDialog
+          open={Boolean(undoRow)}
+          title="Undo this attendance?"
+          description={
+            undoRow?.attendance?.status === "ABSENT"
+              ? "This removes the absence and its pending makeup recovery. Completed makeup recovery or performance evaluations must be resolved first."
+              : "This removes the attendance record and recalculates the student's training progression."
+          }
+          confirmLabel="Undo attendance"
+          cancelLabel="Keep attendance"
+          confirmVariant="danger"
+          loading={undoing}
+          onClose={() => !undoing && setUndoRow(null)}
+          onConfirm={confirmUndoAttendance}
+        />
+
+        <ConfirmationDialog
           open={confirmMarkAllOpen}
           title="Mark all students present?"
           description={`This will mark every eligible scheduled program session as Present for ${formatDate(
@@ -902,13 +948,19 @@ export default function AttendancePage() {
             setMarkingAll(true);
 
             try {
-              const result = await markAllAttendancePresent(formatLocalDateKey(selectedDate));
+              const result = await markAllAttendancePresent(
+                formatLocalDateKey(selectedDate),
+              );
 
               setConfirmMarkAllOpen(false);
               await loadSheet();
 
               if (result.marked === 0) {
-                toast.info(result.failed > 0 ? `No sessions were marked. ${result.failed} session(s) could not be processed; please refresh and try again.` : "No sessions were marked. All eligible attendance is already completed or unavailable for this date.");
+                toast.info(
+                  result.failed > 0
+                    ? `No sessions were marked. ${result.failed} session(s) could not be processed; please refresh and try again.`
+                    : "No sessions were marked. All eligible attendance is already completed or unavailable for this date.",
+                );
               } else {
                 toast.success(
                   `${result.marked} ${result.marked === 1 ? "program session" : "program sessions"} marked Present. ${result.skipped} ${result.skipped === 1 ? "session" : "sessions"} skipped.${
@@ -919,7 +971,11 @@ export default function AttendancePage() {
                 );
               }
             } catch (err) {
-              toast.error(err instanceof Error ? err.message : "Failed to mark all eligible students present.");
+              toast.error(
+                err instanceof Error
+                  ? err.message
+                  : "Failed to mark all eligible students present.",
+              );
             } finally {
               setMarkingAll(false);
             }

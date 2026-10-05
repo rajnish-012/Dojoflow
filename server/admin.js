@@ -1,52 +1,35 @@
+// Explicit, one-time Super Admin provisioning. This script never creates
+// defaults, resets an existing account, or prints credentials.
+require("dotenv").config();
 const mongoose = require("mongoose");
-const bcrypt = require("bcryptjs");
-const dotenv = require("dotenv");
-
 const User = require("./src/models/User");
+const { ensureDefaultRoles } = require("./src/config/defaultRoles");
+const { validatePassword } = require("./src/utils/passwordPolicy");
+const { validateServerEnv } = require("./src/config/env");
 
-dotenv.config();
-
-const createAdmin = async () => {
-  try {
-    await mongoose.connect(process.env.MONGO_URI);
-
-    console.log("MongoDB connected");
-
-    const hashedPassword = await bcrypt.hash("admin123", 10);
-
-    const existingAdmin = await User.findOne({
-      email: "admin@dojoflow.com",
-    });
-
-    if (existingAdmin) {
-      existingAdmin.name = "Dojo Admin";
-      existingAdmin.password = hashedPassword;
-      existingAdmin.role = "SUPER_ADMIN";
-      existingAdmin.branch = null;
-
-      await existingAdmin.save();
-
-      console.log("Existing admin account updated successfully");
-    } else {
-      await User.create({
-        name: "Dojo Admin",
-        email: "admin@dojoflow.com",
-        password: hashedPassword,
-        role: "SUPER_ADMIN",
-        branch: null,
-      });
-
-      console.log("Admin account created successfully");
-    }
-
-    console.log("Email: admin@dojoflow.com");
-    console.log("Password: admin123");
-
-    process.exit(0);
-  } catch (error) {
-    console.error("Failed to create admin:", error);
-    process.exit(1);
+const provisionAdmin = async () => {
+  const name = (process.env.BOOTSTRAP_ADMIN_NAME || "").trim();
+  const email = (process.env.BOOTSTRAP_ADMIN_EMAIL || "").trim().toLowerCase();
+  const password = process.env.BOOTSTRAP_ADMIN_PASSWORD || "";
+  const passwordError = validatePassword(password);
+  if (!name || !email || passwordError) {
+    throw new Error("Set BOOTSTRAP_ADMIN_NAME, BOOTSTRAP_ADMIN_EMAIL and a valid BOOTSTRAP_ADMIN_PASSWORD before provisioning.");
   }
+  const config = validateServerEnv();
+  await mongoose.connect(config.mongoUri);
+  await ensureDefaultRoles();
+  const existing = await User.findOne({ email }).select("_id").lean();
+  if (existing) throw new Error("An account with that email already exists; provisioning will not modify accounts.");
+
+  await User.create({ name, email, password, role: "SUPER_ADMIN", branch: null });
+  console.log("Initial Super Admin account created. Sign in using the credentials supplied to this one-time command.");
 };
 
-createAdmin();
+provisionAdmin()
+  .catch((error) => {
+    console.error("Admin provisioning failed.", { name: error?.name || "Error", code: error?.code });
+    process.exitCode = 1;
+  })
+  .finally(async () => {
+    if (mongoose.connection.readyState !== 0) await mongoose.disconnect();
+  });

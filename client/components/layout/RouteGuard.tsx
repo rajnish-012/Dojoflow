@@ -1,27 +1,14 @@
 "use client";
 
-import {
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
+import { useEffect, useMemo, useState } from "react";
 
-import {
-  usePathname,
-  useRouter,
-} from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 
-import {
-  getMyNavigation,
-  type NavigationModule,
-} from "@/lib/api";
+import { getMyNavigation, type NavigationModule } from "@/lib/api";
 
 import { useAuth } from "@/hooks/userAuth";
 
-import {
-  hasPermission,
-  NAVIGATION_PERMISSIONS,
-} from "@/lib/permissions";
+import { hasPermission, NAVIGATION_PERMISSIONS } from "@/lib/permissions";
 
 /* =========================================================
    TYPES
@@ -38,23 +25,15 @@ type GuardState = {
 ========================================================= */
 
 /* System routes intentionally omitted from navigation authorization. */
-const SYSTEM_ROUTES = [
-  "/unauthorized",
-];
+const SYSTEM_ROUTES = ["/unauthorized", "/notifications"];
 
 /* =========================================================
    SYSTEM ROUTE CHECK
 ========================================================= */
 
-function isSystemRoute(
-  pathname: string,
-) {
+function isSystemRoute(pathname: string) {
   return SYSTEM_ROUTES.some(
-    (route) =>
-      pathname === route ||
-      pathname.startsWith(
-        `${route}/`,
-      ),
+    (route) => pathname === route || pathname.startsWith(`${route}/`),
   );
 }
 
@@ -73,41 +52,28 @@ function filterModulesByPermission(
     return [];
   }
 
-  const role = String(
-    user.role || "",
-  ).toUpperCase();
+  const role = String(user.role || "").toUpperCase();
 
-  return modules.filter(
-    (module) => {
-      /*
-       * Student dashboard is restricted to students.
-       */
-      if (
-        module.key ===
-        "student-dashboard"
-      ) {
-        return role === "STUDENT";
-      }
+  return modules.filter((module) => {
+    /*
+     * Student dashboard is restricted to students.
+     */
+    if (module.key === "student-dashboard") {
+      return role === "STUDENT";
+    }
 
-      const requiredPermission =
-        NAVIGATION_PERMISSIONS[
-          module.key
-        ];
+    const requiredPermission = NAVIGATION_PERMISSIONS[module.key];
 
-      /*
-       * Unknown/custom modules are allowed
-       * when the backend has already returned them.
-       */
-      if (!requiredPermission) {
-        return true;
-      }
+    /*
+     * Unknown/custom modules are allowed
+     * when the backend has already returned them.
+     */
+    if (!requiredPermission) {
+      return true;
+    }
 
-      return hasPermission(
-        user,
-        requiredPermission,
-      );
-    },
-  );
+    return hasPermission(user, requiredPermission);
+  });
 }
 
 /* =========================================================
@@ -182,17 +148,11 @@ export default function RouteGuard({
 }: {
   children: React.ReactNode;
 }) {
-  const pathname =
-    usePathname();
+  const pathname = usePathname();
 
-  const router =
-    useRouter();
+  const router = useRouter();
 
-  const {
-    user,
-    isLoading: authLoading,
-    isAuthenticated,
-  } = useAuth();
+  const { user, isLoading: authLoading, isAuthenticated } = useAuth();
 
   /*
    * /unauthorized is a system page.
@@ -201,18 +161,15 @@ export default function RouteGuard({
    * permission check, otherwise an unauthorized user
    * would be redirected back to /unauthorized forever.
    */
-  const systemRoute =
-    isSystemRoute(pathname);
+  const systemRoute = isSystemRoute(pathname);
 
-  const [state, setState] =
-    useState<GuardState>({
-      status: "loading",
-      modules: [],
-      key: "",
-    });
+  const [state, setState] = useState<GuardState>({
+    status: "loading",
+    modules: [],
+    key: "",
+  });
 
-  const [reload, setReload] =
-    useState(0);
+  const [reload, setReload] = useState(0);
 
   const navigationKey = `${user?.id || ""}:${user?.role || ""}:${reload}`;
 
@@ -232,11 +189,7 @@ export default function RouteGuard({
      * Do not call the navigation API before authentication
      * has been established.
      */
-    if (
-      authLoading ||
-      !isAuthenticated ||
-      !user
-    ) {
+    if (authLoading || !isAuthenticated || !user) {
       return;
     }
 
@@ -265,35 +218,19 @@ export default function RouteGuard({
     return () => {
       cancelled = true;
     };
-  }, [
-    authLoading,
-    isAuthenticated,
-    user,
-    reload,
-    systemRoute,
-    navigationKey,
-  ]);
+  }, [authLoading, isAuthenticated, user, reload, systemRoute, navigationKey]);
 
   /* =======================================================
      NAVIGATION UPDATE EVENT
   ======================================================= */
 
   useEffect(() => {
-    const refresh = () =>
-      setReload(
-        (count) => count + 1,
-      );
+    const refresh = () => setReload((count) => count + 1);
 
-    window.addEventListener(
-      "dojoflow:navigation-updated",
-      refresh,
-    );
+    window.addEventListener("dojoflow:navigation-updated", refresh);
 
     return () => {
-      window.removeEventListener(
-        "dojoflow:navigation-updated",
-        refresh,
-      );
+      window.removeEventListener("dojoflow:navigation-updated", refresh);
     };
   }, []);
 
@@ -301,27 +238,17 @@ export default function RouteGuard({
      FILTERED MODULES
   ======================================================= */
 
-  const allowedModules =
-    useMemo(() => {
-      return filterModulesByPermission(
-        state.modules,
-        user,
-      );
-    }, [
-      state.modules,
-      user,
-    ]);
+  const allowedModules = useMemo(() => {
+    return filterModulesByPermission(state.modules, user);
+  }, [state.modules, user]);
 
   /* =======================================================
      ALLOWED ROUTES
   ======================================================= */
 
-  const allowedHrefs =
-    useMemo(() => {
-      return allowedModules.map(
-        (module) => module.href,
-      );
-    }, [allowedModules]);
+  const allowedHrefs = useMemo(() => {
+    return allowedModules.map((module) => module.href);
+  }, [allowedModules]);
 
   /*
    * A route is allowed if:
@@ -340,11 +267,7 @@ export default function RouteGuard({
     (state.status === "ready" &&
       state.key === navigationKey &&
       allowedHrefs.some(
-        (href) =>
-          pathname === href ||
-          pathname.startsWith(
-            `${href}/`,
-          ),
+        (href) => pathname === href || pathname.startsWith(`${href}/`),
       ));
 
   /* =======================================================
@@ -370,10 +293,7 @@ export default function RouteGuard({
     /*
      * AppShell handles unauthenticated users.
      */
-    if (
-      !isAuthenticated ||
-      !user
-    ) {
+    if (!isAuthenticated || !user) {
       return;
     }
 
@@ -388,12 +308,8 @@ export default function RouteGuard({
     /*
      * No allowed pages at all.
      */
-    if (
-      allowedHrefs.length === 0
-    ) {
-      router.replace(
-        "/unauthorized",
-      );
+    if (allowedHrefs.length === 0) {
+      router.replace("/unauthorized");
 
       return;
     }
@@ -402,9 +318,7 @@ export default function RouteGuard({
      * Current page is not authorized.
      */
     if (!allowed) {
-      router.replace(
-        "/unauthorized",
-      );
+      router.replace("/unauthorized");
     }
   }, [
     authLoading,
@@ -431,10 +345,7 @@ export default function RouteGuard({
      AUTHENTICATION FAILED
   ======================================================= */
 
-  if (
-    !isAuthenticated ||
-    !user
-  ) {
+  if (!isAuthenticated || !user) {
     return null;
   }
 
@@ -465,9 +376,7 @@ export default function RouteGuard({
      NAVIGATION ERROR
   ======================================================= */
 
-  if (
-    state.status === "error"
-  ) {
+  if (state.status === "error") {
     return (
       <div
         className="
@@ -502,21 +411,13 @@ export default function RouteGuard({
               text-(--ink-muted)
             "
           >
-            We could not load your
-            navigation permissions.
-            Please refresh the page
-            or contact your
-            administrator.
+            We could not load your navigation permissions. Please refresh the
+            page or contact your administrator.
           </p>
 
           <button
             type="button"
-            onClick={() =>
-              setReload(
-                (count) =>
-                  count + 1,
-              )
-            }
+            onClick={() => setReload((count) => count + 1)}
             className="
               mt-5
               rounded-xl
@@ -541,9 +442,7 @@ export default function RouteGuard({
      NO ACCESS
   ======================================================= */
 
-  if (
-    allowedModules.length === 0
-  ) {
+  if (allowedModules.length === 0) {
     return null;
   }
 

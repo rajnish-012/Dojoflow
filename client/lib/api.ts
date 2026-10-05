@@ -16,6 +16,7 @@ export interface NavigationModule {
   order: number;
   allowedRoles?: string[];
   requiredPermission?: string | null;
+  group?: string | null;
 }
 
 export interface ManagedModule extends NavigationModule {
@@ -23,6 +24,7 @@ export interface ManagedModule extends NavigationModule {
   isActive: boolean;
   isSystem: boolean;
   requiredPermission?: string | null;
+  group?: string | null;
 }
 
 export interface ModulePayload {
@@ -32,6 +34,8 @@ export interface ModulePayload {
   icon?: string;
   order?: number;
   allowedRoles?: string[];
+  requiredPermission?: string | null;
+  group?: string | null;
   isActive?: boolean;
 }
 

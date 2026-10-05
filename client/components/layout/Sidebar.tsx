@@ -8,34 +8,26 @@ import {
   Building2,
   ChevronDown,
   ChevronLeft,
-  FileText,
-  Folder,
-  Layers,
   LogOut,
-  Settings,
-  ShieldCheck,
   X,
 } from "lucide-react";
 
-import {
-  getMyNavigation,
-  type NavigationModule,
-  getBranches,
-} from "@/lib/api";
+import { getMyNavigation, type NavigationModule, getBranches } from "@/lib/api";
 
-import {
-  clearAuthSession,
-  useCurrentUser,
-} from "@/lib/current-user";
+import { clearAuthSession, useCurrentUser } from "@/lib/current-user";
 
-import {
-  hasPermission,
-  PERMISSIONS,
-} from "@/lib/permissions";
+import { hasPermission } from "@/lib/permissions";
 
 import { getNavigationIcon } from "@/lib/navigation-icons";
+import {
+  getNavigationGroupId,
+  NAVIGATION_GROUPS,
+} from "@/lib/navigation-groups";
 
-import { useAcademyBrand } from "@/components/settings/AcademyBrandProvider";
+import {
+  AcademyLogo,
+  useAcademyBrand,
+} from "@/components/settings/AcademyBrandProvider";
 
 /* =========================================================
    TYPES
@@ -57,15 +49,6 @@ const SIDEBAR_WIDTH = {
   collapsed: 84,
 } as const;
 
-const NAVIGATION_GROUPS = [
-  { id: "academy", label: "Academy", icon: Building2, keys: ["students", "plans", "curriculum", "attendance", "performance", "promotions", "progress"] },
-  { id: "operations", label: "Operations", icon: Layers, keys: ["makeups", "inquiries", "coach-assignments", "holidays", "branch-schedules"] },
-  { id: "content", label: "Content", icon: Folder, keys: ["website", "homepage", "gallery", "news", "sponsors"] },
-  { id: "reports", label: "Reports", icon: FileText, keys: ["reports", "analytics"] },
-  { id: "administration", label: "Administration", icon: ShieldCheck, keys: ["branches", "roles", "modules", "users", "staff", "permissions", "training-session-types"] },
-  { id: "settings", label: "Settings", icon: Settings, keys: ["settings", "academy-settings", "branding", "settings-branding", "settings-staff", "settings-maintenance"] },
-] as const;
-
 type NavigationGroup = {
   id: string;
   label: string;
@@ -79,16 +62,9 @@ function isNavigationGroup(item: NavigationEntry): item is NavigationGroup {
   return "children" in item;
 }
 
-function getGroupId(item: NavigationModule) {
-  const key = item.key.toLowerCase();
-  const href = item.href.toLowerCase();
-  return NAVIGATION_GROUPS.find((group) =>
-    group.keys.some((candidate) => key === candidate || key.startsWith(`${candidate}-`) || href.startsWith(`/website/${candidate}`)),
-  )?.id;
-}
-
 function matchesRoute(pathname: string, href: string) {
-  if (href === "/dashboard" || href === "/student-dashboard") return pathname === href;
+  if (href === "/dashboard" || href === "/student-dashboard")
+    return pathname === href;
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
@@ -100,9 +76,7 @@ function formatRole(role: string) {
   return role
     .replaceAll("_", " ")
     .toLowerCase()
-    .replace(/\b\w/g, (letter) =>
-      letter.toUpperCase(),
-    );
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 /**
@@ -122,7 +96,9 @@ function canSeeNavigationItem(
 
   // /modules/navigation already filters role visibility. Recheck the
   // permission returned by that API without duplicating role rules here.
-  return !item.requiredPermission || hasPermission(user, item.requiredPermission);
+  return (
+    !item.requiredPermission || hasPermission(user, item.requiredPermission)
+  );
 }
 
 /* =========================================================
@@ -139,13 +115,9 @@ export default function Sidebar({
 
   const user = useCurrentUser();
 
-  const {
-    settings: academySettings,
-  } = useAcademyBrand();
+  const { settings: academySettings } = useAcademyBrand();
 
-  const role = String(
-    user?.role || "",
-  ).toUpperCase();
+  const role = String(user?.role || "").toUpperCase();
 
   const [resolvedBranchName, setResolvedBranchName] = useState("");
   const branchValue = user?.branch as unknown as
@@ -153,16 +125,16 @@ export default function Sidebar({
     | { _id?: string; name?: string }
     | null
     | undefined;
-  const embeddedBranchName = branchValue && typeof branchValue === "object"
-    ? branchValue.name
-    : undefined;
-  const branchName = user?.branchName || embeddedBranchName ||
+  const embeddedBranchName =
+    branchValue && typeof branchValue === "object"
+      ? branchValue.name
+      : undefined;
+  const branchName =
+    user?.branchName ||
+    embeddedBranchName ||
     (!user?.branch ? "All Branches" : resolvedBranchName || "Assigned Branch");
 
-  const logoHref =
-    role === "STUDENT"
-      ? "/student-dashboard"
-      : "/dashboard";
+  const logoHref = role === "STUDENT" ? "/student-dashboard" : "/dashboard";
 
   /* =======================================================
      BRANCH NAME
@@ -173,9 +145,7 @@ export default function Sidebar({
     if (user?.branchName || embeddedBranchName || !user?.branch) return;
 
     const branchId =
-      typeof branchValue === "string"
-        ? branchValue
-        : branchValue?._id;
+      typeof branchValue === "string" ? branchValue : branchValue?._id;
 
     if (!branchId) {
       return;
@@ -187,17 +157,11 @@ export default function Sidebar({
           return;
         }
 
-        const branches = Array.isArray(
-          result?.branches,
-        )
-          ? result.branches
-          : [];
+        const branches = Array.isArray(result?.branches) ? result.branches : [];
 
-        const branch =
-          branches.find(
-            (item: { _id?: string }) =>
-              item._id === branchId,
-          );
+        const branch = branches.find(
+          (item: { _id?: string }) => item._id === branchId,
+        );
 
         setResolvedBranchName(branch?.name || "Assigned Branch");
       })
@@ -216,17 +180,13 @@ export default function Sidebar({
      NAVIGATION
   ======================================================= */
 
-  const [navItems, setNavItems] =
-    useState<NavigationModule[]>([]);
+  const [navItems, setNavItems] = useState<NavigationModule[]>([]);
 
-  const [navLoading, setNavLoading] =
-    useState(true);
+  const [navLoading, setNavLoading] = useState(true);
 
-  const [navError, setNavError] =
-    useState("");
+  const [navError, setNavError] = useState("");
 
-  const [navReload, setNavReload] =
-    useState(0);
+  const [navReload, setNavReload] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -246,9 +206,7 @@ export default function Sidebar({
         }
 
         setNavError(
-          error instanceof Error
-            ? error.message
-            : "Failed to load menu",
+          error instanceof Error ? error.message : "Failed to load menu",
         );
       })
       .finally(() => {
@@ -267,21 +225,12 @@ export default function Sidebar({
    * navigation configuration.
    */
   useEffect(() => {
-    const reload = () =>
-      setNavReload(
-        (count) => count + 1,
-      );
+    const reload = () => setNavReload((count) => count + 1);
 
-    window.addEventListener(
-      "dojoflow:navigation-updated",
-      reload,
-    );
+    window.addEventListener("dojoflow:navigation-updated", reload);
 
     return () => {
-      window.removeEventListener(
-        "dojoflow:navigation-updated",
-        reload,
-      );
+      window.removeEventListener("dojoflow:navigation-updated", reload);
     };
   }, []);
 
@@ -289,20 +238,13 @@ export default function Sidebar({
    * Apply the frontend permission layer.
    */
   const visibleNavItems = useMemo(() => {
-    const dynamicItems = navItems.filter((item) =>
-      canSeeNavigationItem(
-        user,
-        item,
-      ),
-    ).filter((item) => !["settings", "academy-settings", "branding"].includes(item.key));
-    if (!user) return dynamicItems;
-
-    const settingsItems: NavigationModule[] = [
-      { _id: "settings-branding", key: "settings-branding", label: "Academy Branding", href: "/settings/branding", icon: "Building2", order: 1, requiredPermission: PERMISSIONS.SETTINGS_VIEW },
-      { _id: "settings-staff", key: "settings-staff", label: "Staff Management", href: "/settings/staff", icon: "Users", order: 2, requiredPermission: PERMISSIONS.USER_VIEW },
-      { _id: "settings-maintenance", key: "settings-maintenance", label: "Maintenance", href: "/settings/maintenance", icon: "ShieldCheck", order: 3, requiredPermission: PERMISSIONS.MAINTENANCE_VIEW },
-    ].filter((item) => canSeeNavigationItem(user, item));
-    return [...dynamicItems, ...settingsItems];
+    const dynamicItems = navItems
+      .filter((item) => canSeeNavigationItem(user, item))
+      .filter(
+        (item) =>
+          !["settings", "academy-settings", "branding"].includes(item.key),
+      );
+    return dynamicItems;
   }, [navItems, user]);
 
   const navigationEntries = useMemo<NavigationEntry[]>(() => {
@@ -311,19 +253,28 @@ export default function Sidebar({
     );
     const groupedKeys = new Set<string>();
     const groups = NAVIGATION_GROUPS.flatMap((config) => {
-      const children = visibleNavItems.filter((item) => getGroupId(item) === config.id);
+      const children = visibleNavItems.filter(
+      (item) => getNavigationGroupId(item) === config.id,
+      );
       if (!children.length) return [];
       children.forEach((item) => groupedKeys.add(item.key));
-      return [{ id: config.id, label: config.label, icon: config.icon, children }];
+      return [
+        { id: config.id, label: config.label, icon: config.icon, children },
+      ];
     });
-    const ungrouped = visibleNavItems.filter((item) =>
-      !dashboardItems.includes(item) && !groupedKeys.has(item.key),
+    const ungrouped = visibleNavItems.filter(
+      (item) => !dashboardItems.includes(item) && !groupedKeys.has(item.key),
     );
     return [...dashboardItems, ...groups, ...ungrouped];
   }, [visibleNavItems]);
 
-  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
-  const [collapsedAtRoute, setCollapsedAtRoute] = useState<{ id: string; pathname: string } | null>(null);
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(
+    {},
+  );
+  const [collapsedAtRoute, setCollapsedAtRoute] = useState<{
+    id: string;
+    pathname: string;
+  } | null>(null);
   const [collapsedFlyout, setCollapsedFlyout] = useState<string | null>(null);
 
   /* =======================================================
@@ -334,8 +285,14 @@ export default function Sidebar({
     return matchesRoute(pathname, href);
   };
 
-  const activeGroupId = visibleNavItems.reduce<string | undefined>((activeId, item) =>
-    activeId || (matchesRoute(pathname, item.href) ? getGroupId(item) : undefined), undefined);
+  const activeGroupId = visibleNavItems.reduce<string | undefined>(
+    (activeId, item) =>
+      activeId ||
+      (matchesRoute(pathname, item.href)
+        ? getNavigationGroupId(item)
+        : undefined),
+    undefined,
+  );
 
   /* =======================================================
      LOGOUT
@@ -358,7 +315,11 @@ export default function Sidebar({
     setCollapsedFlyout(null);
   };
 
-  const renderNavigationLink = (item: NavigationModule, nested = false, forceExpanded = false) => {
+  const renderNavigationLink = (
+    item: NavigationModule,
+    nested = false,
+    forceExpanded = false,
+  ) => {
     const Icon = getNavigationIcon(item.icon);
     const active = isActive(item.href);
     const compact = collapsed && !forceExpanded;
@@ -372,18 +333,38 @@ export default function Sidebar({
         className={[
           "group relative flex min-h-11 items-center rounded-xl py-2 text-[13px] font-semibold transition-colors duration-200",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--gold)",
-          compact ? "justify-center px-3" : nested ? "gap-2.5 px-3" : "gap-3 px-3.5",
+          compact
+            ? "justify-center px-3"
+            : nested
+              ? "gap-2.5 px-3"
+              : "gap-3 px-3.5",
           active
             ? "bg-(--gold) text-(--sidebar-active-text)"
             : "text-(--sidebar-text) opacity-80 hover:bg-(--sidebar-hover) hover:opacity-100",
         ].join(" ")}
       >
         {active && !compact && (
-          <span aria-hidden="true" className="absolute -left-3 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-r-full bg-(--gold)" />
+          <span
+            aria-hidden="true"
+            className="absolute -left-3 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-r-full bg-(--gold)"
+          />
         )}
-        <Icon size={18} strokeWidth={active ? 2.3 : 1.9} className={active ? "shrink-0" : "shrink-0 text-(--sidebar-muted) group-hover:text-(--gold)"} />
+        <Icon
+          size={18}
+          strokeWidth={active ? 2.3 : 1.9}
+          className={
+            active
+              ? "shrink-0"
+              : "shrink-0 text-(--sidebar-muted) group-hover:text-(--gold)"
+          }
+        />
         {!compact && <span className="truncate">{item.label}</span>}
-        {!compact && active && <span aria-hidden="true" className="ml-auto h-1.5 w-1.5 shrink-0 rounded-full bg-(--sidebar-active-text)" />}
+        {!compact && active && (
+          <span
+            aria-hidden="true"
+            className="ml-auto h-1.5 w-1.5 shrink-0 rounded-full bg-(--sidebar-active-text)"
+          />
+        )}
       </Link>
     );
   };
@@ -428,14 +409,10 @@ export default function Sidebar({
           "text-(--sidebar-text)",
           "shadow-none",
           "transition-[width,transform] duration-300 ease-out",
-          isOpen
-            ? "translate-x-0"
-            : "-translate-x-full md:translate-x-0",
+          isOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0",
         ].join(" ")}
         style={{
-          width: collapsed
-            ? SIDEBAR_WIDTH.collapsed
-            : SIDEBAR_WIDTH.expanded,
+          width: collapsed ? SIDEBAR_WIDTH.collapsed : SIDEBAR_WIDTH.expanded,
         }}
       >
         {/* =================================================
@@ -446,9 +423,7 @@ export default function Sidebar({
           className={[
             "flex h-[76px] shrink-0 items-center",
             "border-b border-(--line)",
-            collapsed
-              ? "justify-center px-3"
-              : "justify-between px-5",
+            collapsed ? "justify-center px-3" : "justify-between px-5",
           ].join(" ")}
         >
           <Link
@@ -459,9 +434,7 @@ export default function Sidebar({
               "flex min-w-0 items-center",
               "transition-opacity duration-200",
               "hover:opacity-90",
-              collapsed
-                ? "justify-center"
-                : "gap-3",
+              collapsed ? "justify-center" : "gap-3",
             ].join(" ")}
           >
             <div
@@ -477,16 +450,7 @@ export default function Sidebar({
                 bg-white
               "
             >
-              <img
-                src={academySettings.logoUrl || "/logo.png"}
-                alt={academySettings.academyName || "ForceStrike Academy"}
-                onError={(event) => {
-                  if (event.currentTarget.getAttribute("src") !== "/logo.png") {
-                    event.currentTarget.setAttribute("src", "/logo.png");
-                  }
-                }}
-                className="h-9 w-9 object-contain p-0.5"
-              />
+              <AcademyLogo className="h-9 w-9 object-contain p-0.5" />
             </div>
 
             {!collapsed && (
@@ -500,9 +464,9 @@ export default function Sidebar({
                     leading-5
                     text-(--sidebar-text)
                   "
-                  title={academySettings.academyName || "ForceStrike Academy"}
+                  title={academySettings.academyName || "Your Academy"}
                 >
-                  {academySettings.academyName || "ForceStrike Academy"}
+                  {academySettings.academyName || "Your Academy"}
                 </p>
 
                 <p
@@ -517,7 +481,10 @@ export default function Sidebar({
                     leading-3.5
                     text-(--sidebar-muted)
                   "
-                  title={academySettings.tagline || "Train with purpose. Manage with clarity."}
+                  title={
+                    academySettings.tagline ||
+                    "Train with purpose. Manage with clarity."
+                  }
                 >
                   {academySettings.tagline ||
                     "Train with purpose. Manage with clarity."}
@@ -543,10 +510,7 @@ export default function Sidebar({
               md:hidden
             "
           >
-            <X
-              size={18}
-              strokeWidth={2}
-            />
+            <X size={18} strokeWidth={2} />
           </button>
         </div>
 
@@ -585,10 +549,7 @@ export default function Sidebar({
           "
         >
           {navLoading && (
-            <div
-              aria-hidden="true"
-              className="space-y-2"
-            >
+            <div aria-hidden="true" className="space-y-2">
               {Array.from({
                 length: 6,
               }).map((_, index) => (
@@ -630,12 +591,7 @@ export default function Sidebar({
 
               <button
                 type="button"
-                onClick={() =>
-                  setNavReload(
-                    (count) =>
-                      count + 1,
-                  )
-                }
+                onClick={() => setNavReload((count) => count + 1)}
                 className="
                   text-[11px]
                   font-bold
@@ -648,53 +604,60 @@ export default function Sidebar({
             </div>
           )}
 
-          {!navLoading &&
-            !navError &&
-            visibleNavItems.length === 0 && (
-              <div
-                className="
+          {!navLoading && !navError && visibleNavItems.length === 0 && (
+            <div
+              className="
                   rounded-xl
                   border
                   border-(--line)
                   p-3
                   text-center
                 "
-              >
-                {!collapsed && (
-                  <p
-                    className="
+            >
+              {!collapsed && (
+                <p
+                  className="
                       text-[11px]
                       font-medium
                       leading-5
                       text-(--sidebar-muted)
                     "
-                  >
-                    No modules are available
-                    for your account.
-                  </p>
-                )}
-              </div>
-            )}
+                >
+                  No modules are available for your account.
+                </p>
+              )}
+            </div>
+          )}
 
           <div className="space-y-1">
             {navigationEntries.map((entry) => {
               if (!isNavigationGroup(entry)) return renderNavigationLink(entry);
               const GroupIcon = entry.icon;
-              const groupActive = entry.children.some((child) => isActive(child.href));
-              const routeCollapsed = collapsedAtRoute?.id === entry.id && collapsedAtRoute.pathname === pathname;
+              const groupActive = entry.children.some((child) =>
+                isActive(child.href),
+              );
+              const routeCollapsed =
+                collapsedAtRoute?.id === entry.id &&
+                collapsedAtRoute.pathname === pathname;
               const expanded = groupActive
                 ? !routeCollapsed
                 : expandedGroups[entry.id] === true;
               const flyoutOpen = collapsedFlyout === entry.id;
               const toggleGroup = () => {
                 if (collapsed) {
-                  setCollapsedFlyout((current) => current === entry.id ? null : entry.id);
+                  setCollapsedFlyout((current) =>
+                    current === entry.id ? null : entry.id,
+                  );
                   return;
                 }
                 setExpandedGroups(expanded ? {} : { [entry.id]: true });
                 if (expanded && groupActive) {
                   setCollapsedAtRoute({ id: entry.id, pathname });
-                } else if (!expanded && activeGroupId && activeGroupId !== entry.id) {
+                } else if (
+                  !expanded &&
+                  activeGroupId &&
+                  activeGroupId !== entry.id
+                ) {
                   setCollapsedAtRoute({ id: activeGroupId, pathname });
                 } else {
                   setCollapsedAtRoute(null);
@@ -719,12 +682,28 @@ export default function Sidebar({
                       "group relative flex min-h-11 w-full items-center rounded-xl py-2.5 text-[13px] font-semibold transition-colors duration-200",
                       "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-(--gold)",
                       collapsed ? "justify-center px-3" : "gap-3 px-3.5",
-                      groupActive ? "bg-(--sidebar-hover) text-(--sidebar-text)" : "text-(--sidebar-text) opacity-80 hover:bg-(--sidebar-hover) hover:opacity-100",
+                      groupActive
+                        ? "bg-(--sidebar-hover) text-(--sidebar-text)"
+                        : "text-(--sidebar-text) opacity-80 hover:bg-(--sidebar-hover) hover:opacity-100",
                     ].join(" ")}
                   >
-                    <GroupIcon size={18} className={groupActive ? "shrink-0 text-(--gold)" : "shrink-0 text-(--sidebar-muted) group-hover:text-(--gold)"} />
-                    {!collapsed && <span className="truncate">{entry.label}</span>}
-                    {!collapsed && <ChevronDown size={15} className={`ml-auto shrink-0 transition-transform duration-200 ${expanded ? "rotate-180" : ""}`} />}
+                    <GroupIcon
+                      size={18}
+                      className={
+                        groupActive
+                          ? "shrink-0 text-(--gold)"
+                          : "shrink-0 text-(--sidebar-muted) group-hover:text-(--gold)"
+                      }
+                    />
+                    {!collapsed && (
+                      <span className="truncate">{entry.label}</span>
+                    )}
+                    {!collapsed && (
+                      <ChevronDown
+                        size={15}
+                        className={`ml-auto shrink-0 transition-transform duration-200 ${expanded ? "rotate-180" : ""}`}
+                      />
+                    )}
                   </button>
 
                   {(!collapsed || flyoutOpen) && (
@@ -732,15 +711,29 @@ export default function Sidebar({
                       id={`sidebar-group-${entry.id}`}
                       aria-hidden={!collapsed && !expanded}
                       inert={!collapsed && !expanded}
-                      onMouseEnter={() => collapsed && setCollapsedFlyout(entry.id)}
+                      onMouseEnter={() =>
+                        collapsed && setCollapsedFlyout(entry.id)
+                      }
                       onMouseLeave={() => collapsed && setCollapsedFlyout(null)}
                       className={[
                         "grid transition-[grid-template-rows,opacity] duration-200 ease-out",
-                        collapsed ? "absolute left-full top-0 z-[60] ml-2 w-56 rounded-xl border border-(--line) bg-(--sidebar-bg) p-2 shadow-xl" : expanded ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0",
+                        collapsed
+                          ? "absolute left-full top-0 z-[60] ml-2 w-56 rounded-xl border border-(--line) bg-(--sidebar-bg) p-2 shadow-xl"
+                          : expanded
+                            ? "grid-rows-[1fr] opacity-100"
+                            : "grid-rows-[0fr] opacity-0",
                       ].join(" ")}
                     >
-                      <div className={collapsed ? "space-y-1" : "min-h-0 space-y-1 overflow-hidden border-l border-(--line) ml-7 pl-2 pt-1"}>
-                        {entry.children.map((child) => renderNavigationLink(child, true, collapsed))}
+                      <div
+                        className={
+                          collapsed
+                            ? "space-y-1"
+                            : "min-h-0 space-y-1 overflow-hidden border-l border-(--line) ml-7 pl-2 pt-1"
+                        }
+                      >
+                        {entry.children.map((child) =>
+                          renderNavigationLink(child, true, collapsed),
+                        )}
                       </div>
                     </div>
                   )}
@@ -793,10 +786,7 @@ export default function Sidebar({
                     text-(--gold)
                   "
                 >
-                  {user?.name
-                    ?.trim()
-                    ?.charAt(0)
-                    ?.toUpperCase() ?? ""}
+                  {user?.name?.trim()?.charAt(0)?.toUpperCase() ?? ""}
                 </div>
 
                 <div className="min-w-0">
@@ -824,9 +814,7 @@ export default function Sidebar({
                           text-(--sidebar-muted)
                         "
                       >
-                        {role
-                          ? formatRole(role)
-                          : ""}
+                        {role ? formatRole(role) : ""}
                       </p>
 
                       {branchName && (
@@ -877,11 +865,7 @@ export default function Sidebar({
           <button
             type="button"
             onClick={handleLogout}
-            title={
-              collapsed
-                ? "Logout"
-                : undefined
-            }
+            title={collapsed ? "Logout" : undefined}
             aria-label="Logout"
             className={[
               "group flex min-h-11 w-full",
@@ -894,9 +878,7 @@ export default function Sidebar({
               "focus-visible:outline-none",
               "focus-visible:ring-2",
               "focus-visible:ring-(--gold)",
-              collapsed
-                ? "justify-center px-3"
-                : "gap-3 px-3.5",
+              collapsed ? "justify-center px-3" : "gap-3 px-3.5",
             ].join(" ")}
           >
             <LogOut
@@ -910,9 +892,7 @@ export default function Sidebar({
               "
             />
 
-            {!collapsed && (
-              <span>Logout</span>
-            )}
+            {!collapsed && <span>Logout</span>}
           </button>
 
           {/* COLLAPSE */}
@@ -920,19 +900,9 @@ export default function Sidebar({
           {onToggleCollapse && (
             <button
               type="button"
-              onClick={
-                onToggleCollapse
-              }
-              title={
-                collapsed
-                  ? "Expand sidebar"
-                  : "Collapse sidebar"
-              }
-              aria-label={
-                collapsed
-                  ? "Expand sidebar"
-                  : "Collapse sidebar"
-              }
+              onClick={onToggleCollapse}
+              title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+              aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
               className={[
                 "mt-2 hidden min-h-11 w-full",
                 "items-center rounded-xl",
@@ -945,9 +915,7 @@ export default function Sidebar({
                 "focus-visible:ring-2",
                 "focus-visible:ring-(--gold)",
                 "md:flex",
-                collapsed
-                  ? "justify-center px-3"
-                  : "gap-3 px-3.5",
+                collapsed ? "justify-center px-3" : "gap-3 px-3.5",
               ].join(" ")}
             >
               <ChevronLeft
@@ -956,17 +924,11 @@ export default function Sidebar({
                 className={[
                   "shrink-0",
                   "transition-transform duration-300",
-                  collapsed
-                    ? "rotate-180"
-                    : "",
+                  collapsed ? "rotate-180" : "",
                 ].join(" ")}
               />
 
-              {!collapsed && (
-                <span>
-                  Collapse sidebar
-                </span>
-              )}
+              {!collapsed && <span>Collapse sidebar</span>}
             </button>
           )}
         </div>

@@ -1,4 +1,10 @@
 const Attendance = require("../models/Attendance");
+const indiaDateFormatter = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "Asia/Kolkata",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
 
 async function getProgramLearningProgress({
   studentId,
@@ -38,18 +44,23 @@ async function getProgramLearningProgress({
     };
   }
   const records = await Attendance.find(filter)
-    .select("planDay status makeupRequired makeupCompleted")
+    .select("planDay status date createdAt attendanceType")
+    .sort({ date: 1, createdAt: 1, _id: 1 })
     .lean();
-  const completed = new Set(
-    records
-      .filter(
-        (record) =>
-          record.status === "PRESENT" ||
-          (record.makeupRequired && record.makeupCompleted),
-      )
-      .map((record) => Number(record.planDay))
-      .filter(Number.isInteger),
-  );
+  // Historical duplicates on one calendar date count as one decision.
+  // Makeup attendance is recovery history, never regular progression.
+  const consumedDates = new Set();
+  const completed = new Set();
+  for (const record of records) {
+    if (record.attendanceType === "MAKEUP" || !["PRESENT", "ABSENT"].includes(record.status)) continue;
+    const date = new Date(record.date);
+    if (Number.isNaN(date.getTime())) continue;
+    const dateKey = indiaDateFormatter.format(date);
+    if (consumedDates.has(dateKey)) continue;
+    consumedDates.add(dateKey);
+    const day = Number(record.planDay);
+    if (Number.isInteger(day) && day > 0) completed.add(day);
+  }
   const days = [
     ...new Set(
       (curriculum || [])

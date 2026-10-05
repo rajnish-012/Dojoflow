@@ -14,6 +14,15 @@ const ROLE_KEY_PATTERN = /^[A-Z0-9_]+$/;
 const HREF_PATTERN = /^\/[a-zA-Z0-9\-_\/]*$/;
 
 const KEY_PATTERN = /^[a-z0-9-]+$/;
+const MODULE_GROUPS = new Set([
+  "ungrouped",
+  "academy",
+  "operations",
+  "content",
+  "reports",
+  "administration",
+  "settings",
+]);
 
 /*
  * =========================================================
@@ -61,13 +70,27 @@ const MODULE_PERMISSIONS = Object.freeze({
 
   reports: "report.view",
 
+  fees: "finance.view",
+
   inquiries: "inquiry.view",
+
+  notifications: "notification.view",
+
+  notification: "notification.view",
 
   branches: "branch.view",
 
   "branch-schedules": "branch_schedule.view",
 
   settings: "settings.view",
+
+  "settings-branding": "settings.view",
+
+  "settings-staff": "user.view",
+
+  "settings-maintenance": "maintenance.view",
+
+  "settings-email": "settings.manage",
 
   "website-homepage": "website.view",
 
@@ -131,6 +154,12 @@ const normalizePermission = (value) => {
   const permission = String(value).trim();
 
   return permission || null;
+};
+
+const normalizeGroup = (value) => {
+  if (value === null || value === undefined || value === "") return null;
+  const group = String(value).trim().toLowerCase();
+  return MODULE_GROUPS.has(group) ? group : undefined;
 };
 
 /*
@@ -240,7 +269,7 @@ const canAccessModule = (req, moduleDoc) => {
   }
 
   /*
-   * The Settings section contains branding, staff, and maintenance pages.
+   * The Settings section contains branding, staff, maintenance, and email pages.
    * Allow users who can access any one of those sections to reach its
    * shared route base; each page and API keeps its own permission checks.
    */
@@ -251,6 +280,7 @@ const canAccessModule = (req, moduleDoc) => {
     const permissions = getUserPermissions(req);
     return (
       permissions.includes("settings.view") ||
+      permissions.includes("settings.manage") ||
       permissions.includes("user.view") ||
       permissions.includes("maintenance.view")
     );
@@ -319,7 +349,7 @@ const getMyNavigation = async (req, res) => {
         order: 1,
         label: 1,
       })
-      .select("key label href icon order requiredPermission allowedRoles")
+      .select("key label href icon order requiredPermission allowedRoles group")
       .lean();
 
     const visibleModules = modules.filter((moduleDoc) =>
@@ -383,6 +413,7 @@ const createModule = async (req, res) => {
     const allowedRoles = normalizeRoles(req.body.allowedRoles ?? []);
 
     let requiredPermission = normalizePermission(req.body.requiredPermission);
+    const group = normalizeGroup(req.body.group);
 
     if (!key || !label || !href) {
       return sendError(res, 400, "Key, label and route are required");
@@ -408,6 +439,10 @@ const createModule = async (req, res) => {
 
     if (allowedRoles === null) {
       return sendError(res, 400, "Invalid roles list");
+    }
+
+    if (group === undefined) {
+      return sendError(res, 400, "Invalid sidebar group");
     }
 
     if (requiredPermission && !ALL_PERMISSIONS.includes(requiredPermission)) {
@@ -462,6 +497,8 @@ const createModule = async (req, res) => {
 
       requiredPermission,
 
+      group,
+
       allowedRoles,
 
       isActive: true,
@@ -486,7 +523,7 @@ const createModule = async (req, res) => {
     }
 
     if (error.name === "ValidationError") {
-      return sendError(res, 400, error.message);
+      return sendError(res, 400, process.env.NODE_ENV === "production" ? "Invalid module data." : error.message);
     }
 
     console.error("Create module error:", error);
@@ -588,6 +625,14 @@ const updateModule = async (req, res) => {
       }
 
       moduleDoc.requiredPermission = permission;
+    }
+
+    if (req.body.group !== undefined) {
+      const group = normalizeGroup(req.body.group);
+      if (group === undefined) {
+        return sendError(res, 400, "Invalid sidebar group");
+      }
+      moduleDoc.group = group;
     }
 
     /*

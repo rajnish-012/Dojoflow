@@ -7,7 +7,9 @@ const Branch = require("../models/Branch");
 const Plan = require("../models/Plan");
 const CoachStudentAssignment = require("../models/CoachStudentAssignment");
 const { getProgramLearningProgress } = require("../services/programProgress.service");
+const { safelyNotify } = require("../services/notification.service");
 const { resolveProgramCurriculum } = require("../services/curriculumResolver.service");
+const { withAttendanceSessionDetails } = require("../utils/attendanceSession");
 
 const {
   getBranchDateAvailability,
@@ -327,6 +329,7 @@ const calculateTrainingDay = async (studentId, selectedDate) => {
    */
   const selectedRecord = await Attendance.findOne({
     student: studentId,
+    attendanceType: { $ne: "MAKEUP" },
     date: {
       $gte: selectedStart,
       $lte: selectedEnd,
@@ -350,6 +353,7 @@ const calculateTrainingDay = async (studentId, selectedDate) => {
    */
   const previousRecords = await Attendance.find({
     student: studentId,
+    attendanceType: { $ne: "MAKEUP" },
     date: {
       $gte: joinDate,
       $lt: selectedStart,
@@ -673,13 +677,17 @@ const getAttendanceByStudent = async (req, res) => {
         date: 1,
       })
       .lean();
+    const attendanceWithSessions = await withAttendanceSessionDetails(
+      attendance,
+      student.branch?._id || student.branch,
+    );
 
     return res.json({
       success: true,
 
       student,
 
-      attendance,
+      attendance: attendanceWithSessions,
     });
   } catch (error) {
     console.error("Get attendance by student error:", error);
@@ -786,6 +794,7 @@ const getDailyAttendanceSheet = async (req, res) => {
     }
 
     const selectedDate = formatDate(requestedDate);
+    const { start, end } = getDateRange(requestedDate);
 
     let branchId = branch || null;
 
@@ -819,6 +828,7 @@ const getDailyAttendanceSheet = async (req, res) => {
       status: {
         $nin: ["INACTIVE", "COMPLETED", "DELETED"],
       },
+      joinDate: { $lte: end },
     };
 
     if (branchId) {
@@ -895,9 +905,8 @@ const getDailyAttendanceSheet = async (req, res) => {
      * Existing attendance records for the
      * selected calendar date.
      */
-    const { start, end } = getDateRange(requestedDate);
-
     const attendanceQuery = {
+      attendanceType: { $ne: "MAKEUP" },
       date: {
         $gte: start,
         $lte: end,
@@ -1165,7 +1174,7 @@ const markAttendance = async (req, res) => {
       });
     }
 
-    const allowedStatuses = ["PRESENT", "ABSENT", "LATE", "EXCUSED"];
+    const allowedStatuses = ["PRESENT", "ABSENT"];
 
     if (!allowedStatuses.includes(status)) {
       return res.status(400).json({
@@ -1379,7 +1388,7 @@ const markAttendance = async (req, res) => {
 
     const existingAttendance = await Attendance.findOne({
       student,
-      sessionSlotId: selectedSlot._id,
+      attendanceType: { $ne: "MAKEUP" },
       date: {
         $gte: start,
         $lte: end,
@@ -1389,7 +1398,8 @@ const markAttendance = async (req, res) => {
     if (existingAttendance) {
       return res.status(409).json({
         success: false,
-        message: "Attendance already marked for this session on this date",
+        code: "ATTENDANCE_ALREADY_MARKED",
+        message: "Attendance has already been marked for this student on this date.",
         attendance: existingAttendance,
       });
     }
@@ -1431,7 +1441,8 @@ const markAttendance = async (req, res) => {
    MAKEUP
 ===================================================== */
 
-    const shouldCreateMakeup = status === "ABSENT" && makeupRequired === true;
+    // Absence recovery is mandatory; retain the request field for compatibility.
+    const shouldCreateMakeup = status === "ABSENT";
 
     /* =====================================================
    CREATE ATTENDANCE
@@ -1447,12 +1458,15 @@ const markAttendance = async (req, res) => {
       sessionTypeId: selectedSlot.sessionTypeId,
       sessionSlotId: selectedSlot._id,
       sessionName: selectedSlot.sessionName,
+      sessionStartTime: selectedSlot.startTime,
+      sessionEndTime: selectedSlot.endTime,
       date: attendanceDate,
       planDay: normalizedPlanDay,
       curriculumTitle: curriculumItem.title,
       curriculumSkill: curriculumItem.skill || "",
       curriculumDescription: curriculumItem.description || "",
       status,
+      attendanceType: "REGULAR",
       markedBy: req.user._id,
       makeupRequired: shouldCreateMakeup,
       makeupCompleted: false,
@@ -1463,8 +1477,8 @@ const markAttendance = async (req, res) => {
 ===================================================== */
 
     let makeup = null;
-
     if (shouldCreateMakeup) {
+      try {
       makeup = await Makeup.create({
         student,
         enrollment: datedEnrollment?._id || null,
@@ -1481,6 +1495,39 @@ const markAttendance = async (req, res) => {
         curriculumSkill: curriculumItem.skill || "",
         markedBy: req.user._id,
       });
+      } catch (writeError) {
+        await Attendance.deleteOne({ _id: attendance._id });
+        throw writeError;
+      }
+    }
+
+    if (status === "ABSENT") {
+      await safelyNotify({
+        type: "ATTENDANCE_ABSENT",
+        title: "Attendance marked absent",
+        message: `${studentRecord.name} was marked absent for Training Day ${normalizedPlanDay}.`,
+        severity: "WARNING",
+        branch: studentRecord.branch,
+        student: studentRecord._id,
+        entityType: "ATTENDANCE",
+        entityId: attendance._id,
+        eventKey: `attendance:${attendance._id}:absent`,
+        actionUrl: `/attendance?date=${encodeURIComponent(date)}`,
+      });
+      if (makeup) {
+        await safelyNotify({
+          type: "MAKEUP_CREATED",
+          title: "Makeup class required",
+          message: `${studentRecord.name} missed Training Day ${normalizedPlanDay}. A makeup class has been created.`,
+          severity: "WARNING",
+          branch: studentRecord.branch,
+          student: studentRecord._id,
+          entityType: "MAKEUP",
+          entityId: makeup._id,
+          eventKey: `makeup:${makeup._id}:created`,
+          actionUrl: "/makeups",
+        });
+      }
     }
 
     /* =====================================================
@@ -1501,17 +1548,30 @@ const markAttendance = async (req, res) => {
 
       attendance: populatedAttendance,
       makeup,
+      progression: {
+        consumedDay: normalizedPlanDay,
+        nextDay: (await getProgramLearningProgress({
+          studentId: studentRecord._id,
+          programId: selectedSlot.sessionTypeId,
+          enrollmentId: datedEnrollment?._id,
+          enrollmentStartDate: datedEnrollment?.startDate,
+          enrollmentEndDate: datedEnrollment?.endDate,
+          curriculum: planCurriculum,
+          asOfDate: requestedDate,
+        })).nextDay,
+      },
       branchSchedule: scheduleValidation.schedule,
     });
   } catch (error) {
-    console.error("Mark attendance error:", error);
-
     if (error && error.code === 11000) {
       return res.status(409).json({
         success: false,
-        message: "Attendance already exists for this student and date",
+        code: "ATTENDANCE_ALREADY_MARKED",
+        message: "Attendance has already been marked for this student on this date.",
       });
     }
+
+    console.error("Mark attendance error:", error);
 
     return res.status(500).json({
       success: false,
@@ -1520,6 +1580,54 @@ const markAttendance = async (req, res) => {
           ? "Failed to mark attendance"
           : error.message || "Failed to mark attendance",
     });
+  }
+};
+
+/* =========================================================
+UNDO REGULAR ATTENDANCE
+========================================================= */
+
+const undoAttendance = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: "Attendance record ID is invalid." });
+    }
+
+    const attendance = await Attendance.findById(id);
+    if (!attendance) {
+      return res.status(404).json({ success: false, message: "Attendance record was not found." });
+    }
+    if (attendance.attendanceType !== "REGULAR") {
+      return res.status(409).json({ success: false, code: "MAKEUP_ATTENDANCE_CANNOT_BE_UNDONE", message: "Makeup attendance is part of the recovery history and cannot be undone here." });
+    }
+
+    const branchError = checkBranchAccess(req, attendance.branch);
+    if (branchError) return res.status(branchError.status).json({ success: false, message: branchError.message });
+    const coachError = await checkCoachStudentAccess(req, attendance.student);
+    if (coachError) return res.status(coachError.status).json({ success: false, message: coachError.message });
+
+    const Performance = require("../models/Performance");
+    if (await Performance.exists({ attendance: attendance._id })) {
+      return res.status(409).json({ success: false, code: "ATTENDANCE_HAS_PERFORMANCE", message: "This attendance has a performance evaluation. Remove or correct that evaluation before undoing attendance." });
+    }
+
+    const makeup = await Makeup.findOne({ originalAttendance: attendance._id });
+    if (makeup?.status === "COMPLETED" || makeup?.makeupAttendance) {
+      return res.status(409).json({ success: false, code: "ATTENDANCE_HAS_COMPLETED_MAKEUP", message: "This absence has a completed makeup recovery and cannot be undone." });
+    }
+
+    // Delete the dependent scheduled/cancelled absence recovery before its source.
+    if (makeup) await Makeup.deleteOne({ _id: makeup._id });
+    const deleted = await Attendance.deleteOne({ _id: attendance._id, attendanceType: "REGULAR" });
+    if (!deleted.deletedCount) {
+      return res.status(409).json({ success: false, code: "ATTENDANCE_CHANGED", message: "Attendance changed while undoing. Refresh the sheet and try again." });
+    }
+
+    return res.json({ success: true, message: "Attendance was undone.", attendanceId: id });
+  } catch (error) {
+    console.error("Undo attendance error:", error);
+    return res.status(500).json({ success: false, message: process.env.NODE_ENV === "production" ? "Failed to undo attendance." : error.message || "Failed to undo attendance." });
   }
 };
 
@@ -1686,4 +1794,5 @@ module.exports = {
   getDailyAttendanceSheet,
   markAttendance,
   markAllAttendancePresent,
+  undoAttendance,
 };

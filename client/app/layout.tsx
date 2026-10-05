@@ -3,22 +3,12 @@ import Script from "next/script";
 import "./globals.css";
 import AppShell from "@/components/layout/AppShell";
 import ThemeProvider from "@/components/theme/ThemeProvider";
-import { Inter } from "next/font/google";
-import { cn } from "@/lib/utils";
 import NotificationProvider from "@/components/ui/NotificationProvider";
-
-const inter = Inter({ subsets: ["latin"], variable: "--font-sans" });
+import "@fontsource-variable/plus-jakarta-sans";
 
 export const metadata: Metadata = {
-  title: "ForceStrike | Karate Academy Management",
-  description:
-    "Manage students, plans, attendance, performance and belt progression.",
-
-  icons: {
-    icon: "/logo.png",
-    shortcut: "/logo.png",
-    apple: "/logo.png",
-  },
+  title: "Academy Portal",
+  description: "Academy management portal.",
 };
 
 const themeScript = `
@@ -55,7 +45,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning className={cn("font-sans", inter.variable)}>
+    <html lang="en" suppressHydrationWarning>
       <head>
         <Script
           id="theme-init"

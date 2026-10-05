@@ -29,6 +29,9 @@ import {
   Textarea,
   TablePagination,
 } from "@/components/ui";
+import InternationalPhoneInput, {
+  isValidPhoneNumber,
+} from "@/components/ui/InternationalPhoneInput";
 
 import { createBranch, getBranches } from "@/lib/api";
 import { useCurrentUser } from "@/lib/current-user";
@@ -57,8 +60,7 @@ const initialForm: BranchForm = {
 export default function BranchesPage() {
   const currentUser = useCurrentUser();
   const canManageBranches = useCan("branch.manage");
-  const canCreateBranch =
-    canManageBranches && currentUser?.dataScope === "ALL";
+  const canCreateBranch = canManageBranches && currentUser?.dataScope === "ALL";
   const [branches, setBranches] = useState<Branch[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -127,6 +129,11 @@ export default function BranchesPage() {
       return;
     }
 
+    if (phone && !isValidPhoneNumber(phone, "IN")) {
+      setFormError("Enter a valid phone number with its country code.");
+      return;
+    }
+
     try {
       setSubmitting(true);
       setFormError("");
@@ -146,7 +153,11 @@ export default function BranchesPage() {
     } catch (caughtError) {
       console.error(caughtError);
 
-      toast.error(caughtError instanceof Error ? caughtError.message : "Failed to create branch.");
+      toast.error(
+        caughtError instanceof Error
+          ? caughtError.message
+          : "Failed to create branch.",
+      );
     } finally {
       setSubmitting(false);
     }
@@ -434,17 +445,12 @@ export default function BranchesPage() {
                 Phone Number
               </label>
 
-              <Input
+              <InternationalPhoneInput
                 id="branch-phone"
-                type="tel"
                 value={form.phone}
-                onChange={(event) =>
-                  setForm((previous) => ({
-                    ...previous,
-                    phone: event.target.value,
-                  }))
+                onChange={(phone) =>
+                  setForm((previous) => ({ ...previous, phone }))
                 }
-                placeholder="e.g. 9876543210"
               />
             </div>
           </div>

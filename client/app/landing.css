@@ -1,5 +1,5 @@
 /* =========================================================
-   DOJOFLOW LANDING PAGE — ForceStrike-Inspired Design
+   ForceStrike LANDING PAGE — ForceStrike-Inspired Design
    Full redesign: dark, bold, martial-arts premium aesthetic
 ========================================================= */
 
@@ -173,9 +173,14 @@
   padding: 0 0.75rem 0 0;
 }
 
-.lp-nav-logo img {
+.lp-nav-logo img,
+.lp-nav-logo .lp-nav-brand-logo {
+  display: flex;
   height: 40px;
   width: 40px;
+  flex: 0 0 40px;
+  align-items: center;
+  justify-content: center;
   object-fit: contain;
   border-radius: 8px;
   background: white;

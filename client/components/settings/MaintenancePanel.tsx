@@ -40,7 +40,9 @@ type Health = {
   checkedAt: string;
 };
 
-function badgeVariant(status?: string): "success" | "danger" | "warning" | "neutral" {
+function badgeVariant(
+  status?: string,
+): "success" | "danger" | "warning" | "neutral" {
   if (status === "HEALTHY" || status === "CONNECTED") return "success";
   if (status === "ERROR") return "danger";
   if (status === "DEGRADED") return "warning";
@@ -49,7 +51,10 @@ function badgeVariant(status?: string): "success" | "danger" | "warning" | "neut
 
 const unavailableServices = [
   { label: "Storage", detail: "Storage monitoring has not been configured." },
-  { label: "Background jobs", detail: "Job monitoring has not been configured." },
+  {
+    label: "Background jobs",
+    detail: "Job monitoring has not been configured.",
+  },
 ] as const;
 
 export default function MaintenancePanel() {
@@ -83,7 +88,11 @@ export default function MaintenancePanel() {
           setHealth(null);
         }
       } catch (caught) {
-        setError(caught instanceof Error ? caught.message : "Unable to load maintenance settings.");
+        setError(
+          caught instanceof Error
+            ? caught.message
+            : "Unable to load maintenance settings.",
+        );
       } finally {
         setLoading(false);
         setRefreshing(false);
@@ -110,9 +119,17 @@ export default function MaintenancePanel() {
       setState(settings);
       setMessage(settings.message);
       setIsModalOpen(false);
-      toast.success(settings.enabled ? "Maintenance mode enabled." : "Maintenance mode disabled.");
+      toast.success(
+        settings.enabled
+          ? "Maintenance mode enabled."
+          : "Maintenance mode disabled.",
+      );
     } catch (caught) {
-      toast.error(caught instanceof Error ? caught.message : "Unable to update maintenance mode.");
+      toast.error(
+        caught instanceof Error
+          ? caught.message
+          : "Unable to update maintenance mode.",
+      );
     } finally {
       setSaving(false);
     }
@@ -131,7 +148,11 @@ export default function MaintenancePanel() {
       <ErrorState
         title="Maintenance settings unavailable"
         message={error}
-        action={<Button variant="outline" onClick={() => void load()}>Try again</Button>}
+        action={
+          <Button variant="outline" onClick={() => void load()}>
+            Try again
+          </Button>
+        }
       />
     );
   }
@@ -151,12 +172,20 @@ export default function MaintenancePanel() {
         <ErrorState
           title="Update failed"
           message={error}
-          action={<Button variant="outline" onClick={() => void load(true)}>Refresh status</Button>}
+          action={
+            <Button variant="outline" onClick={() => void load(true)}>
+              Refresh status
+            </Button>
+          }
         />
       )}
 
       <div className="flex justify-end">
-        <Button variant="outline" onClick={() => void load(true)} loading={refreshing}>
+        <Button
+          variant="outline"
+          onClick={() => void load(true)}
+          loading={refreshing}
+        >
           <RefreshCw size={16} />
           Refresh status
         </Button>
@@ -169,20 +198,35 @@ export default function MaintenancePanel() {
               <Activity size={20} />
             </div>
             <div>
-              <h3 className="text-base font-semibold text-[var(--text)]">System health</h3>
-              <p className="text-sm text-[var(--text-muted)]">Current status of core ForceStrike services.</p>
+              <h3 className="text-base font-semibold text-[var(--text)]">
+                System health
+              </h3>
+              <p className="text-sm text-[var(--text-muted)]">
+                Current status of core ForceStrike services.
+              </p>
             </div>
           </div>
 
           <div className="grid gap-3 md:grid-cols-3">
             {healthItems.map(({ label, item }) => (
-              <div key={label} className="rounded-lg border border-[var(--line)] p-4">
+              <div
+                key={label}
+                className="rounded-lg border border-[var(--line)] p-4"
+              >
                 <div className="mb-2 flex items-center justify-between gap-2">
                   <p className="font-medium text-[var(--text)]">{label}</p>
-                  <Badge variant={badgeVariant(item.status)}>{item.status}</Badge>
+                  <Badge variant={badgeVariant(item.status)}>
+                    {item.status}
+                  </Badge>
                 </div>
-                <p className="text-sm text-[var(--text-muted)]">{item.detail}</p>
-                {item.name && <p className="mt-2 text-xs text-[var(--text-muted)]">{item.name}</p>}
+                <p className="text-sm text-[var(--text-muted)]">
+                  {item.detail}
+                </p>
+                {item.name && (
+                  <p className="mt-2 text-xs text-[var(--text-muted)]">
+                    {item.name}
+                  </p>
+                )}
               </div>
             ))}
           </div>
@@ -203,13 +247,16 @@ export default function MaintenancePanel() {
             </div>
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
-                <h3 className="text-base font-semibold text-[var(--text)]">Maintenance mode</h3>
+                <h3 className="text-base font-semibold text-[var(--text)]">
+                  Maintenance mode
+                </h3>
                 <Badge variant={maintenanceEnabled ? "warning" : "success"}>
                   {maintenanceEnabled ? "Enabled" : "Disabled"}
                 </Badge>
               </div>
               <p className="mt-1 text-sm text-[var(--text-muted)]">
-                Temporarily restrict access while important operational work is in progress.
+                Temporarily restrict access while important operational work is
+                in progress.
               </p>
             </div>
           </div>
@@ -225,7 +272,9 @@ export default function MaintenancePanel() {
               variant={maintenanceEnabled ? "outline" : "danger"}
               onClick={() => setIsModalOpen(true)}
             >
-              {maintenanceEnabled ? "Disable maintenance mode" : "Enable maintenance mode"}
+              {maintenanceEnabled
+                ? "Disable maintenance mode"
+                : "Enable maintenance mode"}
             </Button>
           )}
         </Card>
@@ -236,17 +285,28 @@ export default function MaintenancePanel() {
               <Database size={20} />
             </div>
             <div>
-              <h3 className="text-base font-semibold text-[var(--text)]">Operational services</h3>
-              <p className="text-sm text-[var(--text-muted)]">Additional integrations.</p>
+              <h3 className="text-base font-semibold text-[var(--text)]">
+                Operational services
+              </h3>
+              <p className="text-sm text-[var(--text-muted)]">
+                Additional integrations.
+              </p>
             </div>
           </div>
           {unavailableServices.map((service) => (
-            <div key={service.label} className="rounded-lg border border-[var(--line)] p-3">
+            <div
+              key={service.label}
+              className="rounded-lg border border-[var(--line)] p-3"
+            >
               <div className="mb-1 flex items-center justify-between gap-2">
-                <p className="font-medium text-[var(--text)]">{service.label}</p>
+                <p className="font-medium text-[var(--text)]">
+                  {service.label}
+                </p>
                 <Badge variant="neutral">Not configured</Badge>
               </div>
-              <p className="text-sm text-[var(--text-muted)]">{service.detail}</p>
+              <p className="text-sm text-[var(--text-muted)]">
+                {service.detail}
+              </p>
             </div>
           ))}
         </Card>
@@ -255,7 +315,11 @@ export default function MaintenancePanel() {
       <Modal
         open={isModalOpen}
         onClose={() => !saving && setIsModalOpen(false)}
-        title={maintenanceEnabled ? "Disable maintenance mode?" : "Enable maintenance mode?"}
+        title={
+          maintenanceEnabled
+            ? "Disable maintenance mode?"
+            : "Enable maintenance mode?"
+        }
         description={
           maintenanceEnabled
             ? "Normal access will be restored for users."
@@ -263,7 +327,11 @@ export default function MaintenancePanel() {
         }
         footer={
           <>
-            <Button variant="outline" onClick={() => setIsModalOpen(false)} disabled={saving}>
+            <Button
+              variant="outline"
+              onClick={() => setIsModalOpen(false)}
+              disabled={saving}
+            >
               Cancel
             </Button>
             <Button

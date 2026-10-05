@@ -164,7 +164,7 @@
 
   /* Type */
   --font-sans:
-    "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    "Plus Jakarta Sans Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
     "Nirmala UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 
   /* =======================================================
@@ -693,6 +693,91 @@ a {
     display: flex;
     flex-direction: column;
     gap: 24px;
+  }
+
+  .report-chart-line {
+    stroke-dasharray: 1;
+    stroke-dashoffset: 1;
+    animation: report-chart-draw 900ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  }
+
+  .reports-print-only {
+    display: none;
+  }
+
+  @media print {
+    @page {
+      size: auto;
+      margin: 12mm;
+    }
+
+    html,
+    body {
+      background: #fff !important;
+      color: #111 !important;
+      print-color-adjust: exact;
+      -webkit-print-color-adjust: exact;
+    }
+
+    body * {
+      visibility: hidden !important;
+    }
+
+    .reports-print-root,
+    .reports-print-root * {
+      visibility: visible !important;
+    }
+
+    .reports-print-root {
+      position: absolute !important;
+      inset: 0 auto auto 0 !important;
+      width: 100% !important;
+      max-width: none !important;
+      padding: 0 !important;
+      margin: 0 !important;
+      background: #fff !important;
+      color: #111 !important;
+    }
+
+    .reports-print-hide {
+      display: none !important;
+    }
+
+    .reports-print-only {
+      display: block !important;
+    }
+
+    .reports-print-root [class*="overflow-x-auto"],
+    .reports-print-root [class*="overflow-hidden"] {
+      overflow: visible !important;
+    }
+
+    .reports-print-root svg {
+      max-width: 100% !important;
+      break-inside: avoid;
+    }
+
+    .reports-print-root section,
+    .reports-print-root table,
+    .reports-print-root tr {
+      break-inside: avoid;
+    }
+
+    .reports-print-root a {
+      color: #111 !important;
+      text-decoration: none !important;
+    }
+  }
+
+  @keyframes report-chart-draw {
+    to { stroke-dashoffset: 0; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .report-chart-line {
+      animation: none;
+      stroke-dashoffset: 0;
+    }
   }
 
   /* Same side padding as every other page */

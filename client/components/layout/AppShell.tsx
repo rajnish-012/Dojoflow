@@ -1,14 +1,8 @@
 "use client";
 
-import {
-  useEffect,
-  useState,
-} from "react";
+import { useEffect, useState } from "react";
 
-import {
-  usePathname,
-  useRouter,
-} from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 
 import Sidebar from "./Sidebar";
 import Header from "./Header";
@@ -30,31 +24,24 @@ type AppShellProps = {
 const publicRoutes = [
   "/",
   "/login",
+  "/forgot-password",
+  "/reset-password",
   "/inquiry",
 ];
 
-function isPublicPath(
-  pathname: string,
-) {
-  return publicRoutes.some(
-    (route) => {
-      if (route === "/") {
-        return pathname === "/";
-      }
+function isPublicPath(pathname: string) {
+  return publicRoutes.some((route) => {
+    if (route === "/") {
+      return pathname === "/";
+    }
 
-      return (
-        pathname === route ||
-        pathname.startsWith(
-          `${route}/`,
-        )
-      );
-    },
-  );
+    return pathname === route || pathname.startsWith(`${route}/`);
+  });
 }
 
 function AppLoadingScreen({ showBrand = true }: { showBrand?: boolean }) {
   const { settings } = useAcademyBrand();
-  const academyName = settings.academyName.trim() || "ForceStrike";
+  const academyName = settings.academyName.trim() || "Your Academy";
 
   return (
     <div
@@ -75,8 +62,9 @@ function AppLoadingScreen({ showBrand = true }: { showBrand?: boolean }) {
           gap-5
         "
       >
-        {showBrand && <div
-          className="
+        {showBrand && (
+          <div
+            className="
             flex
             h-14
             w-14
@@ -91,27 +79,30 @@ function AppLoadingScreen({ showBrand = true }: { showBrand?: boolean }) {
             shadow-[0_8px_30px_var(--shadow-color)]
             animate-pulse
           "
-        >
-          <AcademyLogo
-            className="
+          >
+            <AcademyLogo
+              className="
               h-11
               w-11
               object-contain
             "
-          />
-        </div>}
+            />
+          </div>
+        )}
 
         <div className="text-center">
-          {showBrand && <p
-            className="
+          {showBrand && (
+            <p
+              className="
               text-sm
               font-black
               tracking-wide
               text-(--foreground)
             "
-          >
-            Loading {academyName}
-          </p>}
+            >
+              Loading {academyName}
+            </p>
+          )}
 
           <p
             className="
@@ -150,58 +141,29 @@ function AppLoadingScreen({ showBrand = true }: { showBrand?: boolean }) {
   );
 }
 
-function AppShellContent({
-  children,
-}: AppShellProps) {
+function AppShellContent({ children }: AppShellProps) {
   const { initialized: academyBrandInitialized } = useAcademyBrand();
-  const pathname =
-    usePathname();
+  const pathname = usePathname();
 
-  const router =
-    useRouter();
+  const router = useRouter();
 
-  const {
-    isLoading,
-    isAuthenticated,
-    user,
-  } = useAuth();
+  const { isLoading, isAuthenticated, user } = useAuth();
 
-  const [
-    sidebarOpen,
-    setSidebarOpen,
-  ] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  const [
-    sidebarCollapsed,
-    setSidebarCollapsed,
-  ] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
-  const isPublicRoute =
-    isPublicPath(pathname);
+  const isPublicRoute = isPublicPath(pathname);
 
   useEffect(() => {
-    if (
-      !isPublicRoute &&
-      isLoading
-    ) {
+    if (!isPublicRoute && isLoading) {
       return;
     }
 
-    if (
-      isPublicRoute &&
-      pathname === "/login" &&
-      isAuthenticated
-    ) {
+    if (isPublicRoute && pathname === "/login" && isAuthenticated) {
       router.replace(getRoleDashboardPath(user?.role));
     }
-  }, [
-    isPublicRoute,
-    pathname,
-    isAuthenticated,
-    user?.role,
-    isLoading,
-    router,
-  ]);
+  }, [isPublicRoute, pathname, isAuthenticated, user?.role, isLoading, router]);
 
   useEffect(() => {
     if (isPublicRoute) {
@@ -214,24 +176,13 @@ function AppShellContent({
 
     if (!isAuthenticated) {
       const redirect =
-        pathname &&
-        pathname !== "/login"
-          ? `?redirect=${encodeURIComponent(
-              pathname,
-            )}`
+        pathname && pathname !== "/login"
+          ? `?redirect=${encodeURIComponent(pathname)}`
           : "";
 
-      router.replace(
-        `/login${redirect}`,
-      );
+      router.replace(`/login${redirect}`);
     }
-  }, [
-    isPublicRoute,
-    isLoading,
-    isAuthenticated,
-    pathname,
-    router,
-  ]);
+  }, [isPublicRoute, isLoading, isAuthenticated, pathname, router]);
 
   useEffect(() => {
     setSidebarOpen(false);
@@ -255,58 +206,41 @@ function AppShellContent({
 
   return (
     <div
-        className="
+      className="
           min-h-screen
           bg-(--background)
           text-(--foreground)
           transition-colors
           duration-300
         "
+    >
+      <Sidebar
+        isOpen={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
+        collapsed={sidebarCollapsed}
+        onToggleCollapse={() => setSidebarCollapsed((previous) => !previous)}
+      />
+
+      <div
+        className={[
+          "df-app-shell",
+          sidebarCollapsed ? "df-shell-collapsed" : "df-shell-expanded",
+        ].join(" ")}
       >
-        <Sidebar
-          isOpen={sidebarOpen}
-          onClose={() =>
-            setSidebarOpen(false)
-          }
-          collapsed={
-            sidebarCollapsed
-          }
-          onToggleCollapse={() =>
-            setSidebarCollapsed(
-              (previous) =>
-                !previous,
-            )
-          }
-        />
+        <Header onMenuClick={() => setSidebarOpen(true)} />
 
-        <div
-          className={[
-            "df-app-shell",
-            sidebarCollapsed
-              ? "df-shell-collapsed"
-              : "df-shell-expanded",
-          ].join(" ")}
-        >
-          <Header
-            onMenuClick={() =>
-              setSidebarOpen(true)
-            }
-          />
-
-          <main
-            className="
+        <main
+          className="
               min-h-[calc(100vh-72px)]
               bg-(--background)
               text-(--foreground)
               transition-colors
               duration-300
             "
-          >
-            <RouteGuard>
-              {children}
-            </RouteGuard>
-          </main>
-        </div>
+        >
+          <RouteGuard>{children}</RouteGuard>
+        </main>
+      </div>
     </div>
   );
 }

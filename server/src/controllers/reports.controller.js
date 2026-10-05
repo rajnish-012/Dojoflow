@@ -8,6 +8,39 @@ const Branch = require("../models/Branch");
 const User = require("../models/User");
 const Makeup = require("../models/Makeup");
 
+const REPORT_TIME_ZONE = "Asia/Kolkata";
+
+function indiaYearBoundary(year) {
+  // Attendance stores academy-local calendar dates as Date values. Translate
+  // India midnight to UTC so Jan 1 and month boundaries are included correctly.
+  return new Date(Date.UTC(year, 0, 1) - (5 * 60 + 30) * 60 * 1000);
+}
+
+function regularAttendanceStages(match) {
+  return [
+    {
+      $match: {
+        ...match,
+        attendanceType: { $ne: "MAKEUP" },
+        status: { $in: ["PRESENT", "ABSENT"] },
+      },
+    },
+    { $sort: { date: 1, createdAt: 1, _id: 1 } },
+    {
+      $group: {
+        _id: {
+          student: "$student",
+          calendarDate: {
+            $dateToString: { format: "%Y-%m-%d", date: "$date", timezone: REPORT_TIME_ZONE },
+          },
+        },
+        attendance: { $first: "$$ROOT" },
+      },
+    },
+    { $replaceRoot: { newRoot: "$attendance" } },
+  ];
+}
+
 let Inquiry = null;
 
 try {
@@ -191,8 +224,8 @@ function getYearRange(yearValue) {
 
   return {
     year,
-    from: new Date(`${year}-01-01T00:00:00.000Z`),
-    to: new Date(`${year + 1}-01-01T00:00:00.000Z`),
+    from: indiaYearBoundary(year),
+    to: indiaYearBoundary(year + 1),
   };
 }
 
@@ -273,6 +306,8 @@ async function getReportsSummary(req, res) {
       newAdmissions,
       attendanceSummary,
       monthlyAttendance,
+      studentAttendanceRows,
+      studentMakeupRows,
       performanceSummary,
       totalPromotions,
       monthlyPromotions,
@@ -305,9 +340,7 @@ async function getReportsSummary(req, res) {
       }),
 
       Attendance.aggregate([
-        {
-          $match: attendanceMatch,
-        },
+        ...regularAttendanceStages(attendanceMatch),
         {
           $group: {
             _id: null,
@@ -351,14 +384,12 @@ async function getReportsSummary(req, res) {
       ]),
 
       Attendance.aggregate([
-        {
-          $match: attendanceMatch,
-        },
+        ...regularAttendanceStages(attendanceMatch),
         {
           $group: {
             _id: {
               month: {
-                $month: "$date",
+                $month: { date: "$date", timezone: REPORT_TIME_ZONE },
               },
               status: "$status",
             },
@@ -372,6 +403,30 @@ async function getReportsSummary(req, res) {
             "_id.month": 1,
           },
         },
+      ]),
+
+      Attendance.aggregate([
+        ...regularAttendanceStages(attendanceMatch),
+        {
+          $group: {
+            _id: "$student",
+            total: { $sum: 1 },
+            present: { $sum: { $cond: [{ $eq: ["$status", "PRESENT"] }, 1, 0] } },
+            absent: { $sum: { $cond: [{ $eq: ["$status", "ABSENT"] }, 1, 0] } },
+          },
+        },
+      ]),
+
+      Makeup.aggregate([
+        {
+          $match: {
+            ...branchMatch,
+            originalDate: { $gte: from, $lt: to },
+            status: "SCHEDULED",
+            makeupDate: null,
+          },
+        },
+        { $group: { _id: "$student", pending: { $sum: 1 } } },
       ]),
 
       Performance.aggregate([
@@ -412,7 +467,7 @@ async function getReportsSummary(req, res) {
           $group: {
             _id: {
               month: {
-                $month: "$promotedAt",
+                $month: { date: "$promotedAt", timezone: REPORT_TIME_ZONE },
               },
             },
             count: {
@@ -431,7 +486,7 @@ async function getReportsSummary(req, res) {
         {
           $match: {
             ...branchMatch,
-            createdAt: {
+            originalDate: {
               $gte: from,
               $lt: to,
             },
@@ -439,7 +494,10 @@ async function getReportsSummary(req, res) {
         },
         {
           $group: {
-            _id: "$status",
+            _id: {
+              status: "$status",
+              hasScheduledDate: { $ne: [{ $ifNull: ["$makeupDate", null] }, null] },
+            },
             count: {
               $sum: 1,
             },
@@ -448,16 +506,12 @@ async function getReportsSummary(req, res) {
       ]),
 
       Branch.countDocuments({
-        status: {
-          $ne: "INACTIVE",
-        },
+        status: { $ne: "INACTIVE" },
         ...(isBranchScopedUser(req)
-          ? {
-              _id: isValidObjectId(getUserBranchId(req))
-                ? toObjectId(getUserBranchId(req))
-                : null,
-            }
-          : {}),
+          ? { _id: isValidObjectId(getUserBranchId(req)) ? toObjectId(getUserBranchId(req)) : null }
+          : req.query.branch && isValidObjectId(req.query.branch)
+            ? { _id: toObjectId(req.query.branch) }
+            : {}),
       }),
     ]);
 
@@ -524,7 +578,7 @@ async function getReportsSummary(req, res) {
         present,
         absent,
         total,
-        attendanceRate: safePercentage(present, total),
+        attendanceRate: total > 0 ? safePercentage(present, total) : null,
       };
     });
 
@@ -539,16 +593,45 @@ async function getReportsSummary(req, res) {
       };
     });
 
+    const scheduledMakeups = makeupSummary
+      .filter((item) => item._id.status === "SCHEDULED")
+      .reduce((sum, item) => sum + item.count, 0);
     const makeupStats = {
-      scheduled:
-        makeupSummary.find((item) => item._id === "SCHEDULED")?.count || 0,
-
-      completed:
-        makeupSummary.find((item) => item._id === "COMPLETED")?.count || 0,
-
-      cancelled:
-        makeupSummary.find((item) => item._id === "CANCELLED")?.count || 0,
+      pending: makeupSummary.find((item) => item._id.status === "SCHEDULED" && !item._id.hasScheduledDate)?.count || 0,
+      booked: makeupSummary.find((item) => item._id.status === "SCHEDULED" && item._id.hasScheduledDate)?.count || 0,
+      scheduled: scheduledMakeups,
+      completed: makeupSummary.filter((item) => item._id.status === "COMPLETED").reduce((sum, item) => sum + item.count, 0),
+      cancelled: makeupSummary.filter((item) => item._id.status === "CANCELLED").reduce((sum, item) => sum + item.count, 0),
     };
+
+    const studentIds = studentAttendanceRows.map((item) => item._id);
+    const studentRecords = studentIds.length
+      ? await Student.find({ ...studentMatch, _id: { $in: studentIds } })
+          .select("name branch plan")
+          .populate("branch", "_id name")
+          .populate("plan", "_id name")
+          .lean()
+      : [];
+    const studentById = new Map(studentRecords.map((item) => [String(item._id), item]));
+    const pendingMakeupsByStudent = new Map(studentMakeupRows.map((item) => [String(item._id), item.pending]));
+    const studentAttendance = studentAttendanceRows
+      .map((item) => {
+        const student = studentById.get(String(item._id));
+        if (!student) return null;
+        return {
+          _id: String(student._id),
+          name: student.name,
+          branch: student.branch ? { _id: String(student.branch._id), name: student.branch.name } : null,
+          plan: student.plan ? { _id: String(student.plan._id), name: student.plan.name } : null,
+          total: item.total,
+          present: item.present,
+          absent: item.absent,
+          attendanceRate: safePercentage(item.present, item.total),
+          pendingMakeup: pendingMakeupsByStudent.get(String(item._id)) || 0,
+        };
+      })
+      .filter(Boolean)
+      .sort((first, second) => first.attendanceRate - second.attendanceRate || second.total - first.total || first.name.localeCompare(second.name));
 
     return res.status(200).json({
       success: true,
@@ -599,6 +682,8 @@ async function getReportsSummary(req, res) {
           newAdmissions,
           retentionRate,
         },
+
+        studentAttendance,
       },
     });
   } catch (error) {
@@ -714,6 +799,9 @@ async function getTopPerformers(req, res) {
                       $eq: ["$student", "$$studentId"],
                     },
 
+                    { $ne: ["$attendanceType", "MAKEUP"] },
+                    { $in: ["$status", ["PRESENT", "ABSENT"]] },
+
                     {
                       $gte: ["$date", from],
                     },
@@ -723,6 +811,17 @@ async function getTopPerformers(req, res) {
                     },
                   ],
                 },
+              },
+            },
+
+            {
+              $sort: { date: 1, createdAt: 1, _id: 1 },
+            },
+
+            {
+              $group: {
+                _id: { $dateToString: { format: "%Y-%m-%d", date: "$date", timezone: REPORT_TIME_ZONE } },
+                status: { $first: "$status" },
               },
             },
 
@@ -1195,19 +1294,7 @@ async function getBranchReports(req, res) {
         ]),
 
         Attendance.aggregate([
-          {
-            $match: {
-              branch: {
-                $in: branchIds,
-              },
-
-              date: {
-                $gte: from,
-                $lt: to,
-              },
-            },
-          },
-
+          ...regularAttendanceStages({ branch: { $in: branchIds }, date: { $gte: from, $lt: to } }),
           {
             $group: {
               _id: {
@@ -1283,7 +1370,7 @@ async function getBranchReports(req, res) {
                 $in: branchIds,
               },
 
-              createdAt: {
+              originalDate: {
                 $gte: from,
                 $lt: to,
               },
@@ -1519,19 +1606,7 @@ async function getCoachReports(req, res) {
 
     const [attendance, performance] = await Promise.all([
       Attendance.aggregate([
-        {
-          $match: {
-            markedBy: {
-              $in: coachIds,
-            },
-
-            date: {
-              $gte: from,
-              $lt: to,
-            },
-          },
-        },
-
+        ...regularAttendanceStages({ markedBy: { $in: coachIds }, date: { $gte: from, $lt: to } }),
         {
           $group: {
             _id: {
@@ -1732,7 +1807,7 @@ async function getBeltReports(req, res) {
           $group: {
             _id: {
               month: {
-                $month: "$promotedAt",
+                $month: { date: "$promotedAt", timezone: REPORT_TIME_ZONE },
               },
             },
 
@@ -1926,7 +2001,7 @@ async function getAdmissionReports(req, res) {
           $group: {
             _id: {
               month: {
-                $month: "$joinDate",
+                $month: { date: "$joinDate", timezone: REPORT_TIME_ZONE },
               },
             },
 

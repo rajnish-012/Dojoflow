@@ -51,17 +51,11 @@ export default function PermissionGate({
   allOf,
   fallback = null,
 }: PermissionGateProps) {
-  const hasSinglePermission = useCan(
-    permission ?? "",
-  );
+  const hasSinglePermission = useCan(permission ?? "");
 
-  const hasAnyPermission = useCanAny(
-    anyOf ?? [],
-  );
+  const hasAnyPermission = useCanAny(anyOf ?? []);
 
-  const hasAllPermissions = useCanAll(
-    allOf ?? [],
-  );
+  const hasAllPermissions = useCanAll(allOf ?? []);
 
   let allowed = false;
 
@@ -79,11 +73,7 @@ export default function PermissionGate({
    * Fail closed instead of accidentally exposing
    * protected content.
    */
-  if (
-    !permission &&
-    !anyOf?.length &&
-    !allOf?.length
-  ) {
+  if (!permission && !anyOf?.length && !allOf?.length) {
     return <>{fallback}</>;
   }
 

@@ -1,15 +1,24 @@
 const mongoose = require("mongoose");
-const bcrypt = require("bcryptjs");
-
 const { isBranchScoped } = require("../utils/access");
+const { validatePassword, sessionInvalidationTime } = require("../utils/passwordPolicy");
+const { normalizePhone } = require("../utils/phone");
 const Student = require("../models/Student");
 const User = require("../models/User");
 const Plan = require("../models/Plan");
 const Attendance = require("../models/Attendance");
 const Performance = require("../models/Performance");
+const Makeup = require("../models/Makeup");
 const CoachStudentAssignment = require("../models/CoachStudentAssignment");
 const { getProgramLearningProgress } = require("../services/programProgress.service");
 const { resolveProgramCurriculum } = require("../services/curriculumResolver.service");
+const { withAttendanceSessionDetails } = require("../utils/attendanceSession");
+
+const indiaDateFormatter = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "Asia/Kolkata",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
 
 // =========================================================
 // SHARED BRANCH ACCESS HELPER
@@ -176,11 +185,12 @@ const createStudent = async (req, res) => {
   try {
     const { name, age, phone, email, branch, plan, loginEmail, loginPassword } =
       req.body;
+    const normalizedPhone = normalizePhone(phone);
 
     if (
       !name ||
       age === undefined ||
-      !phone ||
+      !normalizedPhone ||
       !branch ||
       !plan ||
       !loginEmail ||
@@ -214,10 +224,11 @@ const createStudent = async (req, res) => {
       });
     }
 
-    if (loginPassword.length < 6) {
+    const passwordError = validatePassword(loginPassword);
+    if (passwordError) {
       return res.status(400).json({
         success: false,
-        message: "Login password must be at least 6 characters",
+        message: passwordError,
       });
     }
 
@@ -277,12 +288,11 @@ const createStudent = async (req, res) => {
       });
     }
 
-    const hashedPassword = await bcrypt.hash(loginPassword, 10);
-
     const user = await User.create({
       name: name.trim(),
       email: normalizedLoginEmail,
-      password: hashedPassword,
+      phone: normalizedPhone,
+      password: loginPassword,
       role: "STUDENT",
       branch,
     });
@@ -292,7 +302,7 @@ const createStudent = async (req, res) => {
         user: user._id,
         name: name.trim(),
         age: Number(age),
-        phone: phone.trim(),
+        phone: normalizedPhone,
         email: email ? email.trim() : "",
         branch,
         plan,
@@ -402,7 +412,12 @@ const updateStudent = async (req, res) => {
     }
 
     if (phone !== undefined) {
-      student.phone = phone.trim();
+      const normalizedPhone = normalizePhone(phone);
+      if (!normalizedPhone) {
+        return res.status(400).json({ message: "Enter a valid phone number with its country code." });
+      }
+      student.phone = normalizedPhone;
+      if (student.user) await User.updateOne({ _id: student.user }, { $set: { phone: normalizedPhone } });
     }
 
     if (email !== undefined) {
@@ -503,15 +518,12 @@ const updateStudent = async (req, res) => {
           user.email = normalizedLoginEmail;
         }
 
-        if (password !== undefined && password.trim().length > 0) {
-          if (password.trim().length < 6) {
-            return res.status(400).json({
-              success: false,
-              message: "Password must be at least 6 characters",
-            });
-          }
-
-          user.password = await bcrypt.hash(password.trim(), 10);
+        if (typeof password === "string" && password.length > 0) {
+          const passwordError = validatePassword(password);
+          if (passwordError) return res.status(400).json({ success: false, message: passwordError });
+          user.password = password;
+          user.passwordChangedAt = sessionInvalidationTime();
+          user.mustResetPassword = false;
         }
 
         if (name !== undefined) {
@@ -654,8 +666,12 @@ const getStudentProgress = async (req, res) => {
             presentClasses: 0,
             absentClasses: 0,
             pendingMakeups: 0,
+            unscheduledMakeups: 0,
             completedMakeups: 0,
+            scheduledMakeups: 0,
           },
+          attendance: [],
+          makeups: [],
           currentCurriculum: null,
           milestone: {
             achieved: null,
@@ -683,12 +699,27 @@ const getStudentProgress = async (req, res) => {
       const configuredPlanProgram = (student.plan.programs || []).find((item) => String(item.program?._id || item.program) === programId);
       const curriculum = resolveProgramCurriculum(entitlement, configuredPlanProgram, student.plan.curriculum);
       const milestones = student.plan.milestones || [];
-      const [learning, attendance, performance] = await Promise.all([
+      const [learning, attendance, performance, makeups] = await Promise.all([
         getProgramLearningProgress({ studentId, programId, enrollmentId: currentEnrollment?._id, enrollmentStartDate: currentEnrollment?.startDate, enrollmentEndDate: currentEnrollment?.endDate, curriculum, asOfDate: today }),
-        Attendance.find({ student: studentId, sessionTypeId: programId, ...(currentEnrollment?._id ? { $or: [{ enrollment: currentEnrollment._id }, { enrollment: null, date: { $gte: currentEnrollment.startDate, ...(currentEnrollment.endDate ? { $lt: currentEnrollment.endDate } : {}), $lte: new Date() } }] } : { date: { $lte: new Date() } }) }).sort({ date: 1 }).lean(),
+        Attendance.find({ student: studentId, sessionTypeId: programId, ...(currentEnrollment?._id ? { $or: [{ enrollment: currentEnrollment._id }, { enrollment: null, date: { $gte: currentEnrollment.startDate, ...(currentEnrollment.endDate ? { $lt: currentEnrollment.endDate } : {}), $lte: new Date() } }] } : { date: { $lte: new Date() } }) }).sort({ date: 1, createdAt: 1, _id: 1 }).lean(),
         Performance.find({ student: studentId, sessionTypeId: programId, ...(currentEnrollment?._id ? { $or: [{ enrollment: currentEnrollment._id }, { enrollment: null, evaluationDate: { $gte: currentEnrollment.startDate, ...(currentEnrollment.endDate ? { $lt: currentEnrollment.endDate } : {}), $lte: new Date() } }] } : { evaluationDate: { $lte: new Date() } }) }).sort({ evaluationDate: -1 }).lean(),
+        Makeup.find({ student: studentId, sessionTypeId: programId, ...(currentEnrollment?._id ? { $or: [{ enrollment: currentEnrollment._id }, { enrollment: null, originalDate: { $gte: currentEnrollment.startDate, ...(currentEnrollment.endDate ? { $lt: currentEnrollment.endDate } : {}), $lte: new Date() } }] } : { originalDate: { $lte: new Date() } }) }).select("_id status originalDate makeupDate planDay curriculumTitle").sort({ originalDate: -1, _id: -1 }).lean(),
       ]);
       const currentTrainingDay = learning.currentTrainingDay;
+      const countedRegularDates = new Set();
+      const regularAttendance = attendance.filter((item) => {
+        if (item.attendanceType === "MAKEUP" || !["PRESENT", "ABSENT"].includes(item.status)) return false;
+        const date = new Date(item.date);
+        if (Number.isNaN(date.getTime())) return false;
+        const dateKey = indiaDateFormatter.format(date);
+        if (countedRegularDates.has(dateKey)) return false;
+        countedRegularDates.add(dateKey);
+        return true;
+      });
+      const attendanceWithSessions = await withAttendanceSessionDetails(
+        regularAttendance,
+        student.branch?._id || student.branch,
+      );
       const nextMilestone = milestones.filter((item) => Number(item.day) > currentTrainingDay).sort((a, b) => a.day - b.day)[0] || null;
       const achievedMilestone = milestones.filter((item) => Number(item.day) <= currentTrainingDay).sort((a, b) => b.day - a.day)[0] || null;
       const averageRating = performance.length ? Number((performance.reduce((sum, item) => sum + Number(item.rating), 0) / performance.length).toFixed(2)) : null;
@@ -699,11 +730,15 @@ const getStudentProgress = async (req, res) => {
           currentTrainingDay,
           completedDays: learning.completedDays.length,
           totalCurriculumDays: curriculum.length,
-          presentClasses: attendance.filter((item) => item.status === "PRESENT").length,
-          absentClasses: attendance.filter((item) => item.status === "ABSENT").length,
-          pendingMakeups: attendance.filter((item) => item.makeupRequired && !item.makeupCompleted).length,
-          completedMakeups: attendance.filter((item) => item.makeupRequired && item.makeupCompleted).length,
+          presentClasses: regularAttendance.filter((item) => item.status === "PRESENT").length,
+          absentClasses: regularAttendance.filter((item) => item.status === "ABSENT").length,
+          pendingMakeups: makeups.filter((item) => item.status === "SCHEDULED").length,
+          unscheduledMakeups: makeups.filter((item) => item.status === "SCHEDULED" && !item.makeupDate).length,
+          scheduledMakeups: makeups.filter((item) => item.status === "SCHEDULED" && Boolean(item.makeupDate)).length,
+          completedMakeups: makeups.filter((item) => item.status === "COMPLETED").length,
         },
+        attendance: attendanceWithSessions,
+        makeups,
         currentCurriculum: curriculum.find((item) => Number(item.day) === Number(learning.nextDay)) || null,
         curriculum,
         milestone: { achieved: achievedMilestone, next: nextMilestone },
@@ -717,8 +752,9 @@ const getStudentProgress = async (req, res) => {
       : tracks[0];
     if (requestedProgramId && !selectedTrack) return res.status(404).json({ success: false, message: "Program is not included in the student's active plan." });
     const activeTrack = selectedTrack || {
-      training: { currentTrainingDay: 0, completedDays: 0, totalCurriculumDays: 0, presentClasses: 0, absentClasses: 0, pendingMakeups: 0, completedMakeups: 0 },
+      training: { currentTrainingDay: 0, completedDays: 0, totalCurriculumDays: 0, presentClasses: 0, absentClasses: 0, pendingMakeups: 0, unscheduledMakeups: 0, scheduledMakeups: 0, completedMakeups: 0 },
       currentCurriculum: null, milestone: { achieved: null, next: null }, performance: { totalEvaluations: 0, averageRating: null, latest: null },
+      attendance: [], makeups: [],
     };
 
     return res.status(200).json({
@@ -742,6 +778,8 @@ const getStudentProgress = async (req, res) => {
         tracks,
         curriculum: activeTrack.curriculum || [],
         training: activeTrack.training,
+        attendance: activeTrack.attendance || [],
+        makeups: activeTrack.makeups || [],
         currentCurriculum: activeTrack.currentCurriculum,
         milestone: activeTrack.milestone,
         performance: activeTrack.performance,

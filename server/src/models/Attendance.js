@@ -25,6 +25,8 @@ const attendanceSchema = new mongoose.Schema(
     },
     sessionSlotId: { type: mongoose.Schema.Types.ObjectId, default: null, index: true },
     sessionName: { type: String, trim: true, default: "" },
+    sessionStartTime: { type: String, trim: true, default: "" },
+    sessionEndTime: { type: String, trim: true, default: "" },
 
     date: {
       type: Date,
@@ -48,6 +50,15 @@ const attendanceSchema = new mongoose.Schema(
       type: String,
       enum: ["PRESENT", "ABSENT"],
       required: true,
+    },
+
+    // Makeup visits are persisted for history, but do not consume a regular day.
+    attendanceType: {
+      type: String,
+      enum: ["REGULAR", "MAKEUP"],
+      default: "REGULAR",
+      required: true,
+      index: true,
     },
 
     markedBy: {
@@ -76,11 +87,20 @@ attendanceSchema.index(
   {
     student: 1,
     date: 1,
-    sessionSlotId: 1,
   },
   {
     unique: true,
+    // Missing legacy type is treated as regular until the migration labels it.
+    partialFilterExpression: { $or: [{ attendanceType: "REGULAR" }, { attendanceType: null }] },
+    name: "uniq_regular_attendance_student_date",
   },
 );
+
+// Supports branch attendance lists and date-range reports without scanning
+// every branch's attendance records.
+attendanceSchema.index({ branch: 1, date: -1 });
+
+// Supports per-program learning-progress queries across a student's history.
+attendanceSchema.index({ student: 1, sessionTypeId: 1, date: 1 });
 
 module.exports = mongoose.model("Attendance", attendanceSchema);

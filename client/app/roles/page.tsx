@@ -129,6 +129,8 @@ ALL: "All branches",
 "inquiry.view": "View inquiries",
 "inquiry.update": "Update inquiries",
 
+"notification.view": "View notifications",
+
 "branch.view": "View branches",
 "branch.manage": "Manage branches",
 
@@ -165,11 +167,13 @@ const PERMISSION_MODULE_KEYS: Record<string, string> = {
   "promotion.view": "promotions", "promotion.manage": "promotions",
   "report.view": "reports", "report.export": "reports",
   "inquiry.view": "inquiries", "inquiry.update": "inquiries",
+  "notification.view": "notifications",
   "branch.view": "branches", "branch.manage": "branches",
-  "user.view": "settings", "user.create": "settings", "user.update": "settings", "user.delete": "settings",
+  "user.view": "settings-staff", "user.create": "settings-staff", "user.update": "settings-staff", "user.delete": "settings-staff",
   "role.view": "roles", "role.manage": "roles",
   "module.view": "modules", "module.manage": "modules",
-  "settings.view": "settings", "settings.manage": "settings",
+  "settings.view": "settings-branding", "settings.manage": "settings-email",
+  "maintenance.view": "settings-maintenance", "maintenance.health": "settings-maintenance", "maintenance.mode": "settings-maintenance", "maintenance.backup": "settings-maintenance", "maintenance.restore": "settings-maintenance", "maintenance.cleanup": "settings-maintenance", "maintenance.cache": "settings-maintenance", "maintenance.logs": "settings-maintenance",
   "website.view": "website-homepage", "website.manage": "website-homepage",
 };
 
@@ -273,6 +277,11 @@ permissions: [
 "inquiry.view",
 "inquiry.update",
 ],
+},
+{
+key: "notifications",
+label: "Notifications",
+permissions: ["notification.view"],
 },
 {
 key: "branches",

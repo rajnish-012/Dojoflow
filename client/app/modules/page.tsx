@@ -44,6 +44,10 @@ import {
   getNavigationIcon,
 } from "@/lib/navigation-icons";
 import { PERMISSIONS, useCan } from "@/lib/permissions";
+import {
+  getNavigationGroupId,
+  NAVIGATION_GROUPS,
+} from "@/lib/navigation-groups";
 
 /* =========================================================
    CONSTANTS
@@ -62,6 +66,8 @@ type ModuleForm = {
   label: string;
   href: string;
   icon: string;
+  requiredPermission: string;
+  group: string;
   allowedRoles: string[];
   isSystem: boolean;
 };
@@ -72,6 +78,8 @@ const EMPTY_FORM: ModuleForm = {
   label: "",
   href: "/",
   icon: "LayoutGrid",
+  requiredPermission: "",
+  group: "",
   allowedRoles: ["SUPER_ADMIN"],
   isSystem: false,
 };
@@ -85,6 +93,7 @@ function slugify(value: string) {
 }
 
 const LOCKED_MODULE_KEYS = ["modules", "roles"];
+const SIDEBAR_HIDDEN_MODULE_KEYS = ["settings", "academy-settings", "branding"];
 
 function roleLabel(value: string, options: { value: string; label: string }[]) {
   return options.find((role) => role.value === value)?.label || value;
@@ -176,6 +185,37 @@ export default function ModulesPage() {
     [modules],
   );
 
+  const sidebarModules = useMemo(
+    () => sorted.filter((item) => !SIDEBAR_HIDDEN_MODULE_KEYS.includes(item.key)),
+    [sorted],
+  );
+
+  const sidebarSections = useMemo(() => {
+    const topLevel = sidebarModules.filter((item) =>
+      ["dashboard", "student-dashboard"].includes(item.key),
+    );
+    const groupedKeys = new Set(topLevel.map((item) => item.key));
+    const sections: { id: string; label: string; items: ManagedModule[] }[] = [
+      ...(topLevel.length
+        ? [{ id: "top-level", label: "Top-level links", items: topLevel }]
+        : []),
+      ...NAVIGATION_GROUPS.flatMap((group) => {
+        const items = sidebarModules.filter(
+          (item) => getNavigationGroupId(item) === group.id,
+        );
+        items.forEach((item) => groupedKeys.add(item.key));
+        return items.length
+          ? [{ id: group.id, label: group.label, items }]
+          : [];
+      }),
+    ];
+    const ungrouped = sidebarModules.filter((item) => !groupedKeys.has(item.key));
+    if (ungrouped.length) {
+      sections.push({ id: "ungrouped", label: "Other links", items: ungrouped });
+    }
+    return sections;
+  }, [sidebarModules]);
+
   const refresh = () => {
     setReloadKey((count) => count + 1);
     notifyNavigationChanged();
@@ -200,6 +240,8 @@ export default function ModulesPage() {
       label: item.label,
       href: item.href,
       icon: item.icon,
+      requiredPermission: item.requiredPermission || "",
+      group: item.group || "",
       allowedRoles: item.allowedRoles,
       isSystem: item.isSystem,
     });
@@ -225,6 +267,15 @@ export default function ModulesPage() {
       return;
     }
 
+    const moduleKey = getModuleKey(form.label, form.key);
+    const requiredPermission =
+      form.requiredPermission || defaultPermissionForModule(moduleKey);
+
+    if (!requiredPermission && !form.isSystem) {
+      setFormError("Choose the permission required to access this page");
+      return;
+    }
+
     try {
       setBusy(true);
 
@@ -233,16 +284,20 @@ export default function ModulesPage() {
           label: form.label,
           href: form.isSystem ? undefined : form.href,
           icon: form.icon,
+          ...(requiredPermission ? { requiredPermission } : {}),
+          group: form.group || null,
           allowedRoles: form.allowedRoles,
         });
 
         toast.success("Module updated successfully.");
       } else {
         await createModule({
-          key: form.key.trim() || slugify(form.label),
+          key: moduleKey,
           label: form.label,
           href: form.href,
           icon: form.icon,
+          requiredPermission,
+          group: form.group || null,
           allowedRoles: form.allowedRoles,
         });
 
@@ -301,13 +356,17 @@ export default function ModulesPage() {
     }
   };
 
-  const handleMove = async (index: number, direction: -1 | 1) => {
+  const handleMove = async (
+    sectionItems: ManagedModule[],
+    index: number,
+    direction: -1 | 1,
+  ) => {
     if (!canManageModules) return;
     const target = index + direction;
 
-    if (target < 0 || target >= sorted.length) return;
+    if (target < 0 || target >= sectionItems.length) return;
 
-    const next = [...sorted];
+    const next = [...sectionItems];
     [next[index], next[target]] = [next[target], next[index]];
 
     const items = next.map((item, position) => ({
@@ -353,7 +412,7 @@ export default function ModulesPage() {
         <PageHeader
           eyebrow="Academy Management"
           title="Modules"
-          description="Control which pages appear in the sidebar, their order, and which roles can see them."
+          description="Manage sidebar sections, link order, access permissions, and role visibility."
           actions={canManageModules ? (
               <Button leftIcon={<Plus size={16} />} onClick={openCreate}>
                 Add Module
@@ -381,7 +440,7 @@ export default function ModulesPage() {
               </Button>
             }
           />
-        ) : sorted.length === 0 ? (
+        ) : sidebarModules.length === 0 ? (
           <EmptyState
             icon={<LayoutGrid size={26} />}
             title="No modules yet"
@@ -396,16 +455,17 @@ export default function ModulesPage() {
                     Sidebar Modules
                   </h2>
 
-                  <Badge variant="neutral">{sorted.length}</Badge>
+                  <Badge variant="neutral">{sidebarModules.length}</Badge>
                 </div>
 
                 <p className="mt-1 text-sm text-(--ink-muted)">
-                  Pages that appear in the sidebar, in the order shown here.
+                  Manage the same sidebar sections and link order. New links can
+                  be placed in a section from the module form.
                 </p>
               </div>
 
               <div className="rounded-xl border border-(--line) bg-(--surface) px-3.5 py-2 text-xs font-semibold text-(--ink-muted)">
-                {sorted.filter((item) => item.isActive).length} visible
+                {sidebarModules.filter((item) => item.isActive).length} visible
               </div>
             </div>
 
@@ -435,10 +495,32 @@ export default function ModulesPage() {
                 </thead>
 
                 <tbody className="divide-y divide-(--line)">
-                  {sorted.map((item, index) => {
-                    const Icon = getNavigationIcon(item.icon);
-
-                    return (
+                  {sidebarSections.flatMap((section) => {
+                    const SectionIcon =
+                      NAVIGATION_GROUPS.find((group) => group.id === section.id)
+                        ?.icon || LayoutGrid;
+                    return [
+                      <tr key={`section-${section.id}`} className="bg-(--surface)">
+                        <td colSpan={6} className="px-6 py-3.5">
+                          <div className="flex items-center gap-2.5">
+                            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-(--accent-soft) text-(--accent)">
+                              <SectionIcon size={16} />
+                            </span>
+                            <span className="text-sm font-bold text-(--foreground)">
+                              {section.label}
+                            </span>
+                            <Badge variant="neutral">{section.items.length}</Badge>
+                            {section.id === "ungrouped" && (
+                              <span className="text-xs text-(--ink-muted)">
+                                Appears below the named sidebar sections
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                      </tr>,
+                      ...section.items.map((item, index) => {
+                        const Icon = getNavigationIcon(item.icon);
+                        return (
                       <tr
                         key={item._id}
                         className="transition-colors duration-150 hover:bg-(--hover-bg)"
@@ -449,7 +531,7 @@ export default function ModulesPage() {
                               label={`Move ${item.label} up`}
                               title="Move up"
                               disabled={busy || index === 0}
-                              onClick={() => void handleMove(index, -1)}
+                              onClick={() => void handleMove(section.items, index, -1)}
                             >
                               <ArrowUp size={16} />
                             </IconButton>
@@ -457,8 +539,8 @@ export default function ModulesPage() {
                             <IconButton
                               label={`Move ${item.label} down`}
                               title="Move down"
-                              disabled={busy || index === sorted.length - 1}
-                              onClick={() => void handleMove(index, 1)}
+                              disabled={busy || index === section.items.length - 1}
+                              onClick={() => void handleMove(section.items, index, 1)}
                             >
                               <ArrowDown size={16} />
                             </IconButton>
@@ -563,7 +645,9 @@ export default function ModulesPage() {
                           </div>}
                         </td>
                       </tr>
-                    );
+                        );
+                      }),
+                    ];
                   })}
                 </tbody>
               </table>
@@ -713,6 +797,72 @@ export default function ModulesPage() {
           </div>
 
           <div>
+            <label
+              htmlFor="module-required-permission"
+              className="mb-2 block text-xs font-extrabold text-(--foreground-soft)"
+            >
+              Required permission
+            </label>
+            <Select
+              id="module-required-permission"
+              value={
+                form.requiredPermission ||
+                defaultPermissionForModule(getModuleKey(form.label, form.key))
+              }
+              disabled={form.isSystem}
+              onChange={(event) =>
+                setForm((previous) => ({
+                  ...previous,
+                  requiredPermission: event.target.value,
+                }))
+              }
+            >
+              <option value="">Choose a permission</option>
+              {Object.values(PERMISSIONS).map((permission) => (
+                <option key={permission} value={permission}>
+                  {permissionLabel(permission)}
+                </option>
+              ))}
+            </Select>
+            <p className="mt-1.5 text-[11px] text-(--ink-muted)">
+              Users need this permission and must be included in “Visible to”.
+              Notifications automatically uses notification.view.
+            </p>
+          </div>
+
+          <div>
+            <label
+              htmlFor="module-sidebar-group"
+              className="mb-2 block text-xs font-extrabold text-(--foreground-soft)"
+            >
+              Sidebar section
+            </label>
+            <Select
+              id="module-sidebar-group"
+              value={form.group}
+              disabled={form.isSystem}
+              onChange={(event) =>
+                setForm((previous) => ({
+                  ...previous,
+                  group: event.target.value,
+                }))
+              }
+            >
+              <option value="">Automatic from page type</option>
+              <option value="ungrouped">Other links (bottom of sidebar)</option>
+              {NAVIGATION_GROUPS.map((group) => (
+                <option key={group.id} value={group.id}>
+                  {group.label}
+                </option>
+              ))}
+            </Select>
+            <p className="mt-1.5 text-[11px] text-(--ink-muted)">
+              Choose where this link appears in the grouped sidebar. Automatic
+              keeps the current key-based placement.
+            </p>
+          </div>
+
+          <div>
             <p className="mb-1 text-xs font-extrabold text-(--foreground-soft)">
               Visible to
             </p>
@@ -751,4 +901,24 @@ export default function ModulesPage() {
       </Modal>
     </div>
   );
+}
+
+function getModuleKey(label: string, key: string) {
+  const normalized = (key.trim() || slugify(label)).toLowerCase();
+  return normalized === "notification" ? "notifications" : normalized;
+}
+
+function defaultPermissionForModule(key: string) {
+  return key === "notifications" || key === "notification"
+    ? PERMISSIONS.NOTIFICATION_VIEW
+    : "";
+}
+
+function permissionLabel(permission: string) {
+  const [resource, action] = permission.split(".");
+  const title = (value: string) =>
+    value
+      .replaceAll("_", " ")
+      .replace(/\b\w/g, (letter) => letter.toUpperCase());
+  return `${title(resource)} · ${title(action)} (${permission})`;
 }

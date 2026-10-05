@@ -11,14 +11,9 @@ import {
   Target,
 } from "lucide-react";
 
-import {
-  Badge,
-  Card,
-} from "@/components/ui";
+import { Badge, Card } from "@/components/ui";
 
-import type {
-  TrainingTimelineItem,
-} from "@/lib/studentTimelineApi";
+import type { TrainingTimelineItem } from "@/lib/studentTimelineApi";
 
 type TrainingTimelineProps = {
   items: TrainingTimelineItem[];
@@ -35,19 +30,22 @@ function formatDate(value: string | null) {
     return value;
   }
 
-  return date.toLocaleDateString(
-    "en-IN",
-    {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    }
-  );
+  return date.toLocaleDateString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
 }
 
-function getStatusVariant(
-  status: TrainingTimelineItem["status"]
-) {
+function formatTime(value?: string | null) {
+  if (!value) return "";
+  const [rawHour, minute] = value.split(":");
+  const hour = Number(rawHour);
+  if (!Number.isInteger(hour) || !minute) return value;
+  return `${String(hour % 12 || 12).padStart(2, "0")}:${minute} ${hour >= 12 ? "PM" : "AM"}`;
+}
+
+function getStatusVariant(status: TrainingTimelineItem["status"]) {
   switch (status) {
     case "COMPLETED":
       return "success" as const;
@@ -63,49 +61,23 @@ function getStatusVariant(
   }
 }
 
-function getStatusIcon(
-  status: TrainingTimelineItem["status"]
-) {
+function getStatusIcon(status: TrainingTimelineItem["status"]) {
   switch (status) {
     case "COMPLETED":
-      return (
-        <Check
-          size={15}
-          strokeWidth={2.5}
-        />
-      );
+      return <Check size={15} strokeWidth={2.5} />;
 
     case "MAKEUP_COMPLETED":
-      return (
-        <RotateCcw
-          size={15}
-          strokeWidth={2.2}
-        />
-      );
+      return <RotateCcw size={15} strokeWidth={2.2} />;
 
     case "MISSED":
-      return (
-        <Clock3
-          size={15}
-          strokeWidth={2.2}
-        />
-      );
+      return <Clock3 size={15} strokeWidth={2.2} />;
 
     default:
-      return (
-        <Circle
-          size={15}
-          strokeWidth={2}
-        />
-      );
+      return <Circle size={15} strokeWidth={2} />;
   }
 }
 
-function TimelineMarker({
-  item,
-}: {
-  item: TrainingTimelineItem;
-}) {
+function TimelineMarker({ item }: { item: TrainingTimelineItem }) {
   if (item.type === "MILESTONE") {
     return (
       <div
@@ -126,17 +98,12 @@ function TimelineMarker({
           shadow-[var(--shadow-sm)]
         "
       >
-        <GraduationCap
-          size={21}
-        />
+        <GraduationCap size={21} />
       </div>
     );
   }
 
-  if (
-    item.status === "COMPLETED" ||
-    item.status === "MAKEUP_COMPLETED"
-  ) {
+  if (item.status === "COMPLETED" || item.status === "MAKEUP_COMPLETED") {
     return (
       <div
         className="
@@ -156,10 +123,7 @@ function TimelineMarker({
           shadow-[var(--shadow-sm)]
         "
       >
-        <Check
-          size={20}
-          strokeWidth={2.6}
-        />
+        <Check size={20} strokeWidth={2.6} />
       </div>
     );
   }
@@ -211,13 +175,8 @@ function TimelineMarker({
   );
 }
 
-function TimelineCard({
-  item,
-}: {
-  item: TrainingTimelineItem;
-}) {
-  const isMilestone =
-    item.type === "MILESTONE";
+function TimelineCard({ item }: { item: TrainingTimelineItem }) {
+  const isMilestone = item.type === "MILESTONE";
 
   return (
     <div
@@ -267,11 +226,7 @@ function TimelineCard({
               Day {item.day}
             </span>
 
-            {isMilestone && (
-              <Badge variant="warning">
-                Belt milestone
-              </Badge>
-            )}
+            {isMilestone && <Badge variant="warning">Belt milestone</Badge>}
           </div>
 
           <h3
@@ -298,9 +253,7 @@ function TimelineCard({
             >
               <Target size={15} />
 
-              <span>
-                {item.skill}
-              </span>
+              <span>{item.skill}</span>
             </div>
           )}
 
@@ -317,6 +270,21 @@ function TimelineCard({
               {item.description}
             </p>
           )}
+
+          {item.attendance &&
+            (item.attendance.sessionName ||
+              item.attendance.sessionStartTime ||
+              item.attendance.sessionEndTime) && (
+              <div className="mt-3 flex items-center gap-2 text-sm font-medium text-[var(--text-secondary)]">
+                <Clock3 size={15} className="shrink-0 text-[var(--accent)]" />
+                <span>
+                  {item.attendance.sessionName || "Training session"}
+                  {(item.attendance.sessionStartTime ||
+                    item.attendance.sessionEndTime) &&
+                    ` · ${formatTime(item.attendance.sessionStartTime)} – ${formatTime(item.attendance.sessionEndTime)}`}
+                </span>
+              </div>
+            )}
         </div>
 
         <div
@@ -344,11 +312,7 @@ function TimelineCard({
             {formatDate(item.date)}
           </div>
 
-          <Badge
-            variant={getStatusVariant(
-              item.status
-            )}
-          >
+          <Badge variant={getStatusVariant(item.status)}>
             <span
               className="
                 mr-1.5
@@ -450,16 +414,10 @@ function TimelineCard({
             text-[var(--text-secondary)]
           "
         >
-          <RotateCcw
-            size={16}
-            className="shrink-0"
-          />
+          <RotateCcw size={16} className="shrink-0" />
 
           <span>
-            Makeup status:{" "}
-            <strong>
-              {item.makeup.status}
-            </strong>
+            Makeup status: <strong>{item.makeup.status}</strong>
           </span>
         </div>
       )}
@@ -467,9 +425,7 @@ function TimelineCard({
   );
 }
 
-export default function TrainingTimeline({
-  items,
-}: TrainingTimelineProps) {
+export default function TrainingTimeline({ items }: TrainingTimelineProps) {
   if (!items.length) {
     return (
       <Card>
@@ -517,9 +473,8 @@ export default function TrainingTimeline({
               text-[var(--text-secondary)]
             "
           >
-            This student's plan does not
-            contain any curriculum or
-            milestone days yet.
+            This student's plan does not contain any curriculum or milestone
+            days yet.
           </p>
         </div>
       </Card>
@@ -556,14 +511,10 @@ export default function TrainingTimeline({
                 sm:gap-5
               "
             >
-              <TimelineMarker
-                item={item}
-              />
+              <TimelineMarker item={item} />
 
               <div className="min-w-0 flex-1">
-                <TimelineCard
-                  item={item}
-                />
+                <TimelineCard item={item} />
               </div>
             </div>
           ))}

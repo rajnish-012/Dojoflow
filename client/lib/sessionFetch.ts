@@ -6,7 +6,7 @@ export async function fetchWithSession(input: RequestInfo | URL, init: RequestIn
   const response = await fetch(input, { ...init, headers, credentials: "include" });
   const url = input instanceof Request ? input.url : String(input);
   const shouldExpireSession = response.status === 401 &&
-    !/\/auth\/(login|logout|migrate-legacy-session)(?:\?|$)/.test(url);
+    !/\/auth\/(login|logout|me|migrate-legacy-session)(?:\?|$)/.test(url);
   if (shouldExpireSession && typeof window !== "undefined") {
     window.dispatchEvent(new Event("forcestrike:session-expired"));
   }

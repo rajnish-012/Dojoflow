@@ -13,10 +13,13 @@ import Button from "@/components/ui/Button";
 import Card from "@/components/ui/Card";
 import { useAuth } from "@/hooks/userAuth";
 import { getRoleDashboardPath } from "@/lib/current-user";
+import { useAcademyBrand } from "@/components/settings/AcademyBrandProvider";
 
 export default function UnauthorizedPage() {
   const router = useRouter();
   const { user } = useAuth();
+  const { settings } = useAcademyBrand();
+  const academyName = settings.academyName.trim() || "your academy";
 
   const handleGoBack = () => {
     if (window.history.length > 1) {
@@ -74,7 +77,7 @@ export default function UnauthorizedPage() {
             {/* Description */}
             <p className="mx-auto mt-4 max-w-md text-sm leading-6 text-[var(--foreground-soft)] sm:text-base">
               Your account does not have the required permission
-              to access this area of ForceStrike. If you believe
+              to access this area of {academyName}. If you believe
               this is a mistake, please contact your academy
               administrator.
             </p>

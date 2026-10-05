@@ -90,6 +90,19 @@ const protect = async (req, res, next) => {
       });
     }
 
+    if (user.mustResetPassword === true) {
+      res.clearCookie("forcestrike_session", {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+        path: "/",
+      });
+      return res.status(401).json({
+        success: false,
+        message: "Password reset required. Please use account recovery.",
+      });
+    }
+
     const role = await resolveRole(user);
 
     const roleKey = String(user.role || "").toUpperCase();

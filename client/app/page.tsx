@@ -10,6 +10,8 @@ import Link from "next/link";
 import "./landing.css";
 
 import type { HeroBrand } from "@/app/components/landing/Hero3D";
+import InternationalPhoneInput from "@/components/ui/InternationalPhoneInput";
+import { AcademyLogo } from "@/components/settings/AcademyBrandProvider";
 
 /* =========================================================
    API
@@ -59,7 +61,7 @@ function normalizeBrand(
 }
 
 function displayAcademyName(brand: HeroBrand) {
-  return brand.academyName || "ForceStrike Academy";
+  return brand.academyName || "Your Academy";
 }
 
 function displayTagline(brand: HeroBrand) {
@@ -455,6 +457,7 @@ export default function HomePage() {
   const [mobileDropdown, setMobileDropdown] = useState<string | null>(null);
   const [activeSlide, setActiveSlide] = useState(0);
   const [openFaq, setOpenFaq] = useState<number | null>(null);
+  const [leadPhone, setLeadPhone] = useState("");
   const [activeNav, setActiveNav] = useState("home");
   const slideTimer = useRef<NodeJS.Timeout | null>(null);
 
@@ -480,13 +483,6 @@ export default function HomePage() {
     loadBrand();
     return () => { active = false; };
   }, []);
-
-  /* Update page title */
-  useEffect(() => {
-    if (brand.academyName) {
-      document.title = `${brand.academyName} | Martial Arts Academy`;
-    }
-  }, [brand.academyName]);
 
   /* Auto-play slider */
   useEffect(() => {
@@ -566,14 +562,10 @@ export default function HomePage() {
         <div className="lp-container lp-nav-inner">
           {/* Logo */}
           <Link href="/" className="lp-nav-logo">
-            <img
-              src={brand.logoUrl || "/logo.png"}
-              alt={`${academyName} logo`}
-              onError={(e) => { (e.currentTarget as HTMLImageElement).src = "/logo.png"; }}
-            />
+            <AcademyLogo className="lp-nav-brand-logo" />
             <div className="lp-nav-logo-text">
               <span className="lp-nav-logo-name">{academyName}</span>
-              <span className="lp-nav-logo-tagline">Martial Arts Academy</span>
+              <span className="lp-nav-logo-tagline">{tagline}</span>
             </div>
           </Link>
 
@@ -1191,8 +1183,8 @@ export default function HomePage() {
                     <input type="text" placeholder="Your name" required />
                   </div>
                   <div className="lp-form-group">
-                    <label>Phone</label>
-                    <input type="tel" placeholder="Your phone" />
+                    <label htmlFor="landing-phone">Phone</label>
+                    <InternationalPhoneInput id="landing-phone" value={leadPhone} onChange={setLeadPhone} />
                   </div>
                 </div>
                 <div className="lp-form-group">
@@ -1259,14 +1251,10 @@ export default function HomePage() {
             {/* Brand col */}
             <div className="lp-footer-brand">
               <div className="lp-nav-logo" style={{ marginBottom: "1rem" }}>
-                <img
-                  src={brand.logoUrl || "/logo.png"}
-                  alt={`${academyName} logo`}
-                  onError={(e) => { (e.currentTarget as HTMLImageElement).src = "/logo.png"; }}
-                />
+                <AcademyLogo className="lp-nav-brand-logo" />
                 <div className="lp-nav-logo-text">
                   <span className="lp-nav-logo-name">{academyName}</span>
-                  <span className="lp-nav-logo-tagline">Martial Arts Academy</span>
+                  <span className="lp-nav-logo-tagline">{tagline}</span>
                 </div>
               </div>
               <p className="lp-footer-desc">

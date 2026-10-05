@@ -1,9 +1,4 @@
-import {
-  AlertCircle,
-  CalendarCheck2,
-  CheckCircle2,
-  Users,
-} from "lucide-react";
+import { AlertCircle, CalendarCheck2, CheckCircle2, Users } from "lucide-react";
 
 import { SummaryCard } from "@/components/ui";
 

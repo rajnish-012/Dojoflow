@@ -14,6 +14,19 @@ const planEnrollmentSchema = new mongoose.Schema({
   classesPerWeek: { type: Number, default: null },
   startingBelt: { type: String, default: "White" },
   programs: { type: [planEnrollmentProgramSchema], default: [] },
+  // A dated copy of the plan's fee terms. Later fee plan changes do not
+  // retroactively change what this enrollment agreed to pay.
+  billingSnapshot: {
+    feeName: { type: String, default: "" },
+    amount: { type: Number, min: 0, default: 0 },
+    billingFrequency: { type: String, enum: ["ONE_TIME", "MONTHLY", "QUARTERLY", "YEARLY"], default: "ONE_TIME" },
+    registrationFee: { type: Number, min: 0, default: 0 },
+    taxRate: { type: Number, min: 0, max: 100, default: 0 },
+    active: { type: Boolean, default: true },
+    discountRules: [{ name: String, type: { type: String, enum: ["FIXED", "PERCENT"] }, amount: Number, active: Boolean, effectiveFrom: Date, effectiveUntil: Date }],
+    effectiveFrom: { type: Date, default: null },
+    effectiveUntil: { type: Date, default: null },
+  },
 }, { timestamps: true });
 
 const programBeltSchema = new mongoose.Schema({
@@ -30,7 +43,6 @@ const studentSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       default: null,
-      index: true,
     },
 
     /*
@@ -152,7 +164,10 @@ studentSchema.index(
   { user: 1 },
   {
     unique: true,
-    sparse: true,
+    // `sparse` still indexes explicit null values, which would prevent
+    // multiple legacy/unlinked student profiles from coexisting. Only real
+    // ObjectId links participate in the uniqueness constraint.
+    partialFilterExpression: { user: { $type: "objectId" } },
   },
 );
 

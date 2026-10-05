@@ -1,16 +1,6 @@
-import {
-  AlertCircle,
-  CalendarDays,
-  CheckCircle2,
-  X,
-} from "lucide-react";
+import { AlertCircle, CalendarDays, CheckCircle2, X } from "lucide-react";
 
-import {
-  Badge,
-  Button,
-  Modal,
-  Select,
-} from "@/components/ui";
+import { Badge, Button, Modal, Select } from "@/components/ui";
 
 import type { DailyAttendanceRow } from "./AttendanceRow";
 
@@ -44,18 +34,16 @@ export default function AttendanceModal({
   }
 
   const isAbsent = status === "ABSENT";
-  const selectedSlot = (row.branchSchedule?.slots || []).find((slot) => slot._id === sessionSlotId);
+  const selectedSlot = (row.branchSchedule?.slots || []).find(
+    (slot) => slot._id === sessionSlotId,
+  );
   const selectedCurriculum = selectedSlot?.curriculum || row.curriculum;
 
   return (
     <Modal
       open={open}
       onClose={onClose}
-      title={
-        isAbsent
-          ? "Mark student absent"
-          : "Mark student present"
-      }
+      title={isAbsent ? "Mark student absent" : "Mark student present"}
       description="Review the training step before saving this attendance record."
     >
       <div className="space-y-5">
@@ -66,9 +54,7 @@ export default function AttendanceModal({
               className="mt-0.5 shrink-0 text-[var(--danger)]"
             />
 
-            <p className="text-sm text-[var(--danger)]">
-              {error}
-            </p>
+            <p className="text-sm text-[var(--danger)]">{error}</p>
           </div>
         )}
 
@@ -105,7 +91,9 @@ export default function AttendanceModal({
 
             <p className="mt-2 text-lg font-bold text-[var(--foreground)]">
               Day {selectedSlot?.planDay || row.planDay}
-              {selectedSlot?.programName ? ` · ${selectedSlot.programName}` : ""}
+              {selectedSlot?.programName
+                ? ` · ${selectedSlot.programName}`
+                : ""}
             </p>
           </div>
 
@@ -115,27 +103,46 @@ export default function AttendanceModal({
             </p>
 
             <div className="mt-2">
-              <Badge
-                variant={
-                  isAbsent
-                    ? "danger"
-                    : "success"
-                }
-              >
-                {isAbsent
-                  ? "Absent"
-                  : "Present"}
+              <Badge variant={isAbsent ? "danger" : "success"}>
+                {isAbsent ? "Absent" : "Present"}
               </Badge>
             </div>
           </div>
         </div>
 
-        {(row.branchSchedule?.slots || []).filter((slot) => slot.entitled && slot.curriculumAvailable && slot.sessionTypeId && slot._id && !slot.attendance).length > 0 && <div>
-          <label className="mb-2 block text-xs font-semibold text-[var(--ink-muted)]">Scheduled session</label>
-          <Select value={sessionSlotId} onChange={(event) => onSessionChange(event.target.value)}>
-            {(row.branchSchedule?.slots || []).filter((slot) => slot.entitled && slot.curriculumAvailable && slot.sessionTypeId && slot._id && !slot.attendance).map((slot) => <option key={slot._id} value={slot._id}>{slot.sessionName} ({slot.startTime}–{slot.endTime})</option>)}
-          </Select>
-        </div>}
+        {(row.branchSchedule?.slots || []).filter(
+          (slot) =>
+            slot.entitled &&
+            slot.curriculumAvailable &&
+            slot.sessionTypeId &&
+            slot._id &&
+            !slot.attendance,
+        ).length > 0 && (
+          <div>
+            <label className="mb-2 block text-xs font-semibold text-[var(--ink-muted)]">
+              Scheduled session
+            </label>
+            <Select
+              value={sessionSlotId}
+              onChange={(event) => onSessionChange(event.target.value)}
+            >
+              {(row.branchSchedule?.slots || [])
+                .filter(
+                  (slot) =>
+                    slot.entitled &&
+                    slot.curriculumAvailable &&
+                    slot.sessionTypeId &&
+                    slot._id &&
+                    !slot.attendance,
+                )
+                .map((slot) => (
+                  <option key={slot._id} value={slot._id}>
+                    {slot.sessionName} ({slot.startTime}–{slot.endTime})
+                  </option>
+                ))}
+            </Select>
+          </div>
+        )}
 
         <div className="rounded-xl border border-[var(--border)] p-4">
           <p className="text-xs font-bold uppercase tracking-[0.12em] text-[var(--ink-muted)]">
@@ -143,8 +150,7 @@ export default function AttendanceModal({
           </p>
 
           <p className="mt-2 font-semibold text-[var(--foreground)]">
-            {selectedCurriculum?.title ||
-              "No curriculum title configured"}
+            {selectedCurriculum?.title || "No curriculum title configured"}
           </p>
 
           {selectedCurriculum?.description && (
@@ -163,10 +169,7 @@ export default function AttendanceModal({
         {isAbsent && (
           <div className="rounded-xl border border-[var(--warning)]/25 bg-[var(--warning-soft)] p-4">
             <div className="flex items-start gap-3">
-              <AlertCircle
-                size={18}
-                className="mt-0.5 text-[var(--warning)]"
-              />
+              <AlertCircle size={18} className="mt-0.5 text-[var(--warning)]" />
 
               <div>
                 <p className="text-sm font-semibold text-[var(--foreground)]">
@@ -174,9 +177,8 @@ export default function AttendanceModal({
                 </p>
 
                 <p className="mt-1 text-xs leading-5 text-[var(--ink-muted)]">
-                  This absence will be recorded as a missed
-                  training day. Makeup scheduling will be
-                  handled in the next module.
+                  This absence will be recorded as a missed training day. Makeup
+                  scheduling will be handled in the next module.
                 </p>
               </div>
             </div>
@@ -194,27 +196,21 @@ export default function AttendanceModal({
             Cancel
           </Button>
 
-          {canManage && <Button
-            type="button"
-            variant={
-              isAbsent
-                ? "danger"
-                : "primary"
-            }
-            loading={saving}
-            onClick={onConfirm}
-          >
-            {isAbsent ? (
-              <AlertCircle size={16} />
-            ) : (
-              <CheckCircle2 size={16} />
-            )}
-
-            Confirm{" "}
-            {isAbsent
-              ? "Absent"
-              : "Present"}
-          </Button>}
+          {canManage && (
+            <Button
+              type="button"
+              variant={isAbsent ? "danger" : "primary"}
+              loading={saving}
+              onClick={onConfirm}
+            >
+              {isAbsent ? (
+                <AlertCircle size={16} />
+              ) : (
+                <CheckCircle2 size={16} />
+              )}
+              Confirm {isAbsent ? "Absent" : "Present"}
+            </Button>
+          )}
         </div>
       </div>
     </Modal>

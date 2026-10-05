@@ -1,10 +1,15 @@
 const bcrypt = require("bcryptjs");
+const crypto = require("crypto");
 const jwt = require("jsonwebtoken");
 const User = require("../models/User");
 const Role = require("../models/Role");
 const Branch = require("../models/Branch");
+const PasswordResetToken = require("../models/PasswordResetToken");
+const { validatePassword, sessionInvalidationTime } = require("../utils/passwordPolicy");
+const { sendPasswordResetEmail } = require("../services/inquiryEmail.service");
 
 const SESSION_COOKIE = "forcestrike_session";
+const DUMMY_PASSWORD_HASH = bcrypt.hashSync(crypto.randomBytes(32).toString("hex"), 12);
 const sessionCookieOptions = () => ({
   httpOnly: true,
   secure: process.env.NODE_ENV === "production",
@@ -12,12 +17,13 @@ const sessionCookieOptions = () => ({
   path: "/",
   maxAge: 7 * 24 * 60 * 60 * 1000,
 });
-const clearSessionCookie = (res) => res.clearCookie(SESSION_COOKIE, {
-  httpOnly: true,
-  secure: process.env.NODE_ENV === "production",
-  sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
-  path: "/",
-});
+const clearSessionCookie = (res) =>
+  res.clearCookie(SESSION_COOKIE, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+    path: "/",
+  });
 
 /* =========================================================
    HELPERS
@@ -52,6 +58,8 @@ const register = async (req, res) => {
         message: "Name, email and password are required",
       });
     }
+    const passwordError = validatePassword(password);
+    if (passwordError) return res.status(400).json({ success: false, message: passwordError });
 
     const existingUser = await User.findOne({
       email: email.toLowerCase().trim(),
@@ -64,12 +72,10 @@ const register = async (req, res) => {
       });
     }
 
-    const hashedPassword = await bcrypt.hash(password, 10);
-
     const user = await User.create({
       name,
       email,
-      password: hashedPassword,
+      password,
       role: "STUDENT",
       branch: null,
     });
@@ -103,7 +109,7 @@ const login = async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    if (!email || !password) {
+    if (typeof email !== "string" || typeof password !== "string" || !email || !password || Buffer.byteLength(password, "utf8") > 72) {
       return res.status(400).json({
         success: false,
         message: "Email and password are required",
@@ -119,6 +125,7 @@ const login = async (req, res) => {
     }).select("+password");
 
     if (!user) {
+      await bcrypt.compare(password, DUMMY_PASSWORD_HASH);
       return res.status(401).json({
         success: false,
         message: "Invalid email or password",
@@ -130,20 +137,19 @@ const login = async (req, res) => {
      * This prevents timing attacks that could reveal whether
      * an email address exists in the system.
      */
-    if (user.isActive === false) {
-      return res.status(401).json({
-        success: false,
-        message:
-          "This account has been deactivated. Please contact your administrator.",
-      });
-    }
-
     const isPasswordValid = await bcrypt.compare(password, user.password);
 
-    if (!isPasswordValid) {
+    if (!isPasswordValid || user.isActive === false) {
       return res.status(401).json({
         success: false,
         message: "Invalid email or password",
+      });
+    }
+
+    if (user.mustResetPassword) {
+      return res.status(403).json({
+        success: false,
+        message: "Password reset required. Use Forgot password to recover account access.",
       });
     }
 
@@ -205,18 +211,36 @@ const logout = (req, res) => {
 const migrateLegacySession = async (req, res) => {
   try {
     const token = typeof req.body?.token === "string" ? req.body.token : "";
-    if (!token) return res.status(400).json({ success: false, message: "Legacy session is missing" });
+    if (!token)
+      return res
+        .status(400)
+        .json({ success: false, message: "Legacy session is missing" });
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     const user = await User.findById(decoded.id);
-    if (!user || user.isActive === false || (user.passwordChangedAt && decoded.iat < Math.floor(user.passwordChangedAt.getTime() / 1000))) {
+    if (
+      !user ||
+      user.isActive === false ||
+      (user.passwordChangedAt &&
+        decoded.iat < Math.floor(user.passwordChangedAt.getTime() / 1000))
+    ) {
       clearSessionCookie(res);
-      return res.status(401).json({ success: false, message: "Session expired. Please log in again." });
+      return res
+        .status(401)
+        .json({
+          success: false,
+          message: "Session expired. Please log in again.",
+        });
     }
     res.cookie(SESSION_COOKIE, token, sessionCookieOptions());
     return res.status(204).end();
   } catch {
     clearSessionCookie(res);
-    return res.status(401).json({ success: false, message: "Session expired. Please log in again." });
+    return res
+      .status(401)
+      .json({
+        success: false,
+        message: "Session expired. Please log in again.",
+      });
   }
 };
 
@@ -237,10 +261,11 @@ const changePassword = async (req, res) => {
       });
     }
 
-    if (newPassword.length < 6) {
+    const passwordError = validatePassword(newPassword);
+    if (passwordError) {
       return res.status(400).json({
         success: false,
-        message: "New password must be at least 6 characters",
+        message: passwordError,
       });
     }
 
@@ -276,12 +301,12 @@ const changePassword = async (req, res) => {
       });
     }
 
-    const hashedNewPassword = await bcrypt.hash(newPassword, 10);
-
-    user.password = hashedNewPassword;
-    user.passwordChangedAt = new Date();
+    user.password = newPassword;
+    user.passwordChangedAt = sessionInvalidationTime();
+    user.mustResetPassword = false;
 
     await user.save();
+    clearSessionCookie(res);
 
     res.status(200).json({
       success: true,
@@ -297,10 +322,104 @@ const changePassword = async (req, res) => {
   }
 };
 
+const requestPasswordReset = async (req, res) => {
+  const genericResponse = {
+    success: true,
+    message: "If an active account matches that email, password reset instructions will be sent.",
+  };
+  try {
+    const email = typeof req.body?.email === "string" ? req.body.email.trim().toLowerCase() : "";
+    res.status(202).json(genericResponse);
+    if (!email || email.length > 320 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return;
+
+    const user = await User.findOne({ email, isActive: { $ne: false } }).select("_id").lean();
+    if (!user) return;
+
+    await PasswordResetToken.deleteMany({ user: user._id, consumedAt: null });
+    const token = crypto.randomBytes(32).toString("base64url");
+    const resetRecord = await PasswordResetToken.create({
+      user: user._id,
+      tokenHash: crypto.createHash("sha256").update(token).digest("hex"),
+      expiresAt: new Date(Date.now() + 30 * 60 * 1000),
+    });
+    const clientOrigin = process.env.CLIENT_URL.split(",")[0].trim().replace(/\/$/, "");
+    const resetUrl = `${clientOrigin}/reset-password#token=${encodeURIComponent(token)}`;
+    void sendPasswordResetEmail(email, resetUrl).catch(async () => {
+      await PasswordResetToken.deleteOne({ _id: resetRecord._id, consumedAt: null });
+      console.error("Password reset email could not be sent.");
+    });
+  } catch {
+    // Keep account-existence and mail-provider state out of the public response.
+    console.error("Password reset request could not be completed.");
+  }
+};
+
+const resetPassword = async (req, res) => {
+  let claimedReset = null;
+  let passwordWasUpdated = false;
+  try {
+    const token = typeof req.body?.token === "string" ? req.body.token : "";
+    const newPassword = req.body?.newPassword;
+    const passwordError = validatePassword(newPassword);
+    if (!token || token.length > 128) return res.status(400).json({ success: false, message: "Reset link is invalid or expired." });
+    if (passwordError) return res.status(400).json({ success: false, message: passwordError });
+
+    const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
+    const reset = await PasswordResetToken.findOneAndUpdate(
+      { tokenHash, consumedAt: null, expiresAt: { $gt: new Date() } },
+      { $set: { consumedAt: new Date() } },
+      { returnDocument: "after" },
+    );
+    if (!reset) return res.status(400).json({ success: false, message: "Reset link is invalid or expired." });
+    claimedReset = reset;
+
+    const user = await User.findById(reset.user);
+    if (!user || user.isActive === false) return res.status(400).json({ success: false, message: "Reset link is invalid or expired." });
+    user.password = newPassword;
+    user.passwordChangedAt = sessionInvalidationTime();
+    user.mustResetPassword = false;
+    // Validate the fields changed in this reset. Legacy profile data may not
+    // satisfy newer unrelated validators, and should not block account recovery.
+    await user.save({ validateModifiedOnly: true });
+    passwordWasUpdated = true;
+    try {
+      await PasswordResetToken.deleteMany({ user: user._id });
+    } catch (cleanupError) {
+      console.error("Other password reset tokens could not be invalidated.", {
+        name: cleanupError?.name || "Error",
+        code: cleanupError?.code,
+      });
+    }
+    return res.status(200).json({ success: true, message: "Password reset successfully. Please sign in with your new password." });
+  } catch (error) {
+    if (claimedReset && !passwordWasUpdated) {
+      try {
+        await PasswordResetToken.updateOne(
+          { _id: claimedReset._id, consumedAt: claimedReset.consumedAt },
+          { $set: { consumedAt: null } },
+        );
+      } catch (releaseError) {
+        console.error("Failed password reset could not release its token.", {
+          name: releaseError?.name || "Error",
+          code: releaseError?.code,
+        });
+      }
+    }
+    console.error("Password reset could not be completed.", {
+      name: error?.name || "Error",
+      code: error?.code,
+      validationPaths: Object.keys(error?.errors || {}),
+    });
+    return res.status(500).json({ success: false, message: "Unable to reset password right now." });
+  }
+};
+
 module.exports = {
   register,
   login,
   changePassword,
   logout,
   migrateLegacySession,
+  requestPasswordReset,
+  resetPassword,
 };

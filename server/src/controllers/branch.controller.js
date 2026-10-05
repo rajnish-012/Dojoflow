@@ -1,6 +1,7 @@
 const mongoose = require("mongoose");
 
 const Branch = require("../models/Branch");
+const { normalizePhone } = require("../utils/phone");
 
 const sendError = (res, status, message) =>
   res.status(status).json({ success: false, message });
@@ -117,6 +118,9 @@ const createBranch = async (req, res) => {
       return sendError(res, 400, "Branch name and address are required");
     }
 
+    const normalizedPhone = phone ? normalizePhone(phone) : "";
+    if (phone && !normalizedPhone) return sendError(res, 400, "Enter a valid phone number with its country code.");
+
     const existingBranch = await Branch.findOne({
       name: { $regex: `^${escapeRegex(name)}$`, $options: "i" },
     });
@@ -125,7 +129,7 @@ const createBranch = async (req, res) => {
       return sendError(res, 409, "A branch with this name already exists");
     }
 
-    const branch = await Branch.create({ name, address, phone, isActive: true });
+    const branch = await Branch.create({ name, address, phone: normalizedPhone, isActive: true });
 
     return res.status(201).json({
       success: true,
@@ -159,6 +163,9 @@ const updateBranch = async (req, res) => {
       return sendError(res, 400, "Branch name and address are required");
     }
 
+    const normalizedPhone = phone ? normalizePhone(phone) : "";
+    if (phone && !normalizedPhone) return sendError(res, 400, "Enter a valid phone number with its country code.");
+
     const duplicate = await Branch.findOne({
       _id: { $ne: id },
       name: { $regex: `^${escapeRegex(name)}$`, $options: "i" },
@@ -170,7 +177,7 @@ const updateBranch = async (req, res) => {
 
     branch.name = name;
     branch.address = address;
-    branch.phone = phone;
+    branch.phone = normalizedPhone;
 
     if (hasAllBranchScope(req.user) && typeof req.body.isActive === "boolean") {
       branch.isActive = req.body.isActive;

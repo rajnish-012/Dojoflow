@@ -1,5 +1,4 @@
 const mongoose = require("mongoose");
-const bcrypt = require("bcryptjs");
 
 const { isBranchScoped } = require("../utils/access");
 
@@ -8,6 +7,9 @@ const User = require("../models/User");
 const Plan = require("../models/Plan");
 const Branch = require("../models/Branch");
 const CoachStudentAssignment = require("../models/CoachStudentAssignment");
+const { validatePassword, sessionInvalidationTime } = require("../utils/passwordPolicy");
+const { normalizePhone } = require("../utils/phone");
+const { safelyNotify } = require("../services/notification.service");
 
 /* =========================================================
    CONSTANTS
@@ -40,10 +42,26 @@ function enrollmentEndDate(plan, startDate) {
   return end;
 }
 
-function enrollmentSnapshot(plan) {
+function enrollmentSnapshot(plan, branchId) {
+  const feeOverride = (plan.branchFeeOverrides || []).find((item) => String(item.branch) === String(branchId));
+  const billingTerms = feeOverride || plan;
   return {
     classesPerWeek: Number(plan.classesPerWeek || 0),
     startingBelt: plan.startingBelt || "White",
+    billingSnapshot: {
+      feeName: billingTerms.feeName || plan.name,
+      active: billingTerms.active !== false && plan.feeActive !== false,
+      amount: Number(billingTerms.amount ?? plan.price ?? 0),
+      billingFrequency: billingTerms.billingFrequency || plan.billingFrequency || "ONE_TIME",
+      registrationFee: Number(billingTerms.registrationFee ?? plan.registrationFee ?? 0),
+      taxRate: Number(billingTerms.taxRate ?? plan.taxRate ?? 0),
+      discountRules: (billingTerms.discountRules || plan.discountRules || []).map((rule) => ({
+        _id: rule._id, name: rule.name, type: rule.type, amount: Number(rule.amount || 0), active: rule.active !== false,
+        effectiveFrom: rule.effectiveFrom || null, effectiveUntil: rule.effectiveUntil || null,
+      })),
+      effectiveFrom: billingTerms.effectiveFrom || plan.effectiveFrom || null,
+      effectiveUntil: billingTerms.effectiveUntil || plan.effectiveUntil || null,
+    },
     programs: (plan.programs || []).map((item) => ({
       program: item.program?._id || item.program,
       weeklyLimit: item.weeklyLimit ?? null,
@@ -52,6 +70,12 @@ function enrollmentSnapshot(plan) {
       })),
     })),
   };
+}
+
+function feeIsActiveForBranch(plan, branchId) {
+  if (plan.feeActive === false) return false;
+  const override = (plan.branchFeeOverrides || []).find((item) => String(item.branch) === String(branchId));
+  return !override || override.active !== false;
 }
 
 function normalizeEmail(value) {
@@ -455,7 +479,8 @@ const createStudent = async (req, res) => {
 
     const normalizedName = normalizeString(name);
 
-    const normalizedPhone = normalizeString(phone);
+    const rawPhone = normalizeString(phone);
+    const normalizedPhone = normalizePhone(rawPhone);
 
     const normalizedLoginEmail = normalizeEmail(loginEmail);
 
@@ -478,7 +503,7 @@ const createStudent = async (req, res) => {
       });
     }
 
-    if (!normalizedPhone) {
+    if (!rawPhone) {
       return res.status(400).json({
         success: false,
         message: "Phone number is required.",
@@ -549,10 +574,10 @@ const createStudent = async (req, res) => {
     /*
      * Phone validation.
      */
-    if (!/^\d{10}$/.test(normalizedPhone)) {
+    if (!normalizedPhone) {
       return res.status(400).json({
         success: false,
-        message: "Phone number must be exactly 10 digits.",
+        message: "Enter a valid phone number with its country code.",
       });
     }
 
@@ -572,10 +597,11 @@ const createStudent = async (req, res) => {
     /*
      * Password validation.
      */
-    if (typeof loginPassword !== "string" || loginPassword.length < 6) {
+    const passwordError = validatePassword(loginPassword);
+    if (passwordError) {
       return res.status(400).json({
         success: false,
-        message: "Student login password must be at least 6 characters",
+        message: passwordError,
       });
     }
 
@@ -645,6 +671,13 @@ const createStudent = async (req, res) => {
         success: false,
         message: "Selected training plan is inactive",
       });
+    }
+
+    if (selectedPlan.feeBranch && String(selectedPlan.feeBranch) !== String(selectedBranch._id)) {
+      return res.status(400).json({ success: false, message: "Selected fee structure is not available to this branch" });
+    }
+    if (!feeIsActiveForBranch(selectedPlan, selectedBranch._id)) {
+      return res.status(400).json({ success: false, message: "Selected fee structure is inactive for this branch" });
     }
 
     /*
@@ -722,6 +755,7 @@ const createStudent = async (req, res) => {
     createdUser = await User.create({
       name: normalizedName,
       email: normalizedLoginEmail,
+      phone: normalizedPhone,
       password: loginPassword,
       role: "STUDENT",
       branch: selectedBranch._id,
@@ -739,7 +773,7 @@ const createStudent = async (req, res) => {
       email: normalizedStudentEmail || undefined,
       branch: selectedBranch._id,
       plan: selectedPlan._id,
-      planEnrollments: [{ plan: selectedPlan._id, startDate: parsedJoinDate, endDate: enrollmentEndDate(selectedPlan, parsedJoinDate), status: "ACTIVE", ...enrollmentSnapshot(selectedPlan) }],
+      planEnrollments: [{ plan: selectedPlan._id, startDate: parsedJoinDate, endDate: enrollmentEndDate(selectedPlan, parsedJoinDate), status: "ACTIVE", ...enrollmentSnapshot(selectedPlan, selectedBranch._id) }],
       joinDate: parsedJoinDate,
       status: "ACTIVE",
       currentBelt:
@@ -753,6 +787,19 @@ const createStudent = async (req, res) => {
       .populate("branch", "name address")
       .populate("plan", "name price duration startingBelt isActive programs")
       .populate("plan.programs.program", "name slug");
+
+    await safelyNotify({
+      type: "STUDENT_CREATED",
+      title: "New student registered",
+      message: `${normalizedName} was added to the academy.`,
+      severity: "SUCCESS",
+      branch: selectedBranch._id,
+      student: createdStudent._id,
+      entityType: "STUDENT",
+      entityId: createdStudent._id,
+      eventKey: `student:${createdStudent._id}:created`,
+      actionUrl: "/students",
+    });
 
     return res.status(201).json({
       success: true,
@@ -901,17 +948,20 @@ const updateStudent = async (req, res) => {
      * PHONE
      */
     if (phone !== undefined) {
-      const normalizedPhone = normalizeString(phone);
+      const normalizedPhone = normalizePhone(phone);
 
-      if (normalizedPhone.length < 7 || normalizedPhone.length > 20) {
+      if (!normalizedPhone) {
         return res.status(400).json({
           success: false,
-          message: "Please enter a valid phone number",
+          message: "Enter a valid phone number with its country code.",
         });
       }
 
       student.phone = normalizedPhone;
+      if (student.user) await User.updateOne({ _id: student.user }, { $set: { phone: normalizedPhone } });
     }
+
+    const originalStatus = student.status;
 
     /*
      * STUDENT CONTACT EMAIL
@@ -952,6 +1002,7 @@ const updateStudent = async (req, res) => {
      * between branches. Branch-scoped users may only retain their
      * assigned branch, even when they submit a different branch ID.
      */
+    let targetBranch = null;
     if (branch !== undefined) {
       if (isBranchScoped(req.user) && !hasSameId(req.user.branch, branch)) {
         return res.status(403).json({
@@ -967,7 +1018,7 @@ const updateStudent = async (req, res) => {
         });
       }
 
-      const targetBranch = await Branch.findById(branch);
+      targetBranch = await Branch.findById(branch);
 
       if (!targetBranch) {
         return res.status(404).json({
@@ -1037,6 +1088,14 @@ const updateStudent = async (req, res) => {
         });
       }
 
+      const enrollmentBranch = targetBranch?._id || student.branch;
+      if (selectedPlan.feeBranch && String(selectedPlan.feeBranch) !== String(enrollmentBranch)) {
+        return res.status(400).json({ success: false, message: "Selected fee structure is not available to this branch" });
+      }
+      if (!feeIsActiveForBranch(selectedPlan, enrollmentBranch)) {
+        return res.status(400).json({ success: false, message: "Selected fee structure is inactive for this branch" });
+      }
+
       if (String(student.plan) !== String(selectedPlan._id)) {
         const enrollmentStart = new Date();
         enrollmentStart.setHours(0, 0, 0, 0);
@@ -1045,7 +1104,7 @@ const updateStudent = async (req, res) => {
           currentEnrollment.status = "ENDED";
           currentEnrollment.endDate = enrollmentStart;
         }
-        student.planEnrollments.push({ plan: selectedPlan._id, startDate: enrollmentStart, endDate: enrollmentEndDate(selectedPlan, enrollmentStart), status: "ACTIVE", ...enrollmentSnapshot(selectedPlan) });
+        student.planEnrollments.push({ plan: selectedPlan._id, startDate: enrollmentStart, endDate: enrollmentEndDate(selectedPlan, enrollmentStart), status: "ACTIVE", ...enrollmentSnapshot(selectedPlan, enrollmentBranch) });
         student.plan = selectedPlan._id;
       }
     }
@@ -1109,16 +1168,15 @@ const updateStudent = async (req, res) => {
       student.status = String(status);
     }
 
-    const previousStatus = student.status;
-
     /*
      * PASSWORD
      */
     if (password !== undefined && password !== "") {
-      if (typeof password !== "string" || password.length < 6) {
+      const passwordError = validatePassword(password);
+      if (passwordError) {
         return res.status(400).json({
           success: false,
-          message: "Student login password must be at least 6 characters",
+          message: passwordError,
         });
       }
 
@@ -1174,7 +1232,7 @@ const updateStudent = async (req, res) => {
     const passwordChanged = typeof password === "string" && password.length > 0;
 
     const statusChanged =
-      status !== undefined && student.status !== previousStatus;
+      status !== undefined && student.status !== originalStatus;
 
     const nameChanged = name !== undefined;
 
@@ -1200,8 +1258,9 @@ const updateStudent = async (req, res) => {
         }
 
         if (passwordChanged) {
-          linkedUser.password = await bcrypt.hash(password, 10);
-          linkedUser.passwordChangedAt = new Date();
+          linkedUser.password = password;
+          linkedUser.passwordChangedAt = sessionInvalidationTime();
+          linkedUser.mustResetPassword = false;
         }
       }
     }
@@ -1216,6 +1275,21 @@ const updateStudent = async (req, res) => {
       .populate("branch", "name address")
       .populate("plan", "name price duration startingBelt isActive programs")
       .populate("plan.programs.program", "name slug");
+
+    if (originalStatus !== "COMPLETED" && student.status === "COMPLETED") {
+      await safelyNotify({
+        type: "STUDENT_COMPLETED",
+        title: "Student marked completed",
+        message: `${student.name} was marked completed in the academy.`,
+        severity: "SUCCESS",
+        branch: student.branch,
+        student: student._id,
+        entityType: "STUDENT",
+        entityId: student._id,
+        eventKey: `student:${student._id}:completed`,
+        actionUrl: "/students",
+      });
+    }
 
     return res.status(200).json({
       success: true,

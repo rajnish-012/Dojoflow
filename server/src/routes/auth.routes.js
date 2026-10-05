@@ -1,6 +1,6 @@
 const express = require("express");
 
-const { login, changePassword, logout, migrateLegacySession } = require("../controllers/auth.controller");
+const { login, changePassword, logout, migrateLegacySession, requestPasswordReset, resetPassword } = require("../controllers/auth.controller");
 
 const protect = require("../middleware/auth.middleware");
 const Branch = require("../models/Branch");
@@ -13,6 +13,8 @@ const router = express.Router();
 ------------------------- */
 
 router.post("/login", login);
+router.post("/forgot-password", requestPasswordReset);
+router.post("/reset-password", resetPassword);
 router.post("/migrate-legacy-session", migrateLegacySession);
 router.post("/logout", logout);
 

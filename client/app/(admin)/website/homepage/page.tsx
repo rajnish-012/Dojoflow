@@ -2,7 +2,6 @@
 
 import HomepageCMS from "@/components/website/HomepageCMS";
 
-
 export default function HomepageCMSPage() {
   return (
     <div className="min-h-[calc(100vh-72px)] bg-(--background)">

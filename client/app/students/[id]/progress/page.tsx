@@ -58,6 +58,10 @@ type Student = {
 
 type AttendanceItem = {
   _id?: string;
+  attendanceType?: "REGULAR" | "MAKEUP";
+  sessionName?: string;
+  sessionStartTime?: string;
+  sessionEndTime?: string;
   date?: string;
   planDay?: number;
   curriculumTitle?: string;
@@ -65,6 +69,15 @@ type AttendanceItem = {
   makeupRequired?: boolean;
   makeupCompleted?: boolean;
   sessionTypeId?: string | { _id: string; name?: string } | null;
+};
+
+type MakeupItem = {
+  _id?: string;
+  status?: "SCHEDULED" | "COMPLETED" | "CANCELLED" | string;
+  originalDate?: string;
+  makeupDate?: string | null;
+  planDay?: number;
+  curriculumTitle?: string;
 };
 
 type PerformanceItem = {
@@ -104,7 +117,10 @@ type ProgressData = {
   absentClasses?: number | string;
 
   pendingMakeups?: number | string;
+  unscheduledMakeups?: number | string;
+  scheduledMakeups?: number | string;
   completedMakeups?: number | string;
+  makeups?: MakeupItem[];
 
   averageRating?: number | string | null;
 
@@ -124,6 +140,8 @@ type ProgressData = {
     presentClasses?: number | string;
     absentClasses?: number | string;
     pendingMakeups?: number | string;
+    unscheduledMakeups?: number | string;
+    scheduledMakeups?: number | string;
     completedMakeups?: number | string;
   };
   performanceSummary?: {
@@ -180,6 +198,14 @@ function formatDate(date?: string) {
     month: "short",
     year: "numeric",
   });
+}
+
+function formatTime(value?: string) {
+  if (!value) return "";
+  const [rawHour, minute] = value.split(":");
+  const hour = Number(rawHour);
+  if (!Number.isInteger(hour) || !minute) return value;
+  return `${String(hour % 12 || 12).padStart(2, "0")}:${minute} ${hour >= 12 ? "PM" : "AM"}`;
 }
 
 function statusOf(status?: string) {
@@ -534,16 +560,21 @@ export default function StudentProgressPage() {
       const selectedProgram = progressResult?.selectedProgram;
       const resolvedProgramId = typeof selectedProgram === "object" ? selectedProgram?._id || "" : selectedProgram || programId;
       if (resolvedProgramId && resolvedProgramId !== selectedProgramId) setSelectedProgramId(resolvedProgramId);
-      let attendanceResult: AttendanceItem[] = [];
+      const hasCanonicalAttendance = Array.isArray(progressResult?.attendance);
+      let attendanceResult: AttendanceItem[] = hasCanonicalAttendance
+        ? progressResult.attendance
+        : [];
 
       let performanceResult: PerformanceItem[] = [];
 
-      try {
-        attendanceResult = normalizeAttendance(
-          await getStudentAttendance(studentId),
-        );
-      } catch (attendanceError) {
-        console.error("Attendance API failed:", attendanceError);
+      if (!hasCanonicalAttendance) {
+        try {
+          attendanceResult = normalizeAttendance(
+            await getStudentAttendance(studentId),
+          );
+        } catch (attendanceError) {
+          console.error("Attendance API failed:", attendanceError);
+        }
       }
 
       try {
@@ -554,7 +585,7 @@ export default function StudentProgressPage() {
         console.error("Performance API failed:", performanceError);
       }
 
-      if (!attendanceResult.length) {
+      if (!hasCanonicalAttendance && !attendanceResult.length) {
         attendanceResult = normalizeAttendance(progressResult?.attendance);
 
         if (!attendanceResult.length) {
@@ -576,6 +607,9 @@ export default function StudentProgressPage() {
         return !programKey || String(itemProgramId || "") === String(programKey);
       };
       attendanceResult = attendanceResult.filter(belongsToProgram);
+      attendanceResult = attendanceResult.filter(
+        (item) => item.attendanceType !== "MAKEUP",
+      );
       performanceResult = performanceResult.filter(belongsToProgram);
 
       /*
@@ -636,6 +670,16 @@ export default function StudentProgressPage() {
           progressResult.pendingMakeups,
         ),
 
+        unscheduledMakeups: numberValue(
+          training.unscheduledMakeups,
+          progressResult.unscheduledMakeups,
+        ),
+
+        scheduledMakeups: numberValue(
+          training.scheduledMakeups,
+          progressResult.scheduledMakeups,
+        ),
+
         completedMakeups: numberValue(
           training.completedMakeups,
           progressResult.completedMakeups,
@@ -656,6 +700,10 @@ export default function StudentProgressPage() {
           milestone.achieved ?? progressResult.achievedMilestone ?? null,
 
         attendance: attendanceResult,
+
+        makeups: Array.isArray(progressResult?.makeups)
+          ? progressResult.makeups
+          : [],
 
         performance: performanceResult,
 
@@ -694,11 +742,11 @@ export default function StudentProgressPage() {
 
   const attendanceStats = useMemo(() => {
     const presentFromRecords = attendance.filter(
-      (item) => statusOf(item.status) === "PRESENT",
+      (item) => item.attendanceType !== "MAKEUP" && statusOf(item.status) === "PRESENT",
     ).length;
 
     const absentFromRecords = attendance.filter(
-      (item) => statusOf(item.status) === "ABSENT",
+      (item) => item.attendanceType !== "MAKEUP" && statusOf(item.status) === "ABSENT",
     ).length;
 
     const hasRecords = presentFromRecords + absentFromRecords > 0;
@@ -725,29 +773,39 @@ export default function StudentProgressPage() {
   }, [attendance, progress]);
 
   const makeupStats = useMemo(() => {
-    const completedFromRecords = attendance.filter(
-      (item) => item.makeupRequired === true && item.makeupCompleted === true,
+    const records = progress?.makeups || [];
+    const scheduledRecords = records.filter(
+      (item) => statusOf(item.status) === "SCHEDULED",
+    );
+    const unscheduledFromRecords = scheduledRecords.filter(
+      (item) => !item.makeupDate,
     ).length;
-
-    const pendingFromRecords = attendance.filter(
-      (item) => item.makeupRequired === true && item.makeupCompleted !== true,
+    const scheduledFromRecords = scheduledRecords.filter(
+      (item) => Boolean(item.makeupDate),
     ).length;
-
-    const completed =
-      completedFromRecords > 0
-        ? completedFromRecords
-        : numberValue(progress?.completedMakeups);
-
-    const pending =
-      pendingFromRecords > 0
-        ? pendingFromRecords
-        : numberValue(progress?.pendingMakeups);
+    const completedFromRecords = records.filter(
+      (item) => statusOf(item.status) === "COMPLETED",
+    ).length;
+    const pending = records.length
+      ? scheduledRecords.length
+      : numberValue(progress?.pendingMakeups);
+    const unscheduled = records.length
+      ? unscheduledFromRecords
+      : numberValue(progress?.unscheduledMakeups);
+    const scheduled = records.length
+      ? scheduledFromRecords
+      : numberValue(progress?.scheduledMakeups);
+    const completed = records.length
+      ? completedFromRecords
+      : numberValue(progress?.completedMakeups);
 
     return {
       completed,
       pending,
+      unscheduled,
+      scheduled,
     };
-  }, [attendance, progress]);
+  }, [progress]);
 
   const summary = useMemo(() => {
     /*
@@ -1100,28 +1158,28 @@ export default function StudentProgressPage() {
           <SummaryCard
             title="Training Day"
             value={summary.trainingDay}
-            subtitle="Present + absent classes"
+            subtitle="Regular attendance progression"
             icon={<Target size={20} />}
           />
 
           <SummaryCard
             title="Attendance"
             value={`${summary.attendancePercentage}%`}
-            subtitle={`${attendanceStats.presentClasses} present of ${attendanceStats.totalClasses} classes`}
+            subtitle={`${attendanceStats.presentClasses} present · ${attendanceStats.absentClasses} absent`}
             icon={<CheckCircle2 size={20} />}
           />
 
           <SummaryCard
             title="Completed Days"
             value={`${summary.completedDays}/${summary.totalCurriculumDays}`}
-            subtitle={`${makeupStats.completed} completed makeups included`}
+            subtitle="Regular curriculum days only"
             icon={<CalendarCheck size={20} />}
           />
 
           <SummaryCard
-            title="Pending Makeups"
+            title="Open Makeups"
             value={makeupStats.pending}
-            subtitle="Classes requiring attention"
+            subtitle={`${makeupStats.unscheduled} need booking · ${makeupStats.scheduled} booked`}
             icon={<Clock3 size={20} />}
           />
         </div>
@@ -1234,7 +1292,8 @@ export default function StudentProgressPage() {
               <div
                 className="
                   mt-6 grid gap-3
-                  sm:grid-cols-4
+                  sm:grid-cols-2
+                  xl:grid-cols-5
                 "
               >
                 <MiniMetric
@@ -1254,18 +1313,26 @@ export default function StudentProgressPage() {
                 />
 
                 <MiniMetric
-                  label="Makeups"
-                  value={makeupStats.completed}
+                  label="Needs booking"
+                  value={makeupStats.unscheduled}
+                  valueClassName="
+                    text-(--orange)
+                  "
+                />
+
+                <MiniMetric
+                  label="Booked makeups"
+                  value={makeupStats.scheduled}
                   valueClassName="
                     text-(--blue)
                   "
                 />
 
                 <MiniMetric
-                  label="Pending"
-                  value={makeupStats.pending}
+                  label="Recovered"
+                  value={makeupStats.completed}
                   valueClassName="
-                    text-(--orange)
+                    text-(--green)
                   "
                 />
               </div>
@@ -1355,7 +1422,7 @@ export default function StudentProgressPage() {
             eyebrow="Attendance"
             title="Attendance Overview"
             description="
-              A complete summary of the student's class attendance.
+              Each regular present or absent decision counts once per calendar day. Makeup recovery is tracked separately.
             "
             icon={<CalendarCheck size={19} />}
             action={
@@ -1369,7 +1436,7 @@ export default function StudentProgressPage() {
             className="
               mt-5 grid gap-3
               md:grid-cols-2
-              xl:grid-cols-4
+              xl:grid-cols-5
             "
           >
             <MetricRow
@@ -1400,19 +1467,27 @@ export default function StudentProgressPage() {
                 bg-(--orange-soft)
                 text-(--orange)
               "
-              label="Pending Makeups"
-              description="Classes still to complete"
-              value={makeupStats.pending}
+              label="Needs Booking"
+              description="No recovery date booked"
+              value={makeupStats.unscheduled}
             />
 
             <MetricRow
-              icon={<CheckCircle2 size={18} />}
+              icon={<CalendarCheck size={18} />}
               iconClassName="
                 bg-(--blue-soft)
                 text-(--blue)
               "
+              label="Booked Makeups"
+              description="Recovery date scheduled"
+              value={makeupStats.scheduled}
+            />
+
+            <MetricRow
+              icon={<CheckCircle2 size={18} />}
+              iconClassName="bg-(--green-soft) text-(--green)"
               label="Completed Makeups"
-              description="Recovered classes"
+              description="Recovery session completed"
               value={makeupStats.completed}
             />
           </div>
@@ -1728,11 +1803,13 @@ export default function StudentProgressPage() {
             xl:grid-cols-2
           "
         >
-          {/* Attendance History */}
-          <Card padding="lg">
+          <div className="space-y-5">
+            {/* Regular Attendance History */}
+            <Card padding="lg">
             <SectionHeading
               eyebrow="Class Records"
-              title="Attendance History"
+              title="Regular Attendance"
+              description="Present and absent decisions that drive curriculum progression."
               icon={<CalendarCheck size={19} />}
               action={
                 <Badge variant="warning">{attendance.length} Records</Badge>
@@ -1809,6 +1886,15 @@ export default function StudentProgressPage() {
                           >
                             {formatDate(item.date)}
                           </p>
+                          {(item.sessionName || item.sessionStartTime || item.sessionEndTime) && (
+                            <p className="mt-1 flex items-center gap-1 text-xs font-medium text-(--accent)">
+                              <Clock3 size={12} />
+                              <span>
+                                {item.sessionName || "Training session"}
+                                {(item.sessionStartTime || item.sessionEndTime) && ` · ${formatTime(item.sessionStartTime)} – ${formatTime(item.sessionEndTime)}`}
+                              </span>
+                            </p>
+                          )}
                         </div>
                       </div>
 
@@ -1827,20 +1913,6 @@ export default function StudentProgressPage() {
                         >
                           {statusOf(item.status) || "UNKNOWN"}
                         </p>
-
-                        {item.makeupRequired && (
-                          <p
-                            className="
-                                mt-1 text-[10px]
-                                font-bold
-                                text-(--orange)
-                              "
-                          >
-                            {item.makeupCompleted
-                              ? "Makeup completed"
-                              : "Makeup pending"}
-                          </p>
-                        )}
                       </div>
                     </div>
                   );
@@ -1857,7 +1929,92 @@ export default function StudentProgressPage() {
                 icon={<CalendarCheck size={22} />}
               />
             )}
-          </Card>
+            </Card>
+
+            {/* Makeup Recovery History */}
+            <Card padding="lg">
+              <SectionHeading
+                eyebrow="Recovery Sessions"
+                title="Makeup History"
+                description="Recovery sessions stay separate from regular attendance and curriculum progression."
+                icon={<Clock3 size={19} />}
+                action={
+                  <Badge variant="info">
+                    {(progress?.makeups || []).length} Records
+                  </Badge>
+                }
+              />
+
+              {(progress?.makeups || []).length ? (
+                <div className="mt-5 max-h-[420px] space-y-2.5 overflow-y-auto pr-1">
+                  {(progress?.makeups || []).map((item, index) => {
+                    const state = statusOf(item.status);
+                    const isCompleted = state === "COMPLETED";
+                    const isCancelled = state === "CANCELLED";
+                    const isBooked = state === "SCHEDULED" && Boolean(item.makeupDate);
+                    const stateLabel = isCompleted
+                      ? "COMPLETED"
+                      : isCancelled
+                        ? "CANCELLED"
+                        : isBooked
+                          ? "BOOKED"
+                          : "NEEDS BOOKING";
+                    const stateClass = isCompleted
+                      ? "text-(--green)"
+                      : isCancelled
+                        ? "text-(--ink-faint)"
+                        : isBooked
+                          ? "text-(--blue)"
+                          : "text-(--orange)";
+
+                    return (
+                      <div
+                        key={item._id || `${item.originalDate}-${index}`}
+                        className="flex items-center justify-between gap-3 rounded-xl border border-(--line) bg-(--surface) p-3.5"
+                      >
+                        <div className="flex min-w-0 items-center gap-3">
+                          <div
+                            className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${isCompleted ? "bg-(--green-soft) text-(--green)" : isCancelled ? "bg-(--surface) text-(--ink-faint)" : isBooked ? "bg-(--blue-soft) text-(--blue)" : "bg-(--orange-soft) text-(--orange)"}`}
+                          >
+                            {isCompleted ? (
+                              <CheckCircle2 size={17} />
+                            ) : isCancelled ? (
+                              <XCircle size={17} />
+                            ) : isBooked ? (
+                              <CalendarCheck size={17} />
+                            ) : (
+                              <Clock3 size={17} />
+                            )}
+                          </div>
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-bold text-(--foreground-soft)">
+                              {item.curriculumTitle || `Training Day ${item.planDay ?? "—"}`}
+                            </p>
+                            <p className="mt-1 text-xs text-(--ink-faint)">
+                              Missed {formatDate(item.originalDate)}
+                              {item.makeupDate
+                                ? ` · Recovery ${formatDate(item.makeupDate)}`
+                                : " · No recovery date booked"}
+                            </p>
+                          </div>
+                        </div>
+                        <span className={`shrink-0 text-right text-[10px] font-black uppercase ${stateClass}`}>
+                          {stateLabel}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <EmptyState
+                  className="mt-5 min-h-[180px]"
+                  title="No makeup records"
+                  description="An absence will create a recovery record here."
+                  icon={<Clock3 size={22} />}
+                />
+              )}
+            </Card>
+          </div>
 
           {/* Performance History */}
           <Card padding="lg">

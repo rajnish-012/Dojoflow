@@ -17,6 +17,9 @@ export interface TimelineAttendance {
   _id: string;
   date: string;
   status: "PRESENT" | "ABSENT";
+  sessionName?: string;
+  sessionStartTime?: string;
+  sessionEndTime?: string;
   makeupRequired: boolean;
   makeupCompleted: boolean;
 }

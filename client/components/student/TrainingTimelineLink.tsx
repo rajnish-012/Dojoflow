@@ -1,9 +1,6 @@
 "use client";
 
-import {
-  ArrowRight,
-  CalendarRange,
-} from "lucide-react";
+import { ArrowRight, CalendarRange } from "lucide-react";
 
 import Link from "next/link";
 
@@ -74,8 +71,8 @@ export default function TrainingTimelineLink({
               sm:text-sm
             "
           >
-            View curriculum days, attendance,
-            makeups and upcoming belt milestones.
+            View curriculum days, attendance, makeups and upcoming belt
+            milestones.
           </p>
         </div>
       </div>

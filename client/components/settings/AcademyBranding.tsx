@@ -1,6 +1,5 @@
 "use client";
 
-
 import { fetchWithSession } from "@/lib/sessionFetch";
 import { useEffect, useMemo, useState } from "react";
 
@@ -12,13 +11,15 @@ import {
   Mail,
   MapPin,
   Palette,
-  Phone,
   RotateCcw,
   Save,
   ShieldCheck,
 } from "lucide-react";
 
 import { Button, Card, Input, Select } from "@/components/ui";
+import InternationalPhoneInput, {
+  isValidPhoneNumber,
+} from "@/components/ui/InternationalPhoneInput";
 import { toast } from "@/lib/toast";
 
 import { useAcademyBrand } from "./AcademyBrandProvider";
@@ -123,7 +124,6 @@ function normalizeSettings(
     ...(value || {}),
   };
 }
-
 
 function isValidHex(value: string) {
   return /^#[0-9A-Fa-f]{6}$/.test(value);
@@ -441,8 +441,7 @@ export default function AcademyBranding() {
 
       const response = await fetchWithSession(`${API_URL}/settings/academy`, {
         method: "GET",
-        headers: {
-        },
+        headers: {},
         cache: "no-store",
       });
 
@@ -517,6 +516,15 @@ export default function AcademyBranding() {
         return;
       }
 
+      if (
+        settings.contactPhone.trim() &&
+        !isValidPhoneNumber(settings.contactPhone, "IN")
+      ) {
+        setError("Enter a valid contact phone number with its country code.");
+        setSaving(false);
+        return;
+      }
+
       const response = await fetchWithSession(`${API_URL}/settings/academy`, {
         method: "PUT",
         headers: {
@@ -575,7 +583,11 @@ export default function AcademyBranding() {
       toast.success("Academy settings saved successfully.");
     } catch (caughtError) {
       console.error("Save academy settings error:", caughtError);
-      toast.error(caughtError instanceof Error ? caughtError.message : "Failed to update academy settings.");
+      toast.error(
+        caughtError instanceof Error
+          ? caughtError.message
+          : "Failed to update academy settings.",
+      );
     } finally {
       setSaving(false);
     }
@@ -643,7 +655,6 @@ export default function AcademyBranding() {
           {error}
         </div>
       )}
-
 
       <Card padding="none">
         <div
@@ -1001,27 +1012,11 @@ export default function AcademyBranding() {
           </Field>
 
           <Field label="Contact Phone">
-            <div className="relative">
-              <Phone
-                size={16}
-                className="
-                  pointer-events-none
-                  absolute left-3 top-1/2
-                  -translate-y-1/2
-                  text-(--ink-faint)
-                "
-              />
-
-              <Input
-                type="tel"
-                value={settings.contactPhone}
-                onChange={(event) =>
-                  updateField("contactPhone", event.target.value)
-                }
-                placeholder="Enter contact phone"
-                className="pl-9"
-              />
-            </div>
+            <InternationalPhoneInput
+              id="academy-contact-phone"
+              value={settings.contactPhone}
+              onChange={(phone) => updateField("contactPhone", phone)}
+            />
           </Field>
 
           <Field label="Website">

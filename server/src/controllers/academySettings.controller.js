@@ -1,4 +1,5 @@
 const AcademySettings = require("../models/AcademySettings");
+const { normalizePhone } = require("../utils/phone");
 
 /*
 |--------------------------------------------------------------------------
@@ -124,6 +125,12 @@ async function updateAcademySettings(req, res) {
       });
     }
 
+    const contactPhone = cleanString(body.contactPhone);
+    const normalizedContactPhone = contactPhone ? normalizePhone(contactPhone) : "";
+    if (contactPhone && !normalizedContactPhone) {
+      return res.status(400).json({ success: false, message: "Enter a valid contact phone number with its country code." });
+    }
+
     const updates = {
       academyName,
 
@@ -139,7 +146,7 @@ async function updateAcademySettings(req, res) {
 
       contactEmail: cleanString(body.contactEmail).toLowerCase(),
 
-      contactPhone: cleanString(body.contactPhone),
+      contactPhone: normalizedContactPhone,
 
       website: cleanString(body.website),
 

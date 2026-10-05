@@ -5,6 +5,11 @@ const {
   updateAcademySettings,
   getPublicAcademySettings,
 } = require("../controllers/academySettings.controller");
+const {
+  getEmailSystemSettings,
+  updateEmailSystemSettings,
+  sendTestEmail,
+} = require("../controllers/emailSystemSettings.controller");
 
 const protect = require("../middleware/auth.middleware");
 const { authorizePermission } = require("../middleware/permission.middleware");
@@ -55,6 +60,27 @@ router.put(
   protect,
   authorizePermission("settings.manage"),
   updateAcademySettings,
+);
+
+router.get(
+  "/email-system",
+  protect,
+  authorizePermission("settings.manage"),
+  getEmailSystemSettings,
+);
+
+router.put(
+  "/email-system",
+  protect,
+  authorizePermission("settings.manage"),
+  updateEmailSystemSettings,
+);
+
+router.post(
+  "/email-system/test",
+  protect,
+  authorizePermission("settings.manage"),
+  sendTestEmail,
 );
 
 module.exports = router;

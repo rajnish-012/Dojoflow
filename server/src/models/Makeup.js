@@ -25,7 +25,6 @@ const makeupSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "Attendance",
       required: true,
-      index: true,
     },
 
     planDay: {
@@ -129,5 +128,11 @@ makeupSchema.index({
   makeupDate: 1,
   status: 1,
 });
+
+// One absence can have exactly one recovery, including under concurrent requests.
+makeupSchema.index(
+  { originalAttendance: 1 },
+  { unique: true, name: "uniq_makeup_original_attendance" },
+);
 
 module.exports = mongoose.model("Makeup", makeupSchema);

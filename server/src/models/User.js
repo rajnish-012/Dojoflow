@@ -1,4 +1,6 @@
 const mongoose = require("mongoose");
+const bcrypt = require("bcryptjs");
+const { validatePassword } = require("../utils/passwordPolicy");
 
 const userSchema = new mongoose.Schema(
   {
@@ -20,10 +22,18 @@ const userSchema = new mongoose.Schema(
       ],
     },
 
+    phone: {
+      type: String,
+      trim: true,
+      minlength: 7,
+      maxlength: 20,
+      default: "",
+    },
+
     password: {
       type: String,
       required: true,
-      minlength: 6,
+      minlength: 12,
       select: false,
     },
 
@@ -68,6 +78,11 @@ const userSchema = new mongoose.Schema(
       default: true,
     },
 
+    mustResetPassword: {
+      type: Boolean,
+      default: false,
+    },
+
     /*
      * Tracks the last successful login time.
      * Useful for audit purposes and identifying inactive accounts.
@@ -92,5 +107,15 @@ const userSchema = new mongoose.Schema(
     timestamps: true,
   },
 );
+
+// Hash at the model boundary so every account-creation path, including
+// student admission and provisioning scripts, stores only a password hash.
+userSchema.pre("save", async function hashPasswordBeforeSave() {
+  if (!this.isModified("password")) return;
+  if (/^\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}$/.test(this.password)) return;
+  const passwordError = validatePassword(this.password);
+  if (passwordError) throw new Error(passwordError);
+  this.password = await bcrypt.hash(this.password, 12);
+});
 
 module.exports = mongoose.model("User", userSchema);

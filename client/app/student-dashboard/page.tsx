@@ -30,6 +30,8 @@ import {
   SummaryCard,
 } from "@/components/ui";
 import { toast } from "@/lib/toast";
+import { useAcademyBrand } from "@/components/settings/AcademyBrandProvider";
+import StudentFinancePanel from "@/components/finance/StudentFinancePanel";
 
 const API_URL =
   process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api";
@@ -843,6 +845,8 @@ function InfoBox({
 // ======================================================
 
 export default function StudentDashboard() {
+  const { settings: academySettings } = useAcademyBrand();
+  const academyName = academySettings.academyName.trim() || "Your Academy";
   const [student, setStudent] = useState<Student | null>(null);
   const [attendance, setAttendance] = useState<AttendanceRecord[]>(
     [],
@@ -1106,6 +1110,8 @@ export default function StudentDashboard() {
           />
         </div>
 
+        <StudentFinancePanel />
+
         <Card className="mb-6" padding="lg">
           <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
             <div className="min-w-0">
@@ -1172,7 +1178,7 @@ export default function StudentDashboard() {
 
         <div className="mt-5 flex items-center justify-between border-t border-(--line) pt-4">
           <p className="text-xs font-medium text-(--ink-faint)">
-            ForceStrike Academy Student Portal
+            {academyName} Student Portal
           </p>
 
           <p className="text-xs text-(--ink-faint)">

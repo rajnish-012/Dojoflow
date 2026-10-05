@@ -7,6 +7,7 @@ const CoachStudentAssignment = require("../models/CoachStudentAssignment");
 const { isBranchScoped } = require("../utils/access");
 const { getProgramLearningProgress } = require("../services/programProgress.service");
 const { resolveProgramCurriculum } = require("../services/curriculumResolver.service");
+const { withAttendanceSessionDetails } = require("../utils/attendanceSession");
 
 /* ============================================================
    DATE HELPERS
@@ -345,17 +346,22 @@ const getStudentTimeline = async (req, res) => {
     const enrollmentScope = enrollment?._id
       ? { $or: [{ enrollment: enrollment._id, date: dateRange }, { enrollment: null, date: dateRange }] }
       : { date: { $lte: new Date() } };
-    const allAttendance = await Attendance.find({
+    const attendanceRecords = await Attendance.find({
       student: student._id,
       sessionTypeId: selectedProgramId,
       ...enrollmentScope,
     }).sort({
       date: 1,
-      planDay: 1,
-    });
+      createdAt: 1,
+      _id: 1,
+    }).lean();
+    const allAttendance = await withAttendanceSessionDetails(
+      attendanceRecords,
+      student.branch?._id || student.branch,
+    );
 
     const attendance = allAttendance.filter((record) => {
-      if (!record.date) {
+      if (!record.date || record.attendanceType === "MAKEUP") {
         return false;
       }
 
@@ -368,7 +374,11 @@ const getStudentTimeline = async (req, res) => {
 
     const attendanceByDay = new Map();
 
+    const consumedAttendanceDates = new Set();
     attendance.forEach((record) => {
+      const dateKey = formatDate(record.date);
+      if (!dateKey || consumedAttendanceDates.has(dateKey)) return;
+      consumedAttendanceDates.add(dateKey);
       const day = Number(record.planDay);
 
       if (!Number.isFinite(day) || day <= 0) {
@@ -480,6 +490,17 @@ const getStudentTimeline = async (req, res) => {
               status:
                 attendanceRecord.status,
 
+              sessionName:
+                attendanceRecord.sessionName || "",
+
+              sessionStartTime:
+                attendanceRecord.sessionStartTime || "",
+
+              sessionEndTime:
+                attendanceRecord.sessionEndTime || "",
+
+              attendanceType: "REGULAR",
+
               makeupRequired:
                 Boolean(
                   attendanceRecord.makeupRequired,
@@ -588,6 +609,15 @@ const getStudentTimeline = async (req, res) => {
 
               status:
                 attendanceRecord.status,
+
+              sessionName:
+                attendanceRecord.sessionName || "",
+
+              sessionStartTime:
+                attendanceRecord.sessionStartTime || "",
+
+              sessionEndTime:
+                attendanceRecord.sessionEndTime || "",
 
               makeupRequired:
                 Boolean(

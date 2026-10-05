@@ -127,6 +127,8 @@ export type AttendanceRecord = {
 
   status?: "PRESENT" | "ABSENT" | "HOLIDAY" | "PENDING" | "NOT_MARKED" | string;
 
+  attendanceType?: "REGULAR" | "MAKEUP";
+
   planDay?: number;
 
   trainingDay?: number;
@@ -263,6 +265,8 @@ export type AttendanceApiResponse = {
 
   message?: string;
 
+  code?: string;
+
   [key: string]: unknown;
 };
 
@@ -294,6 +298,8 @@ export type AttendanceApiErrorData = {
   success?: boolean;
 
   message?: string;
+
+  code?: string;
 
   holiday?: {
     _id?: string;
@@ -426,6 +432,10 @@ export type MarkAttendancePayload = {
 export type MarkAttendanceResponse = AttendanceApiResponse & {
   attendance?: AttendanceRecord;
 
+  makeup?: { _id?: string; status?: string; planDay?: number; curriculumTitle?: string } | null;
+
+  progression?: { consumedDay: number; nextDay: number | null };
+
   row?: AttendanceDailyRow;
 
   data?: unknown;
@@ -484,4 +494,11 @@ export async function markAllAttendancePresent(
   });
 
   return parseResponse<MarkAllAttendanceResponse>(response);
+}
+
+export async function undoAttendance(attendanceId: string): Promise<AttendanceApiResponse> {
+  const response = await fetchWithSession(`${API_URL}/attendance/${encodeURIComponent(attendanceId)}/undo`, {
+    method: "POST",
+  });
+  return parseResponse<AttendanceApiResponse>(response);
 }

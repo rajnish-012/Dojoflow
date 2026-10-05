@@ -6,7 +6,7 @@ const {
   PERMISSIONS,
 } = require("./permissions");
 
-const PERMISSIONS_VERSION = 3;
+const PERMISSIONS_VERSION = 5;
 
 const DEFAULT_ROLES = [
   {
@@ -87,6 +87,17 @@ const ensureDefaultRoles = async () => {
       // separated into their own permission pairs. This migration runs once;
       // subsequent administrator edits are never silently undone at startup.
       if ((existing.permissionsVersion || 0) < PERMISSIONS_VERSION) {
+        if (role.key === "BRANCH_ADMIN") {
+          currentPermissions.add(PERMISSIONS.FINANCE_VIEW);
+          currentPermissions.add(PERMISSIONS.FINANCE_MANAGE);
+          currentPermissions.add(PERMISSIONS.FINANCE_COLLECT);
+          currentPermissions.add(PERMISSIONS.FINANCE_REFUND);
+          currentPermissions.add(PERMISSIONS.FINANCE_REPORT);
+        }
+        if (role.key === "STUDENT") currentPermissions.add(PERMISSIONS.STUDENT_FINANCE_VIEW);
+        if (["BRANCH_ADMIN", "COACH"].includes(role.key)) {
+          currentPermissions.add(PERMISSIONS.NOTIFICATION_VIEW);
+        }
         if (currentPermissions.has(PERMISSIONS.ATTENDANCE_MANAGE)) {
           currentPermissions.add(PERMISSIONS.HOLIDAY_VIEW);
           currentPermissions.add(PERMISSIONS.HOLIDAY_MANAGE);

@@ -18,7 +18,7 @@ The system provides dedicated dashboards and permissions for **Super Admins, Bra
 
 - JWT-based authentication
 - Secure password hashing with bcrypt
-- Login and registration
+- Login and explicit initial administrator provisioning
 - Role-based access control
 - Protected frontend routes
 - Protected backend APIs
@@ -621,12 +621,88 @@ server/.env.example
 Example:
 
  env
+NODE_ENV=development
 PORT=5000
 MONGO_URI=mongodb://127.0.0.1:27017/dojoflow
-JWT_SECRET=your_secret_here
- 
+JWT_SECRET=<generated random value, at least 32 bytes>
+CLIENT_URL=http://localhost:3000
 
-The real `.env` file should be included in `.gitignore`.
+
+The real `.env` file should be included in `.gitignore`. Use `server/.env.example`
+as the complete backend variable reference. The API requires `NODE_ENV`,
+`MONGO_URI`, and a generated `JWT_SECRET` (at least 32 bytes). In production,
+`CLIENT_URL` must contain the exact HTTPS frontend origin or comma-separated
+origins. `PORT` is optional and defaults to 5000. Set `TRUST_PROXY_HOPS` only
+to the exact number of trusted reverse proxies in the deployment path.
+
+The browser API URL is `NEXT_PUBLIC_API_URL` in `client/.env.example`. Set it
+to the deployed HTTPS API base (including `/api`) before running a production
+build; Next.js embeds this public value at build time. Production builds fail
+when it is missing or points at localhost/example domains.
+
+SMTP settings are configured in **Settings → Email System** and stored in the
+database encrypted using a key derived from `JWT_SECRET`. Do not rotate the JWT
+secret without planning to re-encrypt those saved credentials; rotation also
+invalidates existing sessions.
+
+### Initial Super Admin provisioning
+
+There is no default administrator account. For a first-time installation, set
+`BOOTSTRAP_ADMIN_NAME`, `BOOTSTRAP_ADMIN_EMAIL`, and
+`BOOTSTRAP_ADMIN_PASSWORD` in the server environment, then run
+`npm run provision:admin` from `server/`. The password must be at least 12
+characters and no more than 72 UTF-8 bytes. Provisioning refuses to overwrite
+an existing account and never prints the supplied password. Remove the
+bootstrap variables after successful provisioning. Use a password manager to
+generate and deliver the initial password securely.
+
+Older versions of this repository contained a hard-coded bootstrap account.
+Treat any account created by that retired script as compromised and rotate its
+password immediately. The current source no longer provisions that account,
+but the historical credential remains in Git history and must be removed in a
+coordinated history rewrite before redistributing a cleaned repository.
+
+Older student-admission code may also have stored plaintext passwords. After
+making and verifying a database backup, run
+`npm run migrate:plaintext-passwords` from `server/` while the API is stopped.
+Affected accounts are converted to password hashes, have existing sessions
+invalidated, and must use password recovery before signing in. The migration is
+safe to rerun; it logs only the count of affected accounts.
+
+### Server tests and database indexes
+
+Run `npm test` from `server/` for unit and API integration tests. Integration
+tests launch MongoDB Memory Server and use an isolated `forcestrike_test`
+database; they do not read `MONGO_URI` from your configured `.env`. The first
+run may download a MongoDB binary. Use `npm run test:unit`,
+`npm run test:integration`, or `npm run test:coverage` for focused runs.
+
+Student login links are unique only when `Student.user` contains an ObjectId;
+unlinked legacy profiles may share a missing or null link. After backing up the
+database and stopping the API, run `npm run migrate:student-user-index` from
+`server/` to replace the old sparse index with the partial unique index. This
+migration is not run by the application or test suite. Attendance and
+performance query indexes are managed by the Mongoose schemas.
+
+### Password recovery and sessions
+
+Use **Forgot password?** on the sign-in page. The API returns the same public
+response whether an account exists or not. Reset links are one-time-use, expire
+after 30 minutes, and are delivered through the configured Email System SMTP
+settings. Password changes/reset invalidate existing JWT sessions; sign in
+again after changing a password. Login, recovery, reset, and public inquiry
+routes are rate limited. The built-in limiter store is process-local, so
+multi-instance deployments should also enforce limits at a shared gateway or
+configure a shared rate-limit store.
+
+### Cookie and origin deployment requirements
+
+The session cookie is HttpOnly, Secure in production, and uses `SameSite=None`
+for cross-site frontend/API deployments. Production frontend origins must use
+HTTPS and must exactly match `CLIENT_URL`. Unsafe browser requests carrying the
+session cookie must include an allowed `Origin`. Set trusted proxy hops only
+after confirming the hosting topology. Test login, logout, password reset, and
+session expiry on the deployed domains and supported browsers before launch.
 
 ---
 
@@ -635,9 +711,12 @@ The real `.env` file should be included in `.gitignore`.
 ## Authentication
 
  http
-POST /api/auth/register
-POST /api/auth/login
-GET  /api/auth/me
+POST  /api/auth/login
+POST  /api/auth/forgot-password
+POST  /api/auth/reset-password
+POST  /api/auth/logout
+GET   /api/auth/me
+PATCH /api/auth/change-password
  
 
 ## Students
@@ -703,6 +782,8 @@ GET /api/dashboard
 
  text
 /login
+/forgot-password
+/reset-password
  
 
 ### Management
@@ -925,3 +1006,9 @@ A complete management platform for modern Karate Academies.
 ⭐ Improve
 🏆 Progress
  
+
+## Public inquiry email notifications
+
+After a public inquiry is saved, the backend sends the academy a notification and the inquirer a thank-you confirmation containing their contact details, selected program and plan, branch, message, and chosen weekly sessions. Configure the SMTP host, port, security, username, password, sender, and inquiry recipient in **Settings → Email System**. The SMTP password is encrypted before it is stored in MongoDB and is never returned to the browser. The existing backend `JWT_SECRET` is used as the encryption key source; keep it stable, because changing it prevents the backend from decrypting the saved SMTP password. If email is not configured or sending fails, the inquiry remains saved and the backend logs the issue.
+
+For Gmail, use an App Password with 2-Step Verification enabled; do not use your normal account password. Use **Send test email** in the settings page to verify the saved configuration.

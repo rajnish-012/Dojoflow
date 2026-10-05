@@ -38,6 +38,9 @@ import { hasPermission, PERMISSIONS } from "@/lib/permissions";
 
 import AcademyBranding from "@/components/settings/AcademyBranding";
 import MaintenancePanel from "@/components/settings/MaintenancePanel";
+import InternationalPhoneInput, {
+  isValidPhoneNumber,
+} from "@/components/ui/InternationalPhoneInput";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api";
 
@@ -57,6 +60,7 @@ type StaffUser = {
   _id: string;
   name: string;
   email: string;
+  phone?: string;
   role: string;
   branch?: Branch | null;
   createdAt?: string;
@@ -65,6 +69,7 @@ type StaffUser = {
 type FormData = {
   name: string;
   email: string;
+  phone: string;
   password: string;
   role: string;
   branch: string;
@@ -73,6 +78,7 @@ type FormData = {
 const emptyForm: FormData = {
   name: "",
   email: "",
+  phone: "",
   password: "",
   role: "",
   branch: "",
@@ -151,7 +157,11 @@ function formatDate(value?: string) {
   });
 }
 
-export default function SettingsSectionPage({ section }: { section: SettingsSection }) {
+export default function SettingsSectionPage({
+  section,
+}: {
+  section: SettingsSection;
+}) {
   const currentUser = useCurrentUser({ refresh: true });
   const canViewStaff = hasPermission(currentUser, PERMISSIONS.USER_VIEW);
   const canCreateStaff = hasPermission(currentUser, PERMISSIONS.USER_CREATE);
@@ -160,7 +170,10 @@ export default function SettingsSectionPage({ section }: { section: SettingsSect
   const canViewBranches = hasPermission(currentUser, PERMISSIONS.BRANCH_VIEW);
   const canViewRoles = hasPermission(currentUser, PERMISSIONS.ROLE_VIEW);
   const canViewBranding = hasPermission(currentUser, PERMISSIONS.SETTINGS_VIEW);
-  const canViewMaintenance = hasPermission(currentUser, PERMISSIONS.MAINTENANCE_VIEW);
+  const canViewMaintenance = hasPermission(
+    currentUser,
+    PERMISSIONS.MAINTENANCE_VIEW,
+  );
   const isBranchScoped = currentUser?.dataScope === "BRANCH";
 
   const [users, setUsers] = useState<StaffUser[]>([]);
@@ -297,131 +310,142 @@ export default function SettingsSectionPage({ section }: { section: SettingsSect
    * ========================================================
    */
 
-  const loadData = useCallback(async (refresh = false) => {
-    try {
-      if (refresh) {
-        setRefreshing(true);
-      } else {
-        setLoading(true);
+  const loadData = useCallback(
+    async (refresh = false) => {
+      try {
+        if (refresh) {
+          setRefreshing(true);
+        } else {
+          setLoading(true);
+        }
+
+        setError("");
+
+        const headers = {
+          "Content-Type": "application/json",
+        };
+
+        const [usersResult, branchesResult, rolesList] = await Promise.all([
+          canViewStaff
+            ? fetchWithSession(`${API_URL}/users`, {
+                headers,
+                cache: "no-store",
+              })
+            : Promise.resolve(null),
+          canViewBranches
+            ? fetchWithSession(`${API_URL}/branches`, {
+                headers,
+                cache: "no-store",
+              })
+            : Promise.resolve(null),
+          canViewRoles ? getRoles() : Promise.resolve([] as RoleRecord[]),
+        ]);
+
+        const usersData = usersResult
+          ? await usersResult.json()
+          : { users: [] };
+        const branchesData = branchesResult
+          ? await branchesResult.json()
+          : { branches: [] };
+
+        if (usersResult && !usersResult.ok) {
+          throw new Error(usersData.message || "Failed to load staff users.");
+        }
+
+        if (branchesResult && !branchesResult.ok) {
+          throw new Error(branchesData.message || "Failed to load branches.");
+        }
+
+        setUsers(
+          Array.isArray(usersData?.users)
+            ? usersData.users
+            : Array.isArray(usersData?.data?.users)
+              ? usersData.data.users
+              : [],
+        );
+
+        /*
+         * Branch API compatibility:
+         *
+         * Supported response shapes:
+         * 1. { branches: [...] }
+         * 2. { data: { branches: [...] } }
+         * 3. { data: [...] }
+         * 4. [...]
+         */
+        const rawBranches = Array.isArray(branchesData?.branches)
+          ? branchesData.branches
+          : Array.isArray(branchesData?.data?.branches)
+            ? branchesData.data.branches
+            : Array.isArray(branchesData?.data)
+              ? branchesData.data
+              : Array.isArray(branchesData)
+                ? branchesData
+                : [];
+
+        const normalizedBranches: Branch[] = rawBranches
+          .map((branch: unknown) => {
+            if (!branch || typeof branch !== "object") {
+              return null;
+            }
+
+            const item = branch as {
+              _id?: string | number;
+              id?: string | number;
+              name?: string;
+              address?: string;
+              phone?: string;
+              isActive?: boolean;
+            };
+
+            const branchId = item._id ?? item.id;
+
+            const branchName = String(item.name ?? "").trim();
+
+            if (!branchId || !branchName) {
+              return null;
+            }
+
+            return {
+              _id: String(branchId),
+              name: branchName,
+              address: item.address,
+              phone: item.phone,
+              isActive: item.isActive !== false,
+            };
+          })
+          .filter((branch: Branch | null): branch is Branch => Boolean(branch));
+
+        /*
+         * Remove duplicate branch IDs so the
+         * native <select> never receives duplicate
+         * option keys.
+         */
+        const uniqueBranches = Array.from(
+          new Map(
+            normalizedBranches.map((branch) => [branch._id, branch]),
+          ).values(),
+        );
+
+        console.log("[Settings] Loaded branches:", uniqueBranches);
+
+        setBranches(uniqueBranches);
+        setRoles(Array.isArray(rolesList) ? rolesList : []);
+      } catch (caughtError) {
+        console.error("[Settings] Load error:", caughtError);
+
+        setError(
+          caughtError instanceof Error
+            ? caughtError.message
+            : "Failed to load staff management.",
+        );
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
       }
-
-      setError("");
-
-      const headers = {
-        "Content-Type": "application/json",
-      };
-
-      const [usersResult, branchesResult, rolesList] = await Promise.all([
-        canViewStaff
-          ? fetchWithSession(`${API_URL}/users`, { headers, cache: "no-store" })
-          : Promise.resolve(null),
-        canViewBranches
-          ? fetchWithSession(`${API_URL}/branches`, { headers, cache: "no-store" })
-          : Promise.resolve(null),
-        canViewRoles ? getRoles() : Promise.resolve([] as RoleRecord[]),
-      ]);
-
-      const usersData = usersResult ? await usersResult.json() : { users: [] };
-      const branchesData = branchesResult
-        ? await branchesResult.json()
-        : { branches: [] };
-
-      if (usersResult && !usersResult.ok) {
-        throw new Error(usersData.message || "Failed to load staff users.");
-      }
-
-      if (branchesResult && !branchesResult.ok) {
-        throw new Error(branchesData.message || "Failed to load branches.");
-      }
-
-      setUsers(
-        Array.isArray(usersData?.users)
-          ? usersData.users
-          : Array.isArray(usersData?.data?.users)
-            ? usersData.data.users
-            : [],
-      );
-
-      /*
-       * Branch API compatibility:
-       *
-       * Supported response shapes:
-       * 1. { branches: [...] }
-       * 2. { data: { branches: [...] } }
-       * 3. { data: [...] }
-       * 4. [...]
-       */
-      const rawBranches = Array.isArray(branchesData?.branches)
-        ? branchesData.branches
-        : Array.isArray(branchesData?.data?.branches)
-          ? branchesData.data.branches
-          : Array.isArray(branchesData?.data)
-            ? branchesData.data
-            : Array.isArray(branchesData)
-              ? branchesData
-              : [];
-
-      const normalizedBranches: Branch[] = rawBranches
-        .map((branch: unknown) => {
-          if (!branch || typeof branch !== "object") {
-            return null;
-          }
-
-          const item = branch as {
-            _id?: string | number;
-            id?: string | number;
-            name?: string;
-            address?: string;
-            phone?: string;
-            isActive?: boolean;
-          };
-
-          const branchId = item._id ?? item.id;
-
-          const branchName = String(item.name ?? "").trim();
-
-          if (!branchId || !branchName) {
-            return null;
-          }
-
-          return {
-            _id: String(branchId),
-            name: branchName,
-            address: item.address,
-            phone: item.phone,
-            isActive: item.isActive !== false,
-          };
-        })
-        .filter((branch: Branch | null): branch is Branch => Boolean(branch));
-
-      /*
-       * Remove duplicate branch IDs so the
-       * native <select> never receives duplicate
-       * option keys.
-       */
-      const uniqueBranches = Array.from(
-        new Map(
-          normalizedBranches.map((branch) => [branch._id, branch]),
-        ).values(),
-      );
-
-      console.log("[Settings] Loaded branches:", uniqueBranches);
-
-      setBranches(uniqueBranches);
-      setRoles(Array.isArray(rolesList) ? rolesList : []);
-    } catch (caughtError) {
-      console.error("[Settings] Load error:", caughtError);
-
-      setError(
-        caughtError instanceof Error
-          ? caughtError.message
-          : "Failed to load staff management.",
-      );
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, [canViewBranches, canViewRoles, canViewStaff]);
+    },
+    [canViewBranches, canViewRoles, canViewStaff],
+  );
 
   useEffect(() => {
     if (!currentUser) {
@@ -489,6 +513,7 @@ export default function SettingsSectionPage({ section }: { section: SettingsSect
     setForm({
       name: user.name || "",
       email: user.email || "",
+      phone: user.phone || "",
       password: "",
       role: user.role,
       branch: user.branch?._id || "",
@@ -584,13 +609,18 @@ export default function SettingsSectionPage({ section }: { section: SettingsSect
       return;
     }
 
+    if (!isValidPhoneNumber(form.phone, "IN")) {
+      setFormError("Enter a valid phone number with its country code.");
+      return;
+    }
+
     if (!password) {
       setFormError("Please enter a password.");
       return;
     }
 
-    if (password.length < 6) {
-      setFormError("Password must contain at least 6 characters.");
+    if (password.length < 12) {
+      setFormError("Password must contain at least 12 characters.");
       return;
     }
 
@@ -615,6 +645,7 @@ export default function SettingsSectionPage({ section }: { section: SettingsSect
         body: JSON.stringify({
           name,
           email,
+          phone: form.phone,
           password,
           role: form.role,
           branch,
@@ -705,6 +736,11 @@ export default function SettingsSectionPage({ section }: { section: SettingsSect
       return;
     }
 
+    if (!isValidPhoneNumber(form.phone, "IN")) {
+      setEditError("Enter a valid phone number with its country code.");
+      return;
+    }
+
     if (!form.role) {
       setEditError("Please select a staff role.");
       return;
@@ -715,27 +751,31 @@ export default function SettingsSectionPage({ section }: { section: SettingsSect
       return;
     }
 
-    if (password && password.length < 6) {
-      setEditError("New password must contain at least 6 characters.");
+    if (password && password.length < 12) {
+      setEditError("New password must contain at least 12 characters.");
       return;
     }
 
     try {
       setUpdating(true);
 
-      const response = await fetchWithSession(`${API_URL}/users/${editingUser._id}`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
+      const response = await fetchWithSession(
+        `${API_URL}/users/${editingUser._id}`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            name,
+            email,
+            phone: form.phone,
+            role: form.role,
+            branch: form.branch,
+            password: password || undefined,
+          }),
         },
-        body: JSON.stringify({
-          name,
-          email,
-          role: form.role,
-          branch: form.branch,
-          password: password || undefined,
-        }),
-      });
+      );
 
       const data = await response.json();
 
@@ -785,7 +825,12 @@ export default function SettingsSectionPage({ section }: { section: SettingsSect
       return;
     }
 
-    const confirmed = await confirmAction({ title: "Deactivate staff user?", message: `Deactivate ${user.name}? They will no longer be able to sign in.`, confirmLabel: "Deactivate", destructive: true });
+    const confirmed = await confirmAction({
+      title: "Deactivate staff user?",
+      message: `Deactivate ${user.name}? They will no longer be able to sign in.`,
+      confirmLabel: "Deactivate",
+      destructive: true,
+    });
 
     if (!confirmed) {
       return;
@@ -796,8 +841,7 @@ export default function SettingsSectionPage({ section }: { section: SettingsSect
 
       const response = await fetchWithSession(`${API_URL}/users/${user._id}`, {
         method: "DELETE",
-        headers: {
-        },
+        headers: {},
       });
 
       const data = await response.json();
@@ -866,7 +910,10 @@ export default function SettingsSectionPage({ section }: { section: SettingsSect
           {canViewBranding ? (
             <AcademyBranding />
           ) : (
-            <ErrorState title="Academy branding is unavailable" message="Your role does not include permission to view academy settings." />
+            <ErrorState
+              title="Academy branding is unavailable"
+              message="Your role does not include permission to view academy settings."
+            />
           )}
         </section>
       )}
@@ -881,7 +928,10 @@ export default function SettingsSectionPage({ section }: { section: SettingsSect
           {canViewMaintenance ? (
             <MaintenancePanel />
           ) : (
-            <ErrorState title="Maintenance is unavailable" message="Your role does not include permission to view maintenance controls." />
+            <ErrorState
+              title="Maintenance is unavailable"
+              message="Your role does not include permission to view maintenance controls."
+            />
           )}
         </section>
       )}
@@ -1228,6 +1278,9 @@ export default function SettingsSectionPage({ section }: { section: SettingsSect
                                 >
                                   {user.email}
                                 </p>
+                                <p className="mt-0.5 truncate text-xs text-(--ink-muted)">
+                                  {user.phone || "No phone number"}
+                                </p>
                               </div>
                             </div>
                           </td>
@@ -1275,34 +1328,36 @@ export default function SettingsSectionPage({ section }: { section: SettingsSect
                           <td className="px-6 py-5 text-right">
                             {user.role !== "SUPER_ADMIN" &&
                               (canUpdateStaff || canDeleteStaff) && (
-                              <div
-                                className="
+                                <div
+                                  className="
                                     flex items-center
                                     justify-end gap-2
                                   "
-                              >
-                                {canUpdateStaff && (
-                                  <IconButton
-                                    label={`Edit ${user.name}`}
-                                    onClick={() => openEditModal(user)}
-                                    title="Edit staff user"
-                                  >
-                                    <Pencil size={16} />
-                                  </IconButton>
-                                )}
+                                >
+                                  {canUpdateStaff && (
+                                    <IconButton
+                                      label={`Edit ${user.name}`}
+                                      onClick={() => openEditModal(user)}
+                                      title="Edit staff user"
+                                    >
+                                      <Pencil size={16} />
+                                    </IconButton>
+                                  )}
 
-                                {canDeleteStaff && (
-                                  <IconButton
-                                    variant="danger"
-                                    label={`Deactivate ${user.name}`}
-                                    onClick={() => void handleDeleteUser(user)}
-                                    title="Deactivate staff user"
-                                  >
-                                    <Trash2 size={16} />
-                                  </IconButton>
-                                )}
-                              </div>
-                            )}
+                                  {canDeleteStaff && (
+                                    <IconButton
+                                      variant="danger"
+                                      label={`Deactivate ${user.name}`}
+                                      onClick={() =>
+                                        void handleDeleteUser(user)
+                                      }
+                                      title="Deactivate staff user"
+                                    >
+                                      <Trash2 size={16} />
+                                    </IconButton>
+                                  )}
+                                </div>
+                              )}
                           </td>
                         </tr>
                       );
@@ -1372,8 +1427,11 @@ export default function SettingsSectionPage({ section }: { section: SettingsSect
             onChange={handleChange}
             onEmailBlur={handleEmailBlur}
             emailError={emailFieldError}
+            onPhoneChange={(phone) =>
+              setForm((current) => ({ ...current, phone }))
+            }
             passwordLabel="Temporary Password"
-            passwordPlaceholder="Minimum 6 characters"
+            passwordPlaceholder="Minimum 12 characters"
           />
         </form>
       </Modal>
@@ -1430,6 +1488,9 @@ export default function SettingsSectionPage({ section }: { section: SettingsSect
             onChange={handleChange}
             onEmailBlur={handleEmailBlur}
             emailError={emailFieldError}
+            onPhoneChange={(phone) =>
+              setForm((current) => ({ ...current, phone }))
+            }
             passwordLabel="New Password (Optional)"
             passwordPlaceholder="Leave blank to keep current password"
           />
@@ -1483,6 +1544,7 @@ function StaffFormFields({
   onChange,
   onEmailBlur,
   emailError,
+  onPhoneChange,
   passwordLabel,
   passwordPlaceholder,
 }: {
@@ -1494,6 +1556,7 @@ function StaffFormFields({
   ) => void;
   onEmailBlur: (event: React.FocusEvent<HTMLInputElement>) => void;
   emailError: string;
+  onPhoneChange: (phone: string) => void;
   passwordLabel: string;
   passwordPlaceholder: string;
 }) {
@@ -1595,6 +1658,21 @@ function StaffFormFields({
             {emailError}
           </p>
         )}
+      </div>
+
+      <div>
+        <label
+          htmlFor="staff-phone"
+          className="mb-2 block text-sm font-semibold text-(--foreground)"
+        >
+          Phone Number
+        </label>
+        <InternationalPhoneInput
+          id="staff-phone"
+          value={form.phone}
+          onChange={onPhoneChange}
+          required
+        />
       </div>
 
       <div>

@@ -44,8 +44,17 @@ export const PERMISSIONS = {
   REPORT_VIEW: "report.view",
   REPORT_EXPORT: "report.export",
 
+  FINANCE_VIEW: "finance.view",
+  FINANCE_MANAGE: "finance.manage",
+  FINANCE_COLLECT: "finance.collect",
+  FINANCE_REFUND: "finance.refund",
+  FINANCE_REPORT: "finance.report",
+  STUDENT_FINANCE_VIEW: "student.finance.view",
+
   INQUIRY_VIEW: "inquiry.view",
   INQUIRY_UPDATE: "inquiry.update",
+
+  NOTIFICATION_VIEW: "notification.view",
 
   BRANCH_VIEW: "branch.view",
   BRANCH_MANAGE: "branch.manage",
@@ -75,7 +84,6 @@ export const PERMISSIONS = {
 
   WEBSITE_VIEW: "website.view",
   WEBSITE_MANAGE: "website.manage",
-
 } as const;
 
 export type Permission = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
@@ -92,7 +100,10 @@ export const NAVIGATION_PERMISSIONS: Record<string, PermissionKey | null> = {
   makeups: PERMISSIONS.MAKEUP_VIEW,
   promotions: PERMISSIONS.PROMOTION_VIEW,
   reports: PERMISSIONS.REPORT_VIEW,
+  fees: PERMISSIONS.FINANCE_VIEW,
   inquiries: PERMISSIONS.INQUIRY_VIEW,
+  notifications: PERMISSIONS.NOTIFICATION_VIEW,
+  notification: PERMISSIONS.NOTIFICATION_VIEW,
   "coach-assignments": PERMISSIONS.COACH_ASSIGNMENT_VIEW,
   holidays: PERMISSIONS.HOLIDAY_VIEW,
   "branch-schedules": PERMISSIONS.BRANCH_SCHEDULE_VIEW,
@@ -101,6 +112,10 @@ export const NAVIGATION_PERMISSIONS: Record<string, PermissionKey | null> = {
   // The backend exposes this shared page for settings.view OR user.view.
   // Its tabs and APIs enforce their own permissions.
   settings: null,
+  "settings-branding": PERMISSIONS.SETTINGS_VIEW,
+  "settings-staff": PERMISSIONS.USER_VIEW,
+  "settings-maintenance": PERMISSIONS.MAINTENANCE_VIEW,
+  "settings-email": PERMISSIONS.SETTINGS_MANAGE,
   "website-homepage": PERMISSIONS.WEBSITE_VIEW,
   modules: PERMISSIONS.MODULE_VIEW,
   roles: PERMISSIONS.ROLE_VIEW,
@@ -112,7 +127,10 @@ export function normalizeRole(role?: string | null): string | null {
     return null;
   }
 
-  return role.trim().toUpperCase();
+  return role
+    .trim()
+    .toUpperCase()
+    .replace(/[\s-]+/g, "_");
 }
 
 export function getUserPermissions(
@@ -161,7 +179,14 @@ export function hasPermission(
     return true;
   }
 
-  return getUserPermissions(user).includes(permission);
+  const permissions = getUserPermissions(user);
+  if (
+    permission === PERMISSIONS.SETTINGS_VIEW &&
+    permissions.includes(PERMISSIONS.SETTINGS_MANAGE)
+  ) {
+    return true;
+  }
+  return permissions.includes(permission);
 }
 
 export function useCurrentRole(): string | null {

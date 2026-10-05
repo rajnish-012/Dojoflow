@@ -148,7 +148,6 @@ export function useAuth(): UseAuthResult {
       clearAuthSession(false);
       setUser(null);
       setStatus("unauthenticated");
-      if (window.location.pathname !== "/login") window.location.assign("/login");
     };
     window.addEventListener(SESSION_EXPIRED_EVENT, handleSessionExpired);
     return () => window.removeEventListener(SESSION_EXPIRED_EVENT, handleSessionExpired);

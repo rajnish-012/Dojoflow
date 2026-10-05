@@ -1,1578 +1,239 @@
 "use client";
 
 import Link from "next/link";
-import {
-  type ChangeEvent,
-  type FormEvent,
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
-import {
-  ArrowLeft,
-  ArrowRight,
-  Check,
-  CheckCircle2,
-  Clock3,
-  Dumbbell,
-  Globe,
-  Loader2,
-  Mail,
-  MapPin,
-  Phone,
-  ShieldCheck,
-  Sparkles,
-  UserRound,
-  X,
-  XCircle,
-} from "lucide-react";
-
-import PublicBranchSchedules from "@/components/public/PublicBranchSchedules";
-import { Button, Card, Input, Select } from "@/components/ui";
+import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { isValidPhoneNumber } from "libphonenumber-js";
+import { ArrowLeft, ArrowRight, CheckCircle2, Dumbbell, Loader2, Sparkles } from "lucide-react";
+import PublicPlanWeeklySchedule, { type WeeklySessionChoice } from "@/components/public/PublicPlanWeeklySchedule";
+import InternationalPhoneInput from "@/components/ui/InternationalPhoneInput";
+import { Button, Card } from "@/components/ui";
 import { AcademyLogo, useAcademyBrand } from "@/components/settings/AcademyBrandProvider";
+import { getPublicTrainingSessionTypes, type TrainingSessionTypeRecord } from "@/lib/trainingSessionTypeApi";
 
-type FormData = {
-  fullName: string;
-  email: string;
-  phone: string;
-  age: string;
-  currentBelt: string;
-  experience: string;
-  preferredBatch: string;
-  preferredBranch: string;
-  branch: string;
-  message: string;
-};
+const API_URL = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api").replace(/\/+$/, "");
+type PlanProgram = { program: string | { _id: string; name: string; isActive?: boolean }; weeklyLimit?: number | null };
+type Plan = { _id: string; name: string; price: number; duration: number; durationUnit: "MONTHS" | "DAYS"; classesPerWeek: number; startingBelt: string; isActive: boolean; programs: PlanProgram[] };
+type BranchPreference = { id: string; name: string } | null;
 
-type BranchOption = {
-  _id: string;
-  name: string;
-};
-
-type Plan = {
-  _id: string;
-  name: string;
-  price: number;
-  duration: number;
-  durationUnit: "MONTHS" | "DAYS";
-  classesPerWeek: number;
-  startingBelt: string;
-  progressReports: string;
-  milestones?: {
-    title: string;
-    description?: string;
-  }[];
-  curriculum?: {
-    title: string;
-    description?: string;
-  }[];
-};
-
-const API_URL =
-  process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api";
-
-const initialFormData: FormData = {
-  fullName: "",
-  email: "",
-  phone: "",
-  age: "",
-  currentBelt: "Beginner",
-  experience: "",
-  preferredBatch: "",
-  preferredBranch: "",
-  branch: "",
-  message: "",
-};
-
-const beltOptions = [
-  "Beginner",
-  "White Belt",
-  "Yellow Belt",
-  "Orange Belt",
-  "Green Belt",
-  "Blue Belt",
-  "Brown Belt",
-  "Black Belt",
-];
-
-const experienceOptions = [
-  "No experience",
-  "Less than 1 year",
-  "1–3 years",
-  "More than 3 years",
-];
-
-const batchOptions = [
-  "Morning",
-  "Afternoon",
-  "Evening",
-  "Flexible",
-];
-
-const benefits = [
-  {
-    icon: ShieldCheck,
-    title: "Safe & structured training",
-    description:
-      "Learn karate in a disciplined, supportive and professional environment.",
-  },
-  {
-    icon: Clock3,
-    title: "Flexible batch timings",
-    description:
-      "Choose a preferred morning, afternoon or evening training schedule.",
-  },
-  {
-    icon: UserRound,
-    title: "Training for every level",
-    description:
-      "Programs are available for beginners, intermediate and advanced students.",
-  },
-  {
-    icon: MapPin,
-    title: "Multiple branches",
-    description:
-      "Explore available branches and choose the location that works best for you.",
-  },
-];
-
-function FieldLabel({
-  htmlFor,
-  children,
-  required = false,
-}: {
-  htmlFor: string;
-  children: React.ReactNode;
-  required?: boolean;
-}) {
-  return (
-    <label
-      htmlFor={htmlFor}
-      className="mb-2 block text-sm font-semibold text-(--foreground)"
-    >
-      {children}
-
-      {required && (
-        <span
-          className="ml-1 text-(--accent)"
-          aria-hidden="true"
-        >
-          *
-        </span>
-      )}
-    </label>
-  );
+function getProgramId(item: PlanProgram) {
+  return typeof item.program === "string" ? item.program : item.program?._id;
+}
+function getProgramName(item: PlanProgram) {
+  return typeof item.program === "string" ? "Program" : item.program?.name || "Program";
 }
 
-function Notice({
-  type,
-  message,
-  onClose,
-}: {
-  type: "error" | "success";
-  message: string;
-  onClose: () => void;
-}) {
-  const isError = type === "error";
-
-  return (
-    <div
-      role="alert"
-      className={`flex items-start justify-between gap-4 rounded-2xl border p-4 ${
-        isError
-          ? "border-(--danger) bg-(--danger-soft) text-(--danger)"
-          : "border-(--green) bg-(--green-soft) text-(--green)"
-      }`}
-    >
-      <div className="flex items-start gap-3">
-        {isError ? (
-          <XCircle className="mt-0.5 h-5 w-5 shrink-0" />
-        ) : (
-          <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0" />
-        )}
-
-        <p className="text-sm font-medium">
-          {message}
-        </p>
-      </div>
-
-      <button
-        type="button"
-        onClick={onClose}
-        className="rounded-lg p-1 transition hover:bg-(--hover-bg)"
-        aria-label="Dismiss message"
-      >
-        <X className="h-4 w-4" />
-      </button>
-    </div>
-  );
-}
-
-function PlanCard({
+function SelectionSummary({
+  programs,
   plan,
-  onSelect,
+  branchName,
+  sessions,
+  currency,
 }: {
+  programs: string[];
   plan: Plan;
-  onSelect: (plan: Plan) => void;
+  branchName: string;
+  sessions: WeeklySessionChoice[];
+  currency: string;
 }) {
-  const durationLabel = useMemo(() => {
-    const unit =
-      plan.durationUnit === "MONTHS"
-        ? plan.duration === 1
-          ? "month"
-          : "months"
-        : plan.duration === 1
-          ? "day"
-          : "days";
-
-    return `${plan.duration} ${unit}`;
-  }, [plan.duration, plan.durationUnit]);
-
-  return (
-    <Card className="group flex h-full flex-col overflow-hidden p-0 transition duration-300 hover:-translate-y-1 hover:border-(--accent) hover:shadow-[0_20px_50px_var(--shadow-color)]">
-      <div className="border-b border-(--line) p-6 sm:p-7">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <span className="text-[11px] font-bold uppercase tracking-[0.18em] text-(--accent)">
-              Training plan
-            </span>
-
-            <h3 className="mt-3 text-2xl font-bold tracking-tight text-(--foreground)">
-              {plan.name}
-            </h3>
-          </div>
-
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-(--sidebar-logo-bg)">
-            <AcademyLogo className="h-7 w-7 rounded-md object-contain text-(--accent)" />
-          </div>
-        </div>
-
-        <div className="mt-7 flex items-end gap-2">
-          <span className="text-4xl font-bold tracking-tight text-(--foreground)">
-            ₹{Number(plan.price || 0).toLocaleString("en-IN")}
-          </span>
-
-          <span className="pb-1 text-sm text-(--ink-muted)">
-            / {durationLabel}
-          </span>
-        </div>
-      </div>
-
-      <div className="flex flex-1 flex-col p-6 sm:p-7">
-        <div className="space-y-4">
-          <div className="flex items-center justify-between gap-4 text-sm">
-            <span className="text-(--ink-muted)">
-              Classes per week
-            </span>
-
-            <span className="font-semibold text-(--foreground)">
-              {plan.classesPerWeek}
-            </span>
-          </div>
-
-          <div className="flex items-center justify-between gap-4 text-sm">
-            <span className="text-(--ink-muted)">
-              Starting belt
-            </span>
-
-            <span className="font-semibold text-(--foreground)">
-              {plan.startingBelt}
-            </span>
-          </div>
-
-          <div className="flex items-center justify-between gap-4 text-sm">
-            <span className="text-(--ink-muted)">
-              Progress reports
-            </span>
-
-            <span className="text-right font-semibold text-(--foreground)">
-              {plan.progressReports}
-            </span>
-          </div>
-        </div>
-
-        {plan.milestones &&
-          plan.milestones.length > 0 && (
-            <div className="mt-7 border-t border-(--line) pt-6">
-              <h4 className="text-sm font-bold text-(--foreground)">
-                Key milestones
-              </h4>
-
-              <ul className="mt-4 space-y-3">
-                {plan.milestones
-                  .slice(0, 4)
-                  .map((milestone, index) => (
-                    <li
-                      key={`${milestone.title}-${index}`}
-                      className="flex items-start gap-2 text-sm text-(--ink-muted)"
-                    >
-                      <Check className="mt-0.5 h-4 w-4 shrink-0 text-(--gold)" />
-
-                      <span>{milestone.title}</span>
-                    </li>
-                  ))}
-              </ul>
-            </div>
-          )}
-
-        <button
-          type="button"
-          onClick={() => onSelect(plan)}
-          className="mt-8 inline-flex items-center justify-center gap-2 rounded-xl border border-(--line) bg-(--surface) px-4 py-3 text-sm font-semibold text-(--foreground) transition hover:border-(--accent) hover:bg-(--accent-soft) hover:text-(--accent)"
-        >
-          Enquire about this plan
-          <ArrowRight className="h-4 w-4" />
-        </button>
-      </div>
-    </Card>
-  );
+  const durationLabel = `${plan.duration} ${plan.durationUnit === "DAYS" ? "days" : plan.duration === 1 ? "month" : "months"}`;
+  return <div className="mt-5 rounded-2xl border border-(--line) bg-(--surface) p-4 sm:p-5">
+    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-(--line) pb-4">
+      <div><p className="text-xs font-bold uppercase tracking-widest text-(--ink-faint)">Your selection</p><h3 className="mt-1 text-lg font-bold">{plan.name}</h3><p className="text-sm font-semibold text-(--accent)">{new Intl.NumberFormat("en-IN", { style: "currency", currency: currency || "INR", maximumFractionDigits: 0 }).format(Number(plan.price || 0))} / {durationLabel}</p></div>
+      <div className="text-right text-xs text-(--ink-muted)"><p>{plan.classesPerWeek} classes per week</p><p className="mt-1">Starting belt: {plan.startingBelt || "Beginner"}</p></div>
+    </div>
+    <dl className="grid gap-3 border-b border-(--line) py-4 sm:grid-cols-2"><div><dt className="text-[10px] font-bold uppercase tracking-widest text-(--ink-faint)">Program{programs.length === 1 ? "" : "s"}</dt><dd className="mt-1 text-sm font-semibold">{programs.join(", ")}</dd></div><div><dt className="text-[10px] font-bold uppercase tracking-widest text-(--ink-faint)">Branch</dt><dd className="mt-1 text-sm font-semibold">{branchName}</dd></div></dl>
+    <div className="pt-4"><p className="text-[10px] font-bold uppercase tracking-widest text-(--ink-faint)">Selected weekly training schedule</p><ul className="mt-3 space-y-2">{sessions.map((session) => <li key={`${session.dayOfWeek}-${session.startTime}-${session.sessionTypeId}`} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-(--line) bg-(--card) px-3 py-3 text-sm"><span className="min-w-20 rounded-lg bg-(--accent-soft) px-3 py-2 text-center font-bold text-(--accent)">{session.dayName.slice(0, 3)}</span><span className="min-w-0 flex-1"><strong className="block truncate">{session.startTime}–{session.endTime}</strong><span className="text-xs text-(--ink-muted)">{session.sessionTypeName} · {session.sessionName}</span></span></li>)}</ul></div>
+  </div>;
 }
 
 export default function InquiryPage() {
+  const router = useRouter();
   const { settings } = useAcademyBrand();
   const academyName = settings.academyName.trim() || "Your Academy";
   const academyTagline = settings.tagline.trim() || "Train with discipline. Grow with confidence.";
-  const [formData, setFormData] =
-    useState<FormData>(initialFormData);
-
+  const [programs, setPrograms] = useState<TrainingSessionTypeRecord[]>([]);
   const [plans, setPlans] = useState<Plan[]>([]);
-  const [branches, setBranches] = useState<BranchOption[]>([]);
-
-  const [isSubmitting, setIsSubmitting] =
-    useState(false);
-
-  const [isLoadingPlans, setIsLoadingPlans] =
-    useState(true);
-
-  const [isLoadingBranches, setIsLoadingBranches] =
-    useState(true);
-
-  const [submitted, setSubmitted] = useState(false);
-
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [categoryIds, setCategoryIds] = useState<string[]>([]);
+  const [step, setStep] = useState(1);
+  const [selectedPlan, setSelectedPlan] = useState<Plan | null>(null);
+  const [branch, setBranch] = useState<BranchPreference>(null);
+  const [weeklySessions, setWeeklySessions] = useState<WeeklySessionChoice[]>([]);
+  const [form, setForm] = useState({ fullName: "", email: "", phone: "", message: "" });
+  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
-  const [plansError, setPlansError] = useState("");
-  const [branchesError, setBranchesError] =
-    useState("");
-
-  const [selectedPlan, setSelectedPlan] =
-    useState<Plan | null>(null);
-
-  const [selectedBranchName, setSelectedBranchName] =
-    useState("");
-
-  const [fieldErrors, setFieldErrors] = useState<{
-    email?: string;
-    phone?: string;
-    age?: string;
-  }>({});
-
-  const emailPattern =
-    /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-  async function fetchPublicPlans() {
-    setIsLoadingPlans(true);
-    setPlansError("");
-
-    try {
-      const response = await fetch(
-        `${API_URL}/plans/public`,
-        {
-          method: "GET",
-          cache: "no-store",
-        },
-      );
-
-      const data = await response.json();
-
-      if (!response.ok || !data.success) {
-        throw new Error(
-          data.message ||
-            "Unable to load training plans.",
-        );
-      }
-
-      setPlans(
-        Array.isArray(data.plans)
-          ? data.plans
-          : [],
-      );
-    } catch (fetchError: unknown) {
-      console.error(
-        "Fetch public plans error:",
-        fetchError,
-      );
-
-      setPlansError(
-        fetchError instanceof Error
-          ? fetchError.message
-          : "Unable to load training plans.",
-      );
-    } finally {
-      setIsLoadingPlans(false);
-    }
-  }
-
-  async function fetchPublicBranches() {
-    setIsLoadingBranches(true);
-    setBranchesError("");
-
-    try {
-      const response = await fetch(
-        `${API_URL}/branches/public`,
-        {
-          method: "GET",
-          cache: "no-store",
-        },
-      );
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(
-          data.message ||
-            "Unable to load branches.",
-        );
-      }
-
-      const publicBranches = Array.isArray(
-        data.branches,
-      )
-        ? data.branches
-        : [];
-
-      setBranches(publicBranches);
-
-      if (publicBranches.length === 0) {
-        setBranchesError(
-          "No branches are currently available.",
-        );
-      }
-    } catch (fetchError: unknown) {
-      console.error(
-        "Fetch public branches error:",
-        fetchError,
-      );
-
-      setBranchesError(
-        fetchError instanceof Error
-          ? fetchError.message
-          : "Unable to load branches.",
-      );
-    } finally {
-      setIsLoadingBranches(false);
-    }
-  }
 
   useEffect(() => {
-    void fetchPublicPlans();
-    void fetchPublicBranches();
+    let cancelled = false;
+    Promise.all([
+      fetch(`${API_URL}/plans/public`, { cache: "no-store" }).then(async (res) => {
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.message || "Unable to load plans.");
+        return (Array.isArray(data.plans) ? data.plans : []) as Plan[];
+      }),
+      getPublicTrainingSessionTypes(),
+    ]).then(([loadedPlans, loadedPrograms]) => {
+      if (!cancelled) {
+        setPlans(loadedPlans);
+        setPrograms(loadedPrograms.filter((program) => program.isActive));
+      }
+    }).catch((reason: unknown) => {
+      if (!cancelled) setLoadError(reason instanceof Error ? reason.message : "Unable to load available programs and plans.");
+    }).finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, []);
 
-  function handleChange(
-    event: ChangeEvent<
-      HTMLInputElement |
-        HTMLSelectElement |
-        HTMLTextAreaElement
-    >,
-  ) {
-    const { name, value } = event.target;
+  const categoryPlans = useMemo(() => plans.filter((plan) =>
+    categoryIds.every((categoryId) => plan.programs?.some((item) => getProgramId(item) === categoryId && (typeof item.program === "string" || item.program?.isActive !== false))),
+  ), [plans, categoryIds]);
+  const selectedPrograms = programs.filter((program) => categoryIds.includes(program._id));
+  const selectedProgramIds = selectedPlan?.programs?.map(getProgramId).filter((id): id is string => Boolean(id)) || [];
+  const programWeeklyLimits = Object.fromEntries((selectedPlan?.programs || []).map((item) => [String(getProgramId(item)), item.weeklyLimit ?? null]));
+  const pageHeading = step === 1 ? "What do you want to train?" : step === 2 ? `${selectedPrograms.map((item) => item.name).join(", ")} Plans` : step === 3 ? "Choose training days & slots" : step === 4 ? "Confirm your selection" : step === 5 ? "Send your inquiry" : "Thank you!";
 
-    setFormData((previous) => ({
-      ...previous,
-      [name]: value,
-    }));
-
-    if (name === "branch") {
-      const selectedBranch = branches.find(
-        (branch) => branch._id === value,
-      );
-
-      setSelectedBranchName(
-        selectedBranch?.name || "",
-      );
-    }
+  function chooseCategory(id: string) {
+    setCategoryIds([id]);
+    setStep(2);
+    setSelectedPlan(null);
+    setBranch(null);
+    setWeeklySessions([]);
   }
-
-  function handleEmailBlur(
-    event: React.FocusEvent<HTMLInputElement>,
-  ) {
-    const value = event.target.value.trim();
-
-    if (!value) {
-      setFieldErrors((previous) => ({
-        ...previous,
-        email: undefined,
-      }));
-      return;
-    }
-
-    setFieldErrors((previous) => ({
-      ...previous,
-      email: emailPattern.test(value)
-        ? undefined
-        : "Please enter a valid email address.",
-    }));
-  }
-
-  function handlePhoneBlur(
-    event: React.FocusEvent<HTMLInputElement>,
-  ) {
-    const value = event.target.value.trim();
-
-    if (!value) {
-      setFieldErrors((previous) => ({
-        ...previous,
-        phone: undefined,
-      }));
-      return;
-    }
-
-    setFieldErrors((previous) => ({
-      ...previous,
-      phone: /^[0-9]{10}$/.test(value)
-        ? undefined
-        : "Phone number must be exactly 10 digits.",
-    }));
-  }
-
-  function handleAgeBlur(
-    event: React.FocusEvent<HTMLInputElement>,
-  ) {
-    const value = event.target.value.trim();
-
-    if (!value) {
-      setFieldErrors((previous) => ({
-        ...previous,
-        age: undefined,
-      }));
-      return;
-    }
-
-    const numericAge = Number(value);
-
-    const valid =
-      Number.isInteger(numericAge) &&
-      numericAge >= 3 &&
-      numericAge <= 100;
-
-    setFieldErrors((previous) => ({
-      ...previous,
-      age: valid
-        ? undefined
-        : "Age must be between 3 and 100.",
-    }));
-  }
-
-  function selectPlan(plan: Plan) {
+  function choosePlan(plan: Plan) {
     setSelectedPlan(plan);
-
-    const planText =
-      `I am interested in the ${plan.name} plan ` +
-      `priced at ₹${Number(plan.price || 0).toLocaleString(
-        "en-IN",
-      )} for ${plan.duration} ${
-        plan.durationUnit === "MONTHS"
-          ? plan.duration === 1
-            ? "month"
-            : "months"
-          : plan.duration === 1
-            ? "day"
-            : "days"
-      }.`;
-
-    setFormData((previous) => {
-      const existingMessage =
-        previous.message.trim();
-
-      if (
-        existingMessage.includes(
-          `I am interested in the ${plan.name} plan`,
-        )
-      ) {
-        return previous;
-      }
-
-      return {
-        ...previous,
-        message: existingMessage
-          ? `${planText}\n\n${existingMessage}`
-          : planText,
-      };
-    });
-
-    window.setTimeout(() => {
-      document
-        .getElementById("inquiry-form")
-        ?.scrollIntoView({
-          behavior: "smooth",
-          block: "start",
-        });
-    }, 50);
+    setBranch(null);
+    setWeeklySessions([]);
+    setStep(3);
+  }
+  function goBackToPrograms() {
+    setStep(1); setSelectedPlan(null); setBranch(null); setWeeklySessions([]);
+  }
+  function goBackToPlans() {
+    setStep(2); setBranch(null); setWeeklySessions([]);
+  }
+  function continueToForm() {
+    if (!selectedPlan || weeklySessions.length !== selectedPlan.classesPerWeek || !branch) return;
+    setStep(4);
+  }
+  function continueToInquiryForm() {
+    setStep(5);
+    window.setTimeout(() => document.getElementById("inquiry-form")?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
   }
 
-  function selectBranch(branchId: string) {
-    const selectedBranch = branches.find(
-      (branch) => branch._id === branchId,
-    );
-
-    setFormData((previous) => ({
-      ...previous,
-      branch: branchId,
-      preferredBranch: branchId,
-    }));
-
-    setSelectedBranchName(
-      selectedBranch?.name || "",
-    );
-
-    window.setTimeout(() => {
-      document
-        .getElementById("inquiry-form")
-        ?.scrollIntoView({
-          behavior: "smooth",
-          block: "start",
-        });
-    }, 50);
-  }
-
-  async function handleSubmit(
-    event: FormEvent<HTMLFormElement>,
-  ) {
+  async function submitInquiry(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-
     setError("");
-
-    const trimmedName =
-      formData.fullName.trim();
-
-    const trimmedEmail =
-      formData.email.trim();
-
-    const trimmedPhone =
-      formData.phone.trim();
-
-    if (!trimmedName) {
-      setError("Please enter your full name.");
-      return;
-    }
-
-    if (trimmedName.length < 2) {
-      setError(
-        "Please enter a valid full name.",
-      );
-      return;
-    }
-
-    if (!trimmedEmail) {
-      setError(
-        "Please enter your email address.",
-      );
-      return;
-    }
-
-    if (!emailPattern.test(trimmedEmail)) {
-      setError(
-        "Please enter a valid email address.",
-      );
-      return;
-    }
-
-    if (!trimmedPhone) {
-      setError(
-        "Please enter your phone number.",
-      );
-      return;
-    }
-
-    if (!/^[0-9]{10}$/.test(trimmedPhone)) {
-      setError(
-        "Please enter a valid 10-digit phone number.",
-      );
-      return;
-    }
-
-    if (formData.age.trim()) {
-      const numericAge = Number(formData.age);
-
-      if (
-        !Number.isInteger(numericAge) ||
-        numericAge < 3 ||
-        numericAge > 100
-      ) {
-        setError(
-          "Please enter a valid age between 3 and 100.",
-        );
-        return;
-      }
-    }
-
-    if (
-      formData.branch &&
-      !branches.some(
-        (branch) => branch._id === formData.branch,
-      )
-    ) {
-      setError(
-        "The selected branch is no longer available. Please choose another branch.",
-      );
-      return;
-    }
-
-    setIsSubmitting(true);
-
+    const fullName = form.fullName.trim();
+    const email = form.email.trim().toLowerCase();
+    const phone = form.phone.trim();
+    if (fullName.length < 2) return setError("Enter your name (at least 2 characters).");
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return setError("Enter a valid email address.");
+    if (!isValidPhoneNumber(phone)) return setError("Enter a valid phone number with its country code.");
+    if (!selectedPlan || !selectedPrograms.length) return setError("Choose a program and plan before sending your inquiry.");
+    if (!branch || weeklySessions.length !== selectedPlan.classesPerWeek) return setError(`Choose a branch and exactly ${selectedPlan.classesPerWeek} weekly sessions.`);
+    setSubmitting(true);
     try {
-      const response = await fetch(
-        `${API_URL}/inquiries`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            ...formData,
-            fullName: trimmedName,
-            email: trimmedEmail,
-            phone: trimmedPhone,
-            age: formData.age
-              ? Number(formData.age)
-              : undefined,
-            preferredBranch:
-              formData.preferredBranch ||
-              formData.branch ||
-              undefined,
-          }),
-        },
-      );
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(
-          data.message ||
-            "Unable to submit enquiry.",
-        );
-      }
-
-      setSubmitted(true);
-      setFormData(initialFormData);
-      setFieldErrors({});
-      setSelectedPlan(null);
-      setSelectedBranchName("");
-
-      window.scrollTo({
-        top: 0,
-        behavior: "smooth",
+      const response = await fetch(`${API_URL}/inquiries`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fullName, email, phone, message: form.message.trim(),
+          branch: branch.id, preferredBranch: branch.name,
+          programs: categoryIds, plan: selectedPlan._id,
+          preferredWeeklySessions: weeklySessions,
+          preferredBatch: weeklySessions.map((item) => `${item.dayName}: ${item.sessionName} (${item.startTime}–${item.endTime})`).join(", "),
+        }),
       });
-    } catch (submitError: unknown) {
-      console.error(
-        "Inquiry submission error:",
-        submitError,
-      );
-
-      setError(
-        submitError instanceof Error
-          ? submitError.message
-          : "Something went wrong. Please try again.",
-      );
-    } finally {
-      setIsSubmitting(false);
-    }
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.message || "Unable to submit your inquiry.");
+      setStep(6);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : "Unable to submit your inquiry.");
+    } finally { setSubmitting(false); }
   }
 
-  return (
-    <main
-      id="top"
-      className="min-h-screen bg-(--background) text-(--foreground) transition-colors duration-300"
-    >
-      {/* Header */}
-      <header className="sticky top-0 z-50 border-b border-(--line) bg-(--card)/95 backdrop-blur-xl">
-        <div className="mx-auto flex w-full max-w-[1440px] items-center justify-between gap-5 px-4 py-4 sm:px-6 lg:px-8">
-          <Link
-            href="/"
-            className="flex items-center gap-3"
-          >
-            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-(--sidebar-logo-bg)">
-              <AcademyLogo className="h-7 w-7 rounded-md object-contain text-(--accent)" />
-            </div>
-
-            <div>
-              <p className="text-lg font-bold tracking-tight text-(--foreground)">
-                {academyName}
-              </p>
-
-              <p className="text-xs text-(--ink-muted)">
-                {academyTagline}
-              </p>
-            </div>
-          </Link>
-
-          <Link
-            href="/"
-            className="inline-flex items-center gap-2 rounded-xl border border-(--line) bg-(--surface) px-4 py-2.5 text-sm font-semibold text-(--foreground) transition hover:border-(--accent) hover:bg-(--accent-soft) hover:text-(--accent)"
-          >
-            <ArrowLeft className="h-4 w-4" />
-
-            <span className="hidden sm:inline">
-              Back to Home
-            </span>
-
-            <span className="sm:hidden">
-              Home
-            </span>
-          </Link>
-        </div>
-      </header>
-
-      {/* Hero + Form */}
-      <section className="relative overflow-hidden border-b border-(--line) bg-(--card)">
-        <div className="pointer-events-none absolute -left-32 -top-32 h-80 w-80 rounded-full bg-(--accent-soft) blur-3xl" />
-        <div className="pointer-events-none absolute -right-32 top-16 h-96 w-96 rounded-full bg-(--surface) blur-3xl" />
-
-        <div className="relative mx-auto w-full max-w-[1440px] px-4 py-10 sm:px-6 sm:py-14 lg:px-8 lg:py-20">
-          <div className="grid gap-10 lg:grid-cols-[0.85fr_1.15fr] lg:items-start lg:gap-14">
-            {/* Left content */}
-            <div className="lg:sticky lg:top-28">
-              <div className="inline-flex items-center gap-2 rounded-full border border-(--line) bg-(--accent-soft) px-4 py-2 text-sm font-semibold text-(--accent)">
-                <Sparkles className="h-4 w-4" />
-                Start your karate journey
-              </div>
-
-              <h1 className="mt-6 max-w-xl text-4xl font-bold leading-tight tracking-tight text-(--foreground) sm:text-5xl lg:text-6xl">
-                Train with discipline.
-                <span className="mt-2 block text-(--gold)">
-                  Grow with confidence.
-                </span>
-              </h1>
-
-              <p className="mt-6 max-w-xl text-base leading-8 text-(--ink-muted)">
-                Tell us a little about yourself.
-                Explore our available branches and
-                training schedules, then submit an
-                enquiry. Our academy team will help
-                you choose the right program.
-              </p>
-
-              <div className="mt-10 grid gap-6 sm:grid-cols-2 lg:grid-cols-1">
-                {benefits.map((benefit) => {
-                  const Icon = benefit.icon;
-
-                  return (
-                    <div
-                      key={benefit.title}
-                      className="flex items-start gap-4"
-                    >
-                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-(--line) bg-(--accent-soft) text-(--accent)">
-                        <Icon className="h-5 w-5" />
-                      </div>
-
-                      <div>
-                        <h3 className="font-semibold text-(--foreground)">
-                          {benefit.title}
-                        </h3>
-
-                        <p className="mt-1 text-sm leading-6 text-(--ink-muted)">
-                          {benefit.description}
-                        </p>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              <Card className="mt-10 p-5">
-                <p className="text-sm font-bold text-(--foreground)">
-                  What happens next?
-                </p>
-
-                <div className="mt-5 space-y-4">
-                  {[
-                    "Submit your enquiry",
-                    "Our team reviews your details",
-                    "Receive suitable branch, batch and plan information",
-                  ].map((item, index) => (
-                    <div
-                      key={item}
-                      className="flex items-center gap-3"
-                    >
-                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-(--sidebar-logo-bg) text-xs font-bold text-(--gold)">
-                        {index + 1}
-                      </span>
-
-                      <span className="text-sm text-(--ink-muted)">
-                        {item}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </Card>
-            </div>
-
-            {/* Inquiry form */}
-            <Card
-              id="inquiry-form"
-              className="scroll-mt-28 overflow-hidden p-0 shadow-[0_20px_60px_var(--shadow-color)]"
-            >
-              {!submitted ? (
-                <>
-                  <div className="border-b border-(--line) px-6 py-6 sm:px-8">
-                    <div className="flex items-start justify-between gap-5">
-                      <div>
-                        <p className="text-xs font-bold uppercase tracking-[0.18em] text-(--accent)">
-                          Student enquiry
-                        </p>
-
-                        <h2 className="mt-2 text-2xl font-bold text-(--foreground) sm:text-3xl">
-                          Tell us about yourself
-                        </h2>
-
-                        <p className="mt-3 text-sm leading-6 text-(--ink-muted)">
-                          Fill in your details and
-                          choose your preferred
-                          branch. Our academy team
-                          will contact you with suitable
-                          training options.
-                        </p>
-                      </div>
-
-                      <div className="hidden h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-(--sidebar-logo-bg) sm:flex">
-                        <AcademyLogo className="h-7 w-7 rounded-md object-contain text-(--accent)" />
-                      </div>
-                    </div>
-                  </div>
-
-                  <form
-                    onSubmit={handleSubmit}
-                    className="space-y-6 px-6 py-7 sm:px-8"
-                  >
-                    {error && (
-                      <Notice
-                        type="error"
-                        message={error}
-                        onClose={() =>
-                          setError("")
-                        }
-                      />
-                    )}
-
-                    {/* Selected plan */}
-                    {selectedPlan && (
-                      <div className="rounded-2xl border border-(--gold) bg-(--gold)/5 p-4">
-                        <div className="flex items-start justify-between gap-4">
-                          <div>
-                            <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-(--gold)">
-                              Selected plan
-                            </p>
-
-                            <p className="mt-1 font-semibold text-(--foreground)">
-                              {selectedPlan.name}
-                            </p>
-
-                            <p className="mt-1 text-sm text-(--ink-muted)">
-                              ₹
-                              {Number(
-                                selectedPlan.price ||
-                                  0,
-                              ).toLocaleString(
-                                "en-IN",
-                              )}{" "}
-                              /{" "}
-                              {selectedPlan.duration}{" "}
-                              {selectedPlan.durationUnit ===
-                              "MONTHS"
-                                ? selectedPlan.duration ===
-                                  1
-                                  ? "month"
-                                  : "months"
-                                : selectedPlan.duration ===
-                                    1
-                                  ? "day"
-                                  : "days"}
-                            </p>
-                          </div>
-
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setSelectedPlan(null)
-                            }
-                            className="rounded-lg p-1 text-(--ink-muted) transition hover:bg-(--hover-bg) hover:text-(--foreground)"
-                            aria-label="Remove selected plan"
-                          >
-                            <X className="h-4 w-4" />
-                          </button>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Selected branch */}
-                    {selectedBranchName && (
-                      <div className="rounded-2xl border border-(--accent) bg-(--accent-soft) p-4">
-                        <div className="flex items-center gap-3">
-                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-(--surface) text-(--accent)">
-                            <MapPin className="h-5 w-5" />
-                          </div>
-
-                          <div>
-                            <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-(--accent)">
-                              Selected branch
-                            </p>
-
-                            <p className="mt-1 font-semibold text-(--foreground)">
-                              {selectedBranchName}
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    <div className="grid gap-5 sm:grid-cols-2">
-                      {/* Full name */}
-                      <div className="sm:col-span-2">
-                        <FieldLabel
-                          htmlFor="fullName"
-                          required
-                        >
-                          Full Name
-                        </FieldLabel>
-
-                        <Input
-                          id="fullName"
-                          name="fullName"
-                          type="text"
-                          required
-                          autoComplete="name"
-                          value={formData.fullName}
-                          onChange={handleChange}
-                          placeholder="Enter your full name"
-                        />
-                      </div>
-
-                      {/* Email */}
-                      <div>
-                        <FieldLabel
-                          htmlFor="email"
-                          required
-                        >
-                          Email Address
-                        </FieldLabel>
-
-                        <Input
-                          id="email"
-                          name="email"
-                          type="email"
-                          required
-                          autoComplete="email"
-                          value={formData.email}
-                          onChange={handleChange}
-                          onBlur={handleEmailBlur}
-                          placeholder="you@example.com"
-                        />
-
-                        {fieldErrors.email && (
-                          <p className="mt-1.5 text-xs font-medium text-(--danger)">
-                            {fieldErrors.email}
-                          </p>
-                        )}
-                      </div>
-
-                      {/* Phone */}
-                      <div>
-                        <FieldLabel
-                          htmlFor="phone"
-                          required
-                        >
-                          Phone Number
-                        </FieldLabel>
-
-                        <Input
-                          id="phone"
-                          name="phone"
-                          type="tel"
-                          inputMode="numeric"
-                          pattern="[0-9]{10}"
-                          maxLength={10}
-                          required
-                          autoComplete="tel"
-                          value={formData.phone}
-                          onChange={(event) => {
-                            const digitsOnly =
-                              event.target.value.replace(
-                                /\D/g,
-                                "",
-                              );
-
-                            setFormData(
-                              (previous) => ({
-                                ...previous,
-                                phone: digitsOnly,
-                              }),
-                            );
-                          }}
-                          onBlur={handlePhoneBlur}
-                          placeholder="10-digit phone number"
-                        />
-
-                        {fieldErrors.phone && (
-                          <p className="mt-1.5 text-xs font-medium text-(--danger)">
-                            {fieldErrors.phone}
-                          </p>
-                        )}
-                      </div>
-
-                      {/* Age */}
-                      <div>
-                        <FieldLabel htmlFor="age">
-                          Age
-                        </FieldLabel>
-
-                        <Input
-                          id="age"
-                          name="age"
-                          type="text"
-                          inputMode="numeric"
-                          maxLength={3}
-                          value={formData.age}
-                          onChange={(event) => {
-                            const digitsOnly =
-                              event.target.value.replace(
-                                /\D/g,
-                                "",
-                              );
-
-                            setFormData(
-                              (previous) => ({
-                                ...previous,
-                                age: digitsOnly,
-                              }),
-                            );
-                          }}
-                          onBlur={handleAgeBlur}
-                          placeholder="Enter age"
-                        />
-
-                        {fieldErrors.age && (
-                          <p className="mt-1.5 text-xs font-medium text-(--danger)">
-                            {fieldErrors.age}
-                          </p>
-                        )}
-                      </div>
-
-                      {/* Belt */}
-                      <div>
-                        <FieldLabel htmlFor="currentBelt">
-                          Current Belt / Rank
-                        </FieldLabel>
-
-                        <Select
-                          id="currentBelt"
-                          name="currentBelt"
-                          value={
-                            formData.currentBelt
-                          }
-                          onChange={handleChange}
-                        >
-                          {beltOptions.map(
-                            (belt) => (
-                              <option
-                                key={belt}
-                                value={belt}
-                              >
-                                {belt}
-                              </option>
-                            ),
-                          )}
-                        </Select>
-                      </div>
-
-                      {/* Experience */}
-                      <div>
-                        <FieldLabel htmlFor="experience">
-                          Previous Experience
-                        </FieldLabel>
-
-                        <Select
-                          id="experience"
-                          name="experience"
-                          value={
-                            formData.experience
-                          }
-                          onChange={handleChange}
-                        >
-                          <option value="">
-                            Select experience
-                          </option>
-
-                          {experienceOptions.map(
-                            (experience) => (
-                              <option
-                                key={experience}
-                                value={experience}
-                              >
-                                {experience}
-                              </option>
-                            ),
-                          )}
-                        </Select>
-                      </div>
-
-                      {/* Preferred batch */}
-                      <div>
-                        <FieldLabel htmlFor="preferredBatch">
-                          Preferred Batch
-                        </FieldLabel>
-
-                        <Select
-                          id="preferredBatch"
-                          name="preferredBatch"
-                          value={
-                            formData.preferredBatch
-                          }
-                          onChange={handleChange}
-                        >
-                          <option value="">
-                            Select timing
-                          </option>
-
-                          {batchOptions.map(
-                            (batch) => (
-                              <option
-                                key={batch}
-                                value={batch}
-                              >
-                                {batch}
-                              </option>
-                            ),
-                          )}
-                        </Select>
-                      </div>
-
-                      {/* Branch */}
-                      <div>
-                        <FieldLabel htmlFor="branch">
-                          Preferred Branch / Location
-                        </FieldLabel>
-
-                        <Select
-                          id="branch"
-                          name="branch"
-                          value={formData.branch}
-                          onChange={handleChange}
-                          disabled={
-                            isLoadingBranches ||
-                            branches.length === 0
-                          }
-                        >
-                          <option value="">
-                            {isLoadingBranches
-                              ? "Loading branches..."
-                              : branches.length ===
-                                  0
-                                ? "No branches available"
-                                : "Select a branch"}
-                          </option>
-
-                          {branches.map(
-                            (branch) => (
-                              <option
-                                key={branch._id}
-                                value={branch._id}
-                              >
-                                {branch.name}
-                              </option>
-                            ),
-                          )}
-                        </Select>
-
-                        {branchesError && (
-                          <p className="mt-1.5 text-xs font-medium text-(--danger)">
-                            {branchesError}
-                          </p>
-                        )}
-
-                        {!branchesError &&
-                          branches.length > 0 && (
-                            <p className="mt-1.5 text-xs text-(--ink-faint)">
-                              You can also select a
-                              branch directly from the
-                              available schedules below.
-                            </p>
-                          )}
-                      </div>
-
-                      {/* Message */}
-                      <div className="sm:col-span-2">
-                        <FieldLabel htmlFor="message">
-                          Additional Message
-                        </FieldLabel>
-
-                        <textarea
-                          id="message"
-                          name="message"
-                          rows={5}
-                          value={formData.message}
-                          onChange={handleChange}
-                          placeholder="Tell us anything else you would like us to know..."
-                          className="w-full resize-none rounded-xl border border-(--line) bg-(--input-bg) px-4 py-3.5 text-sm text-(--foreground) outline-none transition placeholder:text-(--ink-faint) focus:border-(--gold) focus:ring-4 focus:ring-(--gold)/10"
-                        />
-                      </div>
-                    </div>
-
-                    <Button
-                      type="submit"
-                      disabled={isSubmitting}
-                      fullWidth
-                      className="bg-(--sidebar-logo-bg) text-(--gold) hover:bg-(--gold) hover:text-(--sidebar-active-text)"
-                    >
-                      {isSubmitting ? (
-                        <>
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                          Submitting enquiry...
-                        </>
-                      ) : (
-                        <>
-                          Submit Enquiry
-                          <ArrowRight className="h-4 w-4" />
-                        </>
-                      )}
-                    </Button>
-
-                    <p className="text-center text-xs leading-5 text-(--ink-faint)">
-                      By submitting this form,
-                      you agree to be contacted by
-                      the academy team regarding
-                      training and admission.
-                    </p>
-                  </form>
-                </>
-              ) : (
-                <div className="px-6 py-16 text-center sm:px-8">
-                  <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-(--green-soft) text-(--green)">
-                    <CheckCircle2 className="h-10 w-10" />
-                  </div>
-
-                  <p className="mt-6 text-xs font-bold uppercase tracking-[0.18em] text-(--green)">
-                    Enquiry received
-                  </p>
-
-                  <h2 className="mt-3 text-3xl font-bold text-(--foreground)">
-                    Thank you for reaching out!
-                  </h2>
-
-                  <p className="mx-auto mt-4 max-w-md text-sm leading-7 text-(--ink-muted)">
-                    Your enquiry has been submitted
-                    successfully. Our academy team
-                    will contact you soon with
-                    suitable training options, branch
-                    details, batch timings and
-                    admission information.
-                  </p>
-
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    onClick={() => {
-                      setSubmitted(false);
-                      setError("");
-                      setSelectedPlan(null);
-                      setSelectedBranchName("");
-                    }}
-                    className="mx-auto mt-8"
-                  >
-                    Submit Another Enquiry
-                    <ArrowRight className="h-4 w-4" />
-                  </Button>
-                </div>
-              )}
-            </Card>
-          </div>
-        </div>
-      </section>
-
-      {/* Available Branch Schedules */}
-      <section className="border-b border-(--line) bg-(--background)">
-        <div className="mx-auto w-full max-w-[1440px] px-4 pt-14 sm:px-6 lg:px-8 lg:pt-20">
-          <div className="mx-auto max-w-3xl text-center">
-            <div className="inline-flex items-center gap-2 rounded-full border border-(--line) bg-(--accent-soft) px-4 py-2 text-sm font-semibold text-(--accent)">
-              <MapPin className="h-4 w-4" />
-              Find your branch
-            </div>
-
-            <h2 className="mt-5 text-3xl font-bold tracking-tight text-(--foreground) sm:text-4xl">
-              Explore available branches & schedules
-            </h2>
-
-            <p className="mt-4 text-sm leading-7 text-(--ink-muted)">
-              Check the available training schedules
-              before submitting your enquiry. Select a
-              branch and we will automatically add it
-              to your enquiry.
-            </p>
-          </div>
-        </div>
-
-        <PublicBranchSchedules
-          onSelectBranch={selectBranch}
-        />
-      </section>
-
-      {/* Plans */}
-      <section className="border-b border-(--line) bg-(--background)">
-        <div className="mx-auto w-full max-w-[1440px] px-4 py-14 sm:px-6 lg:px-8 lg:py-20">
-          <div className="mx-auto max-w-2xl text-center">
-            <div className="inline-flex items-center gap-2 rounded-full border border-(--line) bg-(--accent-soft) px-4 py-2 text-sm font-semibold text-(--accent)">
-              <Dumbbell className="h-4 w-4" />
-              Active training plans
-            </div>
-
-            <h2 className="mt-5 text-3xl font-bold tracking-tight text-(--foreground) sm:text-4xl">
-              Choose a plan that fits your goals
-            </h2>
-
-            <p className="mt-4 text-sm leading-7 text-(--ink-muted)">
-              These plans are fetched directly from
-              the academy system. Only currently active
-              plans are displayed.
-            </p>
-          </div>
-
-          {isLoadingPlans ? (
-            <div className="flex flex-col items-center justify-center py-16">
-              <Loader2 className="h-8 w-8 animate-spin text-(--gold)" />
-
-              <p className="mt-4 text-sm text-(--ink-muted)">
-                Loading active plans...
-              </p>
-            </div>
-          ) : plansError ? (
-            <Card className="mx-auto mt-10 max-w-lg p-8 text-center">
-              <XCircle className="mx-auto h-8 w-8 text-(--danger)" />
-
-              <h3 className="mt-3 font-semibold text-(--foreground)">
-                Unable to load plans
-              </h3>
-
-              <p className="mt-2 text-sm text-(--ink-muted)">
-                {plansError}
-              </p>
-
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={() =>
-                  void fetchPublicPlans()
-                }
-                className="mx-auto mt-5"
-              >
-                Try Again
-              </Button>
-            </Card>
-          ) : plans.length === 0 ? (
-            <Card className="mx-auto mt-10 max-w-lg p-8 text-center">
-              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-(--accent-soft) text-(--accent)">
-                <Dumbbell className="h-6 w-6" />
-              </div>
-
-              <h3 className="mt-4 text-lg font-semibold text-(--foreground)">
-                No active plans available
-              </h3>
-
-              <p className="mt-2 text-sm leading-6 text-(--ink-muted)">
-                Our current training plans are not
-                available at the moment. Please submit
-                an enquiry and our team will share the
-                latest options with you.
-              </p>
-            </Card>
-          ) : (
-            <div className="mt-12 grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-              {plans.map((plan) => (
-                <PlanCard
-                  key={plan._id}
-                  plan={plan}
-                  onSelect={selectPlan}
-                />
-              ))}
-            </div>
-          )}
-        </div>
-      </section>
-
-      {/* CTA */}
-      <section className="bg-(--sidebar-logo-bg)">
-        <div className="mx-auto max-w-4xl px-4 py-14 text-center sm:px-6 lg:py-20">
-          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-(--gold) text-(--sidebar-active-text)">
-            <Sparkles className="h-6 w-6" />
-          </div>
-
-          <h2 className="mt-6 text-3xl font-bold tracking-tight text-white sm:text-4xl">
-            Ready to begin your journey?
-          </h2>
-
-          <p className="mx-auto mt-4 max-w-2xl text-sm leading-7 text-white/70">
-            Explore your preferred branch, choose a
-            training plan and submit your enquiry. Our
-            team will help you take the next step.
-          </p>
-
-          <a
-            href="#inquiry-form"
-            className="mt-8 inline-flex items-center gap-2 rounded-xl bg-(--gold) px-6 py-3.5 text-sm font-semibold text-(--sidebar-active-text) transition hover:opacity-90"
-          >
-            Submit an Enquiry
-            <ArrowRight className="h-4 w-4" />
-          </a>
-        </div>
-      </section>
-
-      {/* Footer */}
-      <footer className="border-t border-(--line) bg-(--card)">
-        <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-6 px-4 py-8 text-sm text-(--ink-muted) sm:px-6 md:flex-row md:items-center md:justify-between lg:px-8">
-          <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-(--sidebar-logo-bg)">
-                <AcademyLogo className="h-6 w-6 rounded-md object-contain text-(--accent)" />
-            </div>
-
-            <div>
-              <p className="font-semibold text-(--foreground)">
-                {academyName}
-              </p>
-
-              <p className="mt-1">
-                {academyTagline}
-              </p>
-            </div>
-          </div>
-
-          <div className="flex flex-wrap gap-5">
-            {settings.contactEmail && (
-              <a href={`mailto:${settings.contactEmail}`} className="inline-flex items-center gap-2">
-                <Mail className="h-4 w-4" />
-                {settings.contactEmail}
-              </a>
-            )}
-
-            {settings.contactPhone && (
-              <a href={`tel:${settings.contactPhone}`} className="inline-flex items-center gap-2">
-                <Phone className="h-4 w-4" />
-                {settings.contactPhone}
-              </a>
-            )}
-
-            {settings.address && (
-              <span className="inline-flex items-center gap-2">
-                <MapPin className="h-4 w-4" />
-                {settings.address}
-              </span>
-            )}
-            {settings.website && (
-              <a href={settings.website} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 hover:text-(--accent)">
-                <Globe className="h-4 w-4" />
-                {settings.website}
-              </a>
-            )}
-          </div>
-        </div>
-      </footer>
-    </main>
-  );
+  return <main id="top" className="min-h-screen bg-(--background) text-(--foreground)">
+    <header className="sticky top-0 z-40 border-b border-(--line) bg-(--card)/95 backdrop-blur-xl">
+      <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-3 sm:px-6">
+        <Link href="/" className="flex min-w-0 items-center gap-3">
+          <AcademyLogo className="h-11 w-11 shrink-0 rounded-xl border border-(--line) bg-white object-contain p-1" />
+          <span className="min-w-0"><span className="block truncate font-bold">{academyName}</span><span className="block truncate text-xs text-(--ink-muted)">{academyTagline}</span></span>
+        </Link>
+        <Link href="/" className="inline-flex shrink-0 items-center gap-2 rounded-xl border border-(--line) px-3 py-2 text-sm font-semibold hover:border-(--accent)"><ArrowLeft size={16}/><span className="hidden sm:inline">Home</span></Link>
+      </div>
+    </header>
+
+    <section className="mx-auto max-w-7xl px-4 py-8 sm:px-6 sm:py-12">
+      <div className="mx-auto max-w-3xl text-center">
+        <span className="inline-flex items-center gap-2 rounded-full bg-(--accent-soft) px-4 py-2 text-sm font-semibold text-(--accent)"><Sparkles size={16}/> Start your training journey</span>
+        <h1 className="mt-5 text-3xl font-bold tracking-tight sm:text-5xl">{pageHeading}</h1>
+        <p className="mx-auto mt-3 max-w-2xl text-sm leading-6 text-(--ink-muted) sm:text-base">Choose your program, plan, and weekly training preferences. Our team will follow up to confirm availability.</p>
+      </div>
+
+      {!loading && !loadError && <nav aria-label="Inquiry steps" className="mx-auto mt-7 max-w-5xl overflow-x-auto"><ol className="flex min-w-[650px] items-center justify-between gap-2">{["Program", "Plan", "Days & slots", "Confirm", "Inquiry", "Success"].map((label, index) => { const itemStep = index + 1; const active = step === itemStep; const complete = step > itemStep; return <li key={label} className="flex flex-1 items-center gap-2"><span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-bold ${active ? "bg-(--accent) text-white" : complete ? "bg-emerald-100 text-emerald-700" : "bg-(--surface) text-(--ink-faint)"}`}>{complete ? <CheckCircle2 size={16}/> : itemStep}</span><span className={`whitespace-nowrap text-xs font-semibold sm:text-sm ${active ? "text-(--foreground)" : "text-(--ink-faint)"}`}>{label}</span>{index < 5 && <span className={`h-px min-w-3 flex-1 ${complete ? "bg-emerald-300" : "bg-(--line)"}`}/>}</li>; })}</ol></nav>}
+
+      {loading ? <div className="flex justify-center py-16"><Loader2 className="animate-spin text-(--accent)"/></div> : loadError ? <Card className="mx-auto mt-8 max-w-xl p-6 text-center text-(--danger)">{loadError}</Card> : <>
+        {step === 1 && <section className="mt-9" aria-labelledby="program-heading">
+          <div className="mb-4 flex items-end justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-widest text-(--accent)">Step 1</p><h2 id="program-heading" className="mt-1 text-xl font-bold">Select a program</h2></div></div>
+          {programs.length ? <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {programs.map((program) => <button key={program._id} type="button" onClick={() => chooseCategory(program._id)} className="group rounded-2xl border border-(--line) bg-(--card) p-4 text-left transition hover:border-(--accent) hover:shadow-lg sm:p-5">
+              <span className="flex items-center gap-3"><span className="flex h-12 w-12 items-center justify-center rounded-xl bg-(--accent-soft) text-(--accent)"><Dumbbell size={21}/></span><span className="min-w-0 flex-1"><span className="block font-bold">{program.name}</span><span className="mt-1 block text-xs text-(--ink-faint)">Training program</span></span><span className="flex h-9 w-9 items-center justify-center rounded-full bg-(--accent-soft) text-(--accent) transition group-hover:bg-(--accent) group-hover:text-white"><ArrowRight size={17}/></span></span>
+              {program.description && <span className="mt-2 block text-sm leading-5 text-(--ink-muted)">{program.description}</span>}
+            </button>)}
+          </div> : <Card className="p-6 text-center text-sm text-(--ink-muted)">No active programs are currently available.</Card>}
+        </section>}
+
+        {step === 2 && <section className="mt-9" aria-labelledby="plan-heading">
+          <div className="mb-4 flex flex-wrap items-end justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-widest text-(--accent)">Step 2</p><h2 id="plan-heading" className="mt-1 text-xl font-bold">Plans for {selectedPrograms.map((item) => item.name).join(", ")}</h2></div><Button variant="outline" onClick={goBackToPrograms}>Change programs</Button></div>
+          {categoryPlans.length ? <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {categoryPlans.map((plan) => <Card key={plan._id} className={`flex h-full flex-col p-5 transition ${selectedPlan?._id === plan._id ? "border-(--accent) ring-2 ring-(--accent)/20" : ""}`}>
+              <div className="flex items-start justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-widest text-(--accent)">Training plan</p><h3 className="mt-2 text-xl font-bold">{plan.name}</h3></div><span className="rounded-xl bg-(--accent-soft) p-2 text-(--accent)"><Dumbbell size={20}/></span></div>
+              <p className="mt-4 text-2xl font-bold">{new Intl.NumberFormat("en-IN", { style: "currency", currency: settings.currency || "INR", maximumFractionDigits: 0 }).format(Number(plan.price || 0))}<span className="ml-1 text-sm font-medium text-(--ink-muted)">/ {plan.duration} {plan.durationUnit === "DAYS" ? "days" : plan.duration === 1 ? "month" : "months"}</span></p>
+              <div className="mt-4 flex flex-wrap gap-2 text-xs"><span className="rounded-full border border-(--line) px-3 py-1.5">{plan.classesPerWeek} classes / week</span><span className="rounded-full border border-(--line) px-3 py-1.5">Starting {plan.startingBelt || "Beginner"}</span></div>
+              <p className="mt-4 text-sm text-(--ink-muted)">Includes: {plan.programs?.map(getProgramName).join(", ") || "No programs assigned"}</p>
+              <Button type="button" variant={selectedPlan?._id === plan._id ? "secondary" : "outline"} className="mt-5 w-full" onClick={() => choosePlan(plan)}>{selectedPlan?._id === plan._id ? "Plan selected" : "Choose this plan"}<ArrowRight size={16}/></Button>
+            </Card>)}
+          </div> : <Card className="p-6 text-center text-sm text-(--ink-muted)">There are no active plans linked to all selected programs.</Card>}
+        </section>}
+
+        {step === 3 && selectedPlan && <section className="mt-9" aria-labelledby="schedule-heading">
+          <Card className="p-5 sm:p-6">
+            <div className="mb-5 flex flex-wrap items-end justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-widest text-(--accent)">Step 3</p><h2 id="schedule-heading" className="mt-1 text-xl font-bold">Choose {selectedPlan.classesPerWeek} weekly training days and sessions</h2><p className="mt-1 text-sm text-(--ink-muted)">Select one matching session on each of {selectedPlan.classesPerWeek} different days.</p></div><Button type="button" variant="outline" onClick={goBackToPlans}>Change plan</Button></div>
+            <PublicPlanWeeklySchedule planProgramIds={selectedProgramIds} programWeeklyLimits={programWeeklyLimits} selectionLimit={selectedPlan.classesPerWeek} value={weeklySessions} onChange={(selectedBranch, choices) => { setBranch(selectedBranch); setWeeklySessions(choices); }} />
+            <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between"><p className={`text-sm font-semibold ${weeklySessions.length === selectedPlan.classesPerWeek ? "text-emerald-700" : "text-(--ink-muted)"}`}>{weeklySessions.length === selectedPlan.classesPerWeek ? `✓ Selected ${weeklySessions.length} of ${selectedPlan.classesPerWeek} classes` : `Select ${selectedPlan.classesPerWeek - weeklySessions.length} more ${selectedPlan.classesPerWeek - weeklySessions.length === 1 ? "class" : "classes"}`}</p><Button type="button" disabled={!branch || weeklySessions.length !== selectedPlan.classesPerWeek} onClick={continueToForm}>Review selection<ArrowRight size={16}/></Button></div>
+          </Card>
+        </section>}
+
+        {step === 4 && selectedPlan && <section className="mt-9" aria-labelledby="confirm-heading">
+          <Card className="mx-auto max-w-3xl p-5 sm:p-8">
+            <button type="button" onClick={() => setStep(3)} className="mb-5 inline-flex items-center gap-2 text-sm font-semibold text-(--ink-muted) hover:text-(--accent)"><ArrowLeft size={16}/>Change schedule</button>
+            <p className="text-xs font-bold uppercase tracking-widest text-(--accent)">Step 4</p><h2 id="confirm-heading" className="mt-1 text-2xl font-bold">Confirm your selection</h2><p className="mt-1 text-sm text-(--ink-muted)">Review your chosen program, plan, branch, and weekly sessions.</p>
+            <SelectionSummary programs={selectedPrograms.map((item) => item.name)} plan={selectedPlan} branchName={branch?.name || ""} sessions={weeklySessions} currency={settings.currency}/>
+            <Button className="mt-6 w-full" onClick={continueToInquiryForm}>Continue to inquiry form<ArrowRight size={16}/></Button>
+          </Card>
+        </section>}
+
+        {step === 5 && selectedPlan && <section id="inquiry-form" className="scroll-mt-24 mt-9">
+          <Card className="mx-auto max-w-3xl p-5 sm:p-8">
+              <button type="button" onClick={() => setStep(4)} className="mb-5 inline-flex items-center gap-2 text-sm font-semibold text-(--ink-muted) hover:text-(--accent)"><ArrowLeft size={16}/>Change selection</button>
+              <div className="mb-5"><p className="text-xs font-bold uppercase tracking-widest text-(--accent)">Step 5</p><h2 className="mt-1 text-2xl font-bold">Send your inquiry</h2><p className="mt-1 text-sm text-(--ink-muted)">Share your details and our team will contact you soon.</p></div>
+              {error && <p role="alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</p>}
+              <SelectionSummary programs={selectedPrograms.map((item) => item.name)} plan={selectedPlan} branchName={branch?.name || ""} sessions={weeklySessions} currency={settings.currency}/>
+              <form onSubmit={submitInquiry} className="space-y-4">
+                <div className="grid gap-4 sm:grid-cols-2"><label className="text-sm font-semibold">Full name *<input required minLength={2} value={form.fullName} onChange={(event) => setForm({ ...form, fullName: event.target.value })} autoComplete="name" className="mt-2 w-full rounded-xl border border-(--line) bg-(--input-bg) px-4 py-3 font-normal outline-none focus:border-(--accent)" placeholder="Your name"/></label>
+                  <label className="text-sm font-semibold">Email address *<input required type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} autoComplete="email" className="mt-2 w-full rounded-xl border border-(--line) bg-(--input-bg) px-4 py-3 font-normal outline-none focus:border-(--accent)" placeholder="you@example.com"/></label></div>
+                <div><label className="mb-2 block text-sm font-semibold">Phone number *</label><InternationalPhoneInput value={form.phone} onChange={(phone) => setForm((previous) => ({ ...previous, phone }))} required /></div>
+                <label className="block text-sm font-semibold">Message <span className="font-normal text-(--ink-muted)">(optional)</span><textarea rows={4} value={form.message} onChange={(event) => setForm({ ...form, message: event.target.value })} maxLength={2000} className="mt-2 w-full resize-y rounded-xl border border-(--line) bg-(--input-bg) px-4 py-3 font-normal outline-none focus:border-(--accent)" placeholder="Anything you’d like us to know?"/></label>
+                <Button type="submit" disabled={submitting || !selectedPlan || !categoryIds.length} className="w-full">{submitting ? <><Loader2 className="animate-spin" size={16}/>Sending inquiry…</> : <>Send inquiry<ArrowRight size={16}/></>}</Button>
+                <p className="text-center text-xs text-(--ink-faint)">Weekly schedule selections are preferences only and do not reserve classes.</p>
+              </form>
+          </Card>
+        </section>}
+
+        {step === 6 && selectedPlan && <section className="mt-9"><Card className="mx-auto max-w-2xl px-6 py-12 text-center sm:px-10"><span className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-emerald-100 text-emerald-600"><CheckCircle2 size={48}/></span><p className="mt-6 text-xs font-bold uppercase tracking-widest text-emerald-700">Inquiry submitted</p><h2 className="mt-2 text-3xl font-bold">Thank you, {form.fullName.trim()}!</h2><p className="mx-auto mt-3 max-w-lg text-sm leading-6 text-(--ink-muted)">Your inquiry and weekly training preferences have been sent. Our team will contact you to discuss the plan and confirm suitable sessions.</p><Button variant="outline" className="mt-7" onClick={() => router.push("/")}>Back to home<ArrowRight size={16}/></Button></Card></section>}
+      </>}
+    </section>
+    <footer className="border-t border-(--line) bg-(--card) px-4 py-6 text-center text-sm text-(--ink-muted)">{academyName} · {academyTagline}</footer>
+  </main>;
 }

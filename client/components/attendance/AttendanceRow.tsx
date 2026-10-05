@@ -5,6 +5,7 @@ import {
   CalendarOff,
   Check,
   Clock3,
+  RotateCcw,
   X,
 } from "lucide-react";
 
@@ -32,6 +33,11 @@ export type DailyAttendanceRow = {
 
   attendance: {
     _id?: string;
+    attendanceType?: "REGULAR" | "MAKEUP";
+    sessionSlotId?: string;
+    sessionName?: string;
+    sessionStartTime?: string;
+    sessionEndTime?: string;
     status?: string;
     planDay?: number;
     curriculumTitle?: string;
@@ -88,7 +94,11 @@ export type DailyAttendanceRow = {
       isActive?: boolean;
       attendance?: { _id?: string; status?: string } | null;
       planDay?: number | null;
-      curriculum?: { title?: string; description?: string; skill?: string } | null;
+      curriculum?: {
+        title?: string;
+        description?: string;
+        skill?: string;
+      } | null;
       programName?: string;
       entitled?: boolean;
       curriculumAvailable?: boolean;
@@ -106,12 +116,8 @@ type AttendanceRowProps = {
 
   saving: boolean;
 
-  onMark: (
-    row: DailyAttendanceRow,
-    status:
-      | "PRESENT"
-      | "ABSENT",
-  ) => void;
+  onMark: (row: DailyAttendanceRow, status: "PRESENT" | "ABSENT") => void;
+  onUndo: (row: DailyAttendanceRow) => void;
 };
 
 function getInitials(name: string) {
@@ -119,54 +125,37 @@ function getInitials(name: string) {
     name
       .trim()
       .split(/\s+/)
-      .map(
-        (part) =>
-          part[0] || "",
-      )
+      .map((part) => part[0] || "")
       .join("")
       .slice(0, 2)
       .toUpperCase() || "ST"
   );
 }
 
-function formatTime(
-  value?: string,
-) {
+function formatTime(value?: string) {
   if (!value) {
     return "";
   }
 
-  const parts =
-    value.split(":");
+  const parts = value.split(":");
 
   if (parts.length < 2) {
     return value;
   }
 
-  const hour = Number(
-    parts[0],
-  );
+  const hour = Number(parts[0]);
 
-  const minute =
-    parts[1];
+  const minute = parts[1];
 
-  if (
-    Number.isNaN(hour)
-  ) {
+  if (Number.isNaN(hour)) {
     return value;
   }
 
-  const period =
-    hour >= 12
-      ? "PM"
-      : "AM";
+  const period = hour >= 12 ? "PM" : "AM";
 
-  const displayHour =
-    hour % 12 || 12;
+  const displayHour = hour % 12 || 12;
 
-  return `${String(
-    displayHour,
-  ).padStart(2, "0")}:${minute} ${period}`;
+  return `${String(displayHour).padStart(2, "0")}:${minute} ${period}`;
 }
 
 export default function AttendanceRow({
@@ -174,15 +163,13 @@ export default function AttendanceRow({
   canManage,
   saving,
   onMark,
+  onUndo,
 }: AttendanceRowProps) {
-  const marked =
-    Boolean(row.attendance);
+  const marked = Boolean(row.attendance);
 
-  const status =
-    row.attendance?.status;
+  const status = row.attendance?.status;
 
-  const isHoliday =
-    Boolean(row.holiday);
+  const isHoliday = Boolean(row.holiday);
 
   /*
    * A configured branch with no active
@@ -193,13 +180,23 @@ export default function AttendanceRow({
    */
   const isBranchClosed =
     !isHoliday &&
-    row.branchSchedule?.configured ===
-      true &&
-    row.branchSchedule.isOpen ===
-      false;
+    row.branchSchedule?.configured === true &&
+    row.branchSchedule.isOpen === false;
 
   const activeSlots = row.branchSchedule?.slots || [];
-  const hasMarkableSlot = activeSlots.some((slot) => slot.entitled && slot.curriculumAvailable && !slot.attendance);
+  const selectedAttendanceSlot = activeSlots.find(
+    (slot) =>
+      String(slot._id || "") === String(row.attendance?.sessionSlotId || ""),
+  );
+  const attendedSessionName =
+    row.attendance?.sessionName || selectedAttendanceSlot?.sessionName;
+  const attendedSessionStart =
+    row.attendance?.sessionStartTime || selectedAttendanceSlot?.startTime;
+  const attendedSessionEnd =
+    row.attendance?.sessionEndTime || selectedAttendanceSlot?.endTime;
+  const hasMarkableSlot = activeSlots.some(
+    (slot) => slot.entitled && slot.curriculumAvailable && !slot.attendance,
+  );
 
   const canMarkAttendance =
     canManage &&
@@ -216,8 +213,7 @@ export default function AttendanceRow({
         transition-colors
         duration-200
         ${
-          isHoliday ||
-          isBranchClosed
+          isHoliday || isBranchClosed
             ? "bg-(--surface)"
             : "hover:bg-(--surface)"
         }
@@ -243,9 +239,7 @@ export default function AttendanceRow({
               text-(--gold)
             "
           >
-            {getInitials(
-              row.student.name,
-            )}
+            {getInitials(row.student.name)}
           </div>
 
           <div className="min-w-0">
@@ -261,9 +255,7 @@ export default function AttendanceRow({
             </p>
 
             <p className="mt-1 text-sm leading-5 text-(--ink-muted)">
-              Age{" "}
-              {row.student.age ??
-                "—"}
+              Age {row.student.age ?? "—"}
             </p>
           </div>
         </Link>
@@ -280,8 +272,7 @@ export default function AttendanceRow({
             text-(--foreground-soft)
           "
         >
-          {row.student.phone ||
-            "No phone"}
+          {row.student.phone || "No phone"}
         </p>
 
         <p
@@ -291,9 +282,7 @@ export default function AttendanceRow({
             text-(--ink-muted)
           "
         >
-          {row.student.branch
-            ?.name ||
-            "No branch"}
+          {row.student.branch?.name || "No branch"}
         </p>
       </td>
 
@@ -318,9 +307,7 @@ export default function AttendanceRow({
             text-(--ink-muted)
           "
         >
-          {row.student.plan
-            ?.name ||
-            "No plan"}
+          {row.student.plan?.name || "No plan"}
         </p>
       </td>
 
@@ -359,8 +346,7 @@ export default function AttendanceRow({
                   text-(--accent)
                 "
               >
-                {row.holiday?.name ||
-                  "Holiday"}
+                {row.holiday?.name || "Holiday"}
               </p>
 
               <p
@@ -370,9 +356,7 @@ export default function AttendanceRow({
                   text-(--ink-muted)
                 "
               >
-                {row.holiday
-                  ?.description ||
-                  "No training session"}
+                {row.holiday?.description || "No training session"}
               </p>
             </div>
           </div>
@@ -416,11 +400,8 @@ export default function AttendanceRow({
                   text-(--ink-muted)
                 "
               >
-                {row.branchSchedule
-                  ?.dayName ||
-                  "No training day"}{" "}
-                has no active training
-                session.
+                {row.branchSchedule?.dayName || "No training day"} has no active
+                training session.
               </p>
             </div>
           </div>
@@ -446,24 +427,43 @@ export default function AttendanceRow({
               "
             >
               {row.curriculum.skill ||
-                row.curriculum
-                  .description ||
+                row.curriculum.description ||
                 "Training step"}
             </p>
 
-            {row.curriculumScheduled && activeSlots.some((slot) => slot.entitled && slot.curriculumAvailable) && (
-              <p className="mt-2 text-[11px] font-semibold text-(--accent)">
-                {(() => {
-                  const matching = activeSlots.filter((slot) => slot.entitled && slot.curriculumAvailable);
-                  return matching.length === 1
-                    ? `${formatTime(matching[0].startTime)} – ${formatTime(matching[0].endTime)}`
-                    : `${matching.length} training sessions`;
-                })()}
+            {row.attendance &&
+            (attendedSessionName ||
+              attendedSessionStart ||
+              attendedSessionEnd) ? (
+              <p className="mt-2 flex items-center gap-1 text-[11px] font-semibold text-(--accent)">
+                <Clock3 size={12} />
+                <span className="truncate">
+                  {attendedSessionName || "Selected session"}
+                  {(attendedSessionStart || attendedSessionEnd) &&
+                    ` · ${formatTime(attendedSessionStart)} – ${formatTime(attendedSessionEnd)}`}
+                </span>
               </p>
+            ) : (
+              row.curriculumScheduled &&
+              activeSlots.some(
+                (slot) => slot.entitled && slot.curriculumAvailable,
+              ) && (
+                <p className="mt-2 text-[11px] font-semibold text-(--accent)">
+                  {(() => {
+                    const matching = activeSlots.filter(
+                      (slot) => slot.entitled && slot.curriculumAvailable,
+                    );
+                    return matching.length === 1
+                      ? `${formatTime(matching[0].startTime)} – ${formatTime(matching[0].endTime)}`
+                      : `${matching.length} training sessions`;
+                  })()}
+                </p>
+              )
             )}
-            {!row.curriculumScheduled && (
+            {!row.attendance && !row.curriculumScheduled && (
               <p className="mt-2 text-[11px] font-semibold text-(--ink-muted)">
-                No matching program session scheduled today; attendance is unavailable.
+                No matching program session scheduled today; attendance is
+                unavailable.
               </p>
             )}
           </>
@@ -478,11 +478,11 @@ export default function AttendanceRow({
               text-xs text-(--ink-muted)
             "
           >
-            <Clock3
-              size={14}
-            />
+            <Clock3 size={14} />
 
-            {activeSlots.some((slot) => slot.entitled) ? "No curriculum day available" : "No enrolled program session"}
+            {activeSlots.some((slot) => slot.entitled)
+              ? "No curriculum day available"
+              : "No enrolled program session"}
           </div>
         )}
       </td>
@@ -495,64 +495,44 @@ export default function AttendanceRow({
         {isHoliday && (
           <Badge variant="default">
             <span className="inline-flex items-center gap-1.5">
-              <CalendarOff
-                size={13}
-              />
-
+              <CalendarOff size={13} />
               HOLIDAY
             </span>
           </Badge>
         )}
 
-        {!isHoliday &&
-          isBranchClosed && (
-            <Badge variant="default">
-              <span className="inline-flex items-center gap-1.5">
-                <CalendarOff
-                  size={13}
-                />
+        {!isHoliday && isBranchClosed && (
+          <Badge variant="default">
+            <span className="inline-flex items-center gap-1.5">
+              <CalendarOff size={13} />
+              CLOSED
+            </span>
+          </Badge>
+        )}
 
-                CLOSED
-              </span>
-            </Badge>
-          )}
+        {!isHoliday && !isBranchClosed && status === "PRESENT" && (
+          <Badge variant="success">Present</Badge>
+        )}
 
-        {!isHoliday &&
-          !isBranchClosed &&
-          status ===
-            "PRESENT" && (
-            <Badge variant="success">
-              Present
-            </Badge>
-          )}
+        {!isHoliday && !isBranchClosed && status === "ABSENT" && (
+          <Badge variant="danger">Absent</Badge>
+        )}
 
-        {!isHoliday &&
-          !isBranchClosed &&
-          status ===
-            "ABSENT" && (
-            <Badge variant="danger">
-              Absent
-            </Badge>
-          )}
+        {!isHoliday && !isBranchClosed && status === "PARTIAL" && (
+          <Badge variant="warning">
+            Partial ({row.sessionAttendanceCount}/{row.sessionAttendanceTotal})
+          </Badge>
+        )}
+
+        {!isHoliday && !isBranchClosed && !marked && row.curriculumComplete && (
+          <Badge variant="warning">Curriculum complete</Badge>
+        )}
 
         {!isHoliday &&
           !isBranchClosed &&
-          status === "PARTIAL" && (
-            <Badge variant="warning">Partial ({row.sessionAttendanceCount}/{row.sessionAttendanceTotal})</Badge>
-          )}
-
-        {!isHoliday &&
-          !isBranchClosed &&
-          !marked && row.curriculumComplete && (
-            <Badge variant="warning">Curriculum complete</Badge>
-          )}
-
-        {!isHoliday &&
-          !isBranchClosed &&
-          !marked && !row.curriculumComplete && (
-            <Badge variant="default">
-              Not marked
-            </Badge>
+          !marked &&
+          !row.curriculumComplete && (
+            <Badge variant="default">Not marked</Badge>
           )}
       </td>
 
@@ -565,63 +545,47 @@ export default function AttendanceRow({
           {/* NORMAL ATTENDANCE */}
 
           {!isHoliday &&
-            !isBranchClosed && (
-              <>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={
-                    status ===
-                    "PRESENT"
-                      ? "primary"
-                      : "outline"
-                  }
-                  disabled={
-                    !canMarkAttendance
-                  }
-                  className={status === "PRESENT" ? "disabled:opacity-100" : ""}
-                  onClick={() =>
-                    onMark(
-                      row,
-                      "PRESENT",
-                    )
-                  }
-                >
-                  <Check
-                    size={15}
-                  />
-
-                  Present
-                </Button>
-
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={
-                    status ===
-                    "ABSENT"
-                      ? "danger"
-                      : "outline"
-                  }
-                  disabled={
-                    !canMarkAttendance
-                  }
-                  className={status === "ABSENT" ? "disabled:opacity-100" : ""}
-                  onClick={() =>
-                    onMark(
-                      row,
-                      "ABSENT",
-                    )
-                  }
-                >
-                  <X
-                    size={15}
-                  />
-
-                  Absent
-                </Button>
-              </>
+            marked &&
+            canManage &&
+            row.attendance?.attendanceType !== "MAKEUP" && (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={saving || !row.attendance?._id}
+                onClick={() => onUndo(row)}
+              >
+                <RotateCcw size={15} /> Undo
+              </Button>
             )}
+
+          {!isHoliday && !marked && !isBranchClosed && (
+            <>
+              <Button
+                type="button"
+                size="sm"
+                variant={status === "PRESENT" ? "primary" : "outline"}
+                disabled={!canMarkAttendance}
+                className={status === "PRESENT" ? "disabled:opacity-100" : ""}
+                onClick={() => onMark(row, "PRESENT")}
+              >
+                <Check size={15} />
+                Present
+              </Button>
+
+              <Button
+                type="button"
+                size="sm"
+                variant={status === "ABSENT" ? "danger" : "outline"}
+                disabled={!canMarkAttendance}
+                className={status === "ABSENT" ? "disabled:opacity-100" : ""}
+                onClick={() => onMark(row, "ABSENT")}
+              >
+                <X size={15} />
+                Absent
+              </Button>
+            </>
+          )}
 
           {/* HOLIDAY */}
 
@@ -638,20 +602,16 @@ export default function AttendanceRow({
                 text-(--ink-muted)
               "
             >
-              <CalendarOff
-                size={14}
-              />
-
+              <CalendarOff size={14} />
               No attendance
             </span>
           )}
 
           {/* CLOSED */}
 
-          {!isHoliday &&
-            isBranchClosed && (
-              <span
-                className="
+          {!isHoliday && isBranchClosed && (
+            <span
+              className="
                   inline-flex
                   items-center gap-2
                   rounded-lg
@@ -661,14 +621,11 @@ export default function AttendanceRow({
                   text-xs font-bold
                   text-(--ink-muted)
                 "
-              >
-                <CalendarOff
-                  size={14}
-                />
-
-                Branch closed
-              </span>
-            )}
+            >
+              <CalendarOff size={14} />
+              Branch closed
+            </span>
+          )}
 
           {/* STUDENT LINK */}
 
@@ -684,9 +641,7 @@ export default function AttendanceRow({
               hover:bg-(--accent-soft)
             "
           >
-            <ArrowUpRight
-              size={15}
-            />
+            <ArrowUpRight size={15} />
           </Link>
         </div>
       </td>

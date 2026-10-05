@@ -89,10 +89,7 @@ function getDisplayTagline(
 function safeImage(
   value?: string,
 ) {
-  return (
-    value?.trim() ||
-    "/logo.png"
-  );
+  return value?.trim() || "";
 }
 
 export default function Hero3D({
@@ -110,6 +107,7 @@ export default function Hero3D({
     reducedMotion,
     setReducedMotion,
   ] = useState(false);
+  const [failedLogoUrl, setFailedLogoUrl] = useState("");
 
   useEffect(() => {
     const mediaQuery =
@@ -165,6 +163,12 @@ export default function Hero3D({
   const logoUrl = safeImage(
     brand.logoUrl,
   );
+  const academyInitials = academyName
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((word) => word[0]?.toUpperCase())
+    .join("") || "A";
 
   function handlePointerMove(
     event: PointerEvent<HTMLDivElement>,
@@ -647,33 +651,22 @@ export default function Hero3D({
                   sm:w-24
                 "
               >
-                <img
-                  src={logoUrl}
-                  alt={`${academyName} logo`}
-                  className="
-                    h-full
-                    w-full
-                    object-contain
-                    p-2
-                  "
-                  onError={(
-                    event,
-                  ) => {
-                    const image =
-                      event.currentTarget;
-
-                    if (
-                      image.src.endsWith(
-                        "/logo.png",
-                      )
-                    ) {
-                      return;
-                    }
-
-                    image.src =
-                      "/logo.png";
-                  }}
-                />
+                {logoUrl && failedLogoUrl !== logoUrl ? (
+                  <img
+                    src={logoUrl}
+                    alt={`${academyName} logo`}
+                    className="h-full w-full object-contain p-2"
+                    onError={() => setFailedLogoUrl(logoUrl)}
+                  />
+                ) : (
+                  <span
+                    role="img"
+                    aria-label={`${academyName} logo`}
+                    className="flex h-full w-full items-center justify-center bg-[#e44498] text-2xl font-extrabold text-white"
+                  >
+                    {academyInitials}
+                  </span>
+                )}
               </div>
             </div>
 

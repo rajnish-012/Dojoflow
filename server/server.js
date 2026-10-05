@@ -6,6 +6,14 @@
 
 const dotenv = require("dotenv");
 dotenv.config();
+const { validateServerEnv } = require("./src/config/env");
+let serverEnv;
+try {
+  serverEnv = validateServerEnv();
+} catch (error) {
+  console.error(error.message);
+  process.exit(1);
+}
 
 const express = require("express");
 const cors = require("cors");
@@ -13,6 +21,7 @@ const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 
 const connectDB = require("./src/config/db");
+const mongoose = require("mongoose");
 
 /* =========================================================
    ROUTES
@@ -39,6 +48,9 @@ const academySettingRoutes = require("./src/routes/academySettings.routes");
 const websiteRoutes = require("./src/routes/website.routes");
 const publicWebsiteRoutes = require("./src/routes/publicWebsite.routes");
 const maintenanceRoutes = require("./src/routes/maintenance.routes");
+const notificationRoutes = require("./src/routes/notification.routes");
+const financeRoutes = require("./src/routes/finance.routes");
+const { refreshFinanceReminders } = require("./src/services/financeReminder.service");
 
 /*
  * Branch Schedule
@@ -72,12 +84,8 @@ const {
 ========================================================= */
 
 const app = express();
-const getClientOrigins = () => (process.env.CLIENT_URL || "http://localhost:3000")
-  .split(",")
-  .map((value) => value.trim())
-  .map((value) => {
-    try { return new URL(value).origin; } catch { return value; }
-  });
+app.set("trust proxy", serverEnv.proxyHops);
+const getClientOrigins = () => serverEnv.clientOrigins;
 
 /* =========================================================
    SECURITY MIDDLEWARE
@@ -96,25 +104,40 @@ app.use(helmet());
  *
  * 10 attempts per 15 minutes per IP.
  *
- * Skipped in development so local testing is never blocked.
- * In production this protects against credential stuffing.
+ * Applies in every environment to protect against credential stuffing.
  */
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 10,
   standardHeaders: true,
   legacyHeaders: false,
-  /*
-   * Skip rate limiting when running locally.
-   * NODE_ENV must be set to "production" in the deployment
-   * environment for this limiter to take effect.
-   */
-  skip: () => process.env.NODE_ENV !== "production",
   message: {
     success: false,
     message:
       "Too many login attempts. Please try again in 15 minutes.",
   },
+});
+
+const inquiryLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, message: "Too many inquiry attempts. Please try again later." },
+});
+const forgotPasswordLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, message: "Too many recovery requests. Please try again later." },
+});
+const resetPasswordLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, message: "Too many reset attempts. Please try again later." },
 });
 
 /*
@@ -151,8 +174,11 @@ app.use(
 // Cross-site session cookies require explicit app-origin validation on
 // cookie-authenticated unsafe browser requests as an additional CSRF guard.
 app.use("/api", (req, res, next) => {
-  if (["GET", "HEAD", "OPTIONS"].includes(req.method) || !req.headers.origin) return next();
+  if (["GET", "HEAD", "OPTIONS"].includes(req.method)) return next();
   const allowedOrigins = getClientOrigins();
+  const hasSessionCookie = (req.headers.cookie || "").split(";").some((part) => part.trim().startsWith("forcestrike_session="));
+  if (!req.headers.origin && !hasSessionCookie) return next();
+  if (!req.headers.origin) return res.status(403).json({ success: false, message: "Request origin is required" });
   if (!allowedOrigins.includes(req.headers.origin)) {
     return res.status(403).json({ success: false, message: "Request origin is not allowed" });
   }
@@ -182,6 +208,8 @@ app.use(
 ------------------------- */
 
 app.use("/api/auth/login", loginLimiter);
+app.use("/api/auth/forgot-password", forgotPasswordLimiter);
+app.use("/api/auth/reset-password", resetPasswordLimiter);
 app.use("/api/auth", authRoutes);
 
 /* -------------------------
@@ -218,6 +246,8 @@ app.use("/api/performance", performanceRoutes);
    Maintenance
 ------------------------- */
 app.use("/api/maintenance", maintenanceRoutes);
+app.use("/api/notifications", notificationRoutes);
+app.use("/api/finance", financeRoutes);
 
 /* -------------------------
    Student Progress
@@ -247,7 +277,10 @@ app.use("/api/users", userRoutes);
    Inquiries
 ------------------------- */
 
-app.use("/api/inquiries", inquiryRoutes);
+app.use("/api/inquiries", (req, res, next) => {
+  if (req.method === "POST" && req.path === "/") return inquiryLimiter(req, res, next);
+  return next();
+}, inquiryRoutes);
 
 /* -------------------------
    Modules
@@ -327,10 +360,8 @@ app.use("/api/training-session-types", trainingSessionTypeRoutes);
 ========================================================= */
 
 app.get("/api/health", (req, res) => {
-  res.status(200).json({
-    success: true,
-    message: "DojoFlow API is running",
-  });
+  const ready = mongoose.connection.readyState === 1;
+  res.status(ready ? 200 : 503).json({ success: ready, status: ready ? "ready" : "not_ready" });
 });
 
 /* =========================================================
@@ -340,7 +371,7 @@ app.get("/api/health", (req, res) => {
 app.use((req, res) => {
   res.status(404).json({
     success: false,
-    message: `Route not found: ${req.method} ${req.originalUrl}`,
+    message: process.env.NODE_ENV === "production" ? "Route not found" : `Route not found: ${req.method} ${req.path}`,
   });
 });
 
@@ -351,18 +382,24 @@ app.use((req, res) => {
 ========================================================= */
 
 app.use((error, req, res, next) => {
-  console.error("Server error:", error);
-
   const isProduction =
     process.env.NODE_ENV === "production";
 
-  res.status(error.status || 500).json({
+  // Keep operational logs useful without logging credentials, request bodies,
+  // database connection strings, or complete error objects.
+  console.error("Request failed", {
+    method: req.method,
+    path: req.path,
+    status: Number(error.status) || 500,
+    code: typeof error.code === "string" ? error.code : undefined,
+    name: typeof error.name === "string" ? error.name : "Error",
+  });
+
+  const status = Number(error.status) >= 400 && Number(error.status) < 500 ? Number(error.status) : 500;
+
+  res.status(status).json({
     success: false,
-    message: isProduction
-      ? error.status
-        ? error.message
-        : "Internal server error"
-      : error.message || "Internal server error",
+    message: isProduction ? (status < 500 ? "Request could not be processed." : "Internal server error") : error.message || "Internal server error",
   });
 });
 
@@ -370,7 +407,7 @@ app.use((error, req, res, next) => {
    START SERVER
 ========================================================= */
 
-const PORT = process.env.PORT || 5000;
+const PORT = serverEnv.port;
 
 const startServer = async () => {
   try {
@@ -388,6 +425,13 @@ const startServer = async () => {
      * Make sure default modules exist.
      */
     await ensureDefaultModules();
+
+    // Reminder events are event-keyed, so retrying this scheduler cannot spam.
+    refreshFinanceReminders().catch((error) => console.error("Finance reminder refresh failed", { name: error?.name || "Error" }));
+    const financeReminderTimer = setInterval(() => {
+      refreshFinanceReminders().catch((error) => console.error("Finance reminder refresh failed", { name: error?.name || "Error" }));
+    }, 60 * 60 * 1000);
+    financeReminderTimer.unref?.();
 
     /*
      * Start HTTP server only after
@@ -407,15 +451,14 @@ const startServer = async () => {
       },
     );
   } catch (error) {
-    console.error(
-      "Failed to start ForceStrike server:",
-      error,
-    );
+    console.error("Failed to start ForceStrike server", { name: error?.name || "Error", code: error?.code });
 
     process.exit(1);
   }
 };
 
-startServer();
+if (require.main === module) {
+  startServer();
+}
 
 module.exports = app;
