@@ -33,6 +33,8 @@ const timeSlotSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "TrainingSessionType",
     },
+    coach: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+    capacity: { type: Number, min: 1, default: null },
 
     /**
      * Session start time in 24-hour HH:mm format.

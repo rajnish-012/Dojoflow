@@ -6,12 +6,17 @@ const {
   createAssignment,
   deleteAssignment,
   getMyAssignedStudents,
+  getCoachAvailability,
+  updateCoachAvailability,
 } = require("../controllers/coachAssignment.controller");
 
 const protect = require("../middleware/auth.middleware");
 const { authorizePermission } = require("../middleware/permission.middleware");
 
 const router = express.Router();
+
+router.get("/coaches/:coachId/availability", protect, getCoachAvailability);
+router.put("/coaches/:coachId/availability", protect, updateCoachAvailability);
 
 router.get(
   "/my-students",

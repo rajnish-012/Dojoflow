@@ -2,6 +2,8 @@ const mongoose = require("mongoose");
 
 const Module = require("../models/Module");
 const { ALL_PERMISSIONS } = require("../config/permissions");
+const auditService = require("../services/audit.service");
+const { AUDIT_ACTIONS } = require("../config/auditActions");
 
 /*
  * =========================================================
@@ -14,16 +16,6 @@ const ROLE_KEY_PATTERN = /^[A-Z0-9_]+$/;
 const HREF_PATTERN = /^\/[a-zA-Z0-9\-_\/]*$/;
 
 const KEY_PATTERN = /^[a-z0-9-]+$/;
-const MODULE_GROUPS = new Set([
-  "ungrouped",
-  "academy",
-  "operations",
-  "content",
-  "reports",
-  "administration",
-  "settings",
-]);
-
 /*
  * =========================================================
  * SYSTEM MODULES
@@ -53,6 +45,8 @@ const MODULE_PERMISSIONS = Object.freeze({
   dashboard: "dashboard.view",
 
   students: "student.view",
+
+  memberships: "membership.view",
 
   plans: "plan.view",
 
@@ -157,9 +151,9 @@ const normalizePermission = (value) => {
 };
 
 const normalizeGroup = (value) => {
-  if (value === null || value === undefined || value === "") return null;
-  const group = String(value).trim().toLowerCase();
-  return MODULE_GROUPS.has(group) ? group : undefined;
+  if (value === null || value === undefined) return null;
+  const group = String(value).trim();
+  return group || undefined;
 };
 
 /*
@@ -441,8 +435,8 @@ const createModule = async (req, res) => {
       return sendError(res, 400, "Invalid roles list");
     }
 
-    if (group === undefined) {
-      return sendError(res, 400, "Invalid sidebar group");
+    if (!group) {
+      return sendError(res, 400, "Sidebar section is required");
     }
 
     if (requiredPermission && !ALL_PERMISSIONS.includes(requiredPermission)) {
@@ -507,6 +501,7 @@ const createModule = async (req, res) => {
     };
 
     const created = await Module.create(moduleData);
+    await auditService.record({ req, action: AUDIT_ACTIONS.MODULE_CREATED, entityType: "MODULE", entityId: created._id, after: { key: created.key, label: created.label, href: created.href, requiredPermission: created.requiredPermission, group: created.group, allowedRoles: created.allowedRoles } });
 
     res.status(201).json({
       success: true,
@@ -626,11 +621,12 @@ const updateModule = async (req, res) => {
 
       moduleDoc.requiredPermission = permission;
     }
+    const auditBefore = { label: moduleDoc.label, href: moduleDoc.href, isActive: moduleDoc.isActive, requiredPermission: moduleDoc.requiredPermission, group: moduleDoc.group, allowedRoles: moduleDoc.allowedRoles };
 
     if (req.body.group !== undefined) {
       const group = normalizeGroup(req.body.group);
-      if (group === undefined) {
-        return sendError(res, 400, "Invalid sidebar group");
+      if (!group) {
+        return sendError(res, 400, "Sidebar section cannot be empty");
       }
       moduleDoc.group = group;
     }
@@ -694,6 +690,8 @@ const updateModule = async (req, res) => {
     }
 
     await moduleDoc.save();
+    const auditAfter = { label: moduleDoc.label, href: moduleDoc.href, isActive: moduleDoc.isActive, requiredPermission: moduleDoc.requiredPermission, group: moduleDoc.group, allowedRoles: moduleDoc.allowedRoles };
+    if (JSON.stringify(auditBefore) !== JSON.stringify(auditAfter)) await auditService.record({ req, action: AUDIT_ACTIONS.MODULE_UPDATED, entityType: "MODULE", entityId: moduleDoc._id, before: auditBefore, after: auditAfter });
 
     res.status(200).json({
       success: true,
@@ -740,6 +738,7 @@ const deleteModule = async (req, res) => {
     }
 
     await Module.findByIdAndDelete(id);
+    await auditService.record({ req, action: AUDIT_ACTIONS.MODULE_DELETED, entityType: "MODULE", entityId: moduleDoc._id, before: { key: moduleDoc.key, label: moduleDoc.label, href: moduleDoc.href, requiredPermission: moduleDoc.requiredPermission, group: moduleDoc.group, allowedRoles: moduleDoc.allowedRoles } });
 
     res.status(200).json({
       success: true,
@@ -776,20 +775,18 @@ const reorderModules = async (req, res) => {
       return sendError(res, 400, "Invalid reorder data");
     }
 
-    await Module.bulkWrite(
-      items.map((item) => ({
-        updateOne: {
-          filter: {
-            _id: item.id,
-          },
-          update: {
-            $set: {
-              order: Number(item.order),
-            },
-          },
-        },
-      })),
-    );
+    const previousModules = await Module.find({ _id: { $in: items.map((item) => item.id) } }).select("_id key order group").lean();
+    const previousById = new Map(previousModules.map((item) => [String(item._id), item]));
+    const session = await mongoose.startSession();
+    try {
+      await session.withTransaction(async () => {
+        await Module.bulkWrite(items.map((item) => ({ updateOne: { filter: { _id: item.id }, update: { $set: { order: Number(item.order) } } } })), { session });
+        for (const item of items) {
+          const previous = previousById.get(String(item.id));
+          if (previous && Number(previous.order) !== Number(item.order)) await auditService.record({ req, session, action: AUDIT_ACTIONS.MODULE_UPDATED, entityType: "MODULE", entityId: item.id, before: { key: previous.key, order: previous.order, group: previous.group }, after: { key: previous.key, order: Number(item.order), group: previous.group }, metadata: { change: "SIDEBAR_ORDER" } });
+        }
+      });
+    } finally { await session.endSession(); }
 
     res.status(200).json({
       success: true,

@@ -359,12 +359,17 @@ export async function cancelMakeup(id: string) {
    DASHBOARD
 ========================================================= */
 
-export async function getDashboard() {
-  const response = await fetchWithSession(`${API_URL}/dashboard`, {
+export async function getDashboard(filters?: { from?: string; to?: string }) {
+  const query = new URLSearchParams();
+  if (filters?.from) query.set("from", filters.from);
+  if (filters?.to) query.set("to", filters.to);
+  const queryString = query.toString();
+  const response = await fetchWithSession(`${API_URL}/dashboard${queryString ? `?${queryString}` : ""}`, {
     method: "GET",
     headers: {
       "Content-Type": "application/json",
     },
+    cache: "no-store",
   });
 
   const data = await response.json();
@@ -386,6 +391,15 @@ export interface StudentRecord {
   age: number;
   phone: string;
   email?: string;
+  guardians?: Array<{
+    _id?: string;
+    name: string;
+    relationship: "FATHER" | "MOTHER" | "GUARDIAN";
+    phone: string;
+    email: string;
+    emergencyContact: boolean;
+    pickupAuthorized: boolean;
+  }>;
 
   branch?: {
     _id: string;
@@ -794,6 +808,14 @@ export async function updateStudent(
     currentBelt?: string;
     status?: "ACTIVE" | "INACTIVE" | "COMPLETED";
     password?: string;
+    guardians?: Array<{
+      name: string;
+      relationship: "FATHER" | "MOTHER" | "GUARDIAN";
+      phone?: string;
+      email?: string;
+      emergencyContact?: boolean;
+      pickupAuthorized?: boolean;
+    }>;
   },
 ) {
   const response = await fetchWithSession(`${API_URL}/students/${id}`, {

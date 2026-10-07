@@ -18,7 +18,9 @@ import {
 } from "lucide-react";
 
 import { getStudents, getBranches, getPlans, createStudent } from "@/lib/api";
-import InternationalPhoneInput, { isValidPhoneNumber } from "@/components/ui/InternationalPhoneInput";
+import InternationalPhoneInput, {
+  isValidPhoneNumber,
+} from "@/components/ui/InternationalPhoneInput";
 
 import { useCan } from "@/lib/permissions";
 
@@ -26,6 +28,7 @@ import {
   Badge,
   Button,
   Card,
+  DataTableSection,
   DataFilters,
   DataSort,
   EmptyState,
@@ -91,7 +94,10 @@ type Plan = {
   classesPerWeek?: number;
   startingBelt?: string;
   curriculum?: CurriculumItem[];
-  programs?: { program?: { _id?: string; name?: string } | string; curriculum?: CurriculumItem[] }[];
+  programs?: {
+    program?: { _id?: string; name?: string } | string;
+    curriculum?: CurriculumItem[];
+  }[];
   milestones?: MilestoneItem[];
 };
 
@@ -297,8 +303,7 @@ export default function StudentsPage() {
   };
 
   const handleDigitsOnlyChange =
-    (field: "age") =>
-    (event: React.ChangeEvent<HTMLInputElement>) => {
+    (field: "age") => (event: React.ChangeEvent<HTMLInputElement>) => {
       const digitsOnly = event.target.value.replace(/\D/g, "");
 
       setForm((current) => ({
@@ -468,7 +473,9 @@ export default function StudentsPage() {
     } catch (error) {
       console.error(error);
 
-      toast.error(error instanceof Error ? error.message : "Failed to create student.");
+      toast.error(
+        error instanceof Error ? error.message : "Failed to create student.",
+      );
     } finally {
       setSaving(false);
     }
@@ -572,14 +579,14 @@ export default function StudentsPage() {
             branches and academy access.
           "
           actions={
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
               <Button
                 variant="outline"
                 onClick={() => void loadStudents(pagination.page)}
                 disabled={loading}
               >
                 <RefreshCw
-                  size={17}
+                  size={16}
                   className={loading ? "animate-spin" : ""}
                 />
                 Refresh
@@ -602,50 +609,12 @@ export default function StudentsPage() {
           inactive={inactiveStudents}
         />
 
-        <Card padding="none" className="mt-6 overflow-hidden">
-          <div
-            className="
-            flex flex-col justify-between gap-5
-            border-b border-(--line)
-            px-5 py-5
-            sm:px-6
-            lg:flex-row lg:items-center
-          "
-          >
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <div
-                  className="
-                  flex h-9 w-9 items-center justify-center
-                  rounded-xl bg-(--accent-soft)
-                  text-(--accent)
-                "
-                >
-                  <Users size={18} />
-                </div>
-
-                <div>
-                  <h2
-                    className="
-                    text-xl font-extrabold tracking-tight
-                    text-(--foreground)
-                  "
-                  >
-                    All students
-                  </h2>
-
-                  <p
-                    className="
-                    mt-0.5 text-xs text-(--ink-muted)
-                    sm:text-sm
-                  "
-                  >
-                    View and manage every student in your academy.
-                  </p>
-                </div>
-              </div>
-            </div>
-
+        <DataTableSection
+          className="mt-6"
+          title="All students"
+          description="View and manage every student in your academy."
+          icon={<Users size={18} />}
+          toolbar={
             <div className="flex w-full flex-col gap-2 lg:w-auto lg:flex-row lg:items-start">
               <div className="relative w-full lg:w-[340px]">
                 <Search
@@ -775,8 +744,8 @@ export default function StudentsPage() {
                 ]}
               />
             </div>
-          </div>
-
+          }
+        >
           <StudentsContent
             loading={loading}
             error={error}
@@ -798,7 +767,7 @@ export default function StudentsPage() {
               onPageSizeChange={(pageSize) => void loadStudents(1, pageSize)}
             />
           )}
-        </Card>
+        </DataTableSection>
       </div>
 
       <Modal
@@ -882,15 +851,13 @@ export default function StudentsPage() {
               />
             </FormField>
 
-            <FormField
-              label="Phone number"
-              htmlFor="student-phone"
-              required
-            >
+            <FormField label="Phone number" htmlFor="student-phone" required>
               <InternationalPhoneInput
                 id="student-phone"
                 value={form.phone}
-                onChange={(phone) => setForm((current) => ({ ...current, phone }))}
+                onChange={(phone) =>
+                  setForm((current) => ({ ...current, phone }))
+                }
                 required
               />
             </FormField>
@@ -1128,7 +1095,10 @@ function AdmissionTimelinePreview({
             </h3>
             {primaryProgram && (
               <p className="mt-1 text-sm text-(--ink-muted)">
-                {typeof primaryProgram.program === "object" ? primaryProgram.program.name : "Program"} curriculum
+                {typeof primaryProgram.program === "object"
+                  ? primaryProgram.program.name
+                  : "Program"}{" "}
+                curriculum
               </p>
             )}
 

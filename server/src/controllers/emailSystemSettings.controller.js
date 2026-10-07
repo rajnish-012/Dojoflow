@@ -1,6 +1,8 @@
 const EmailSystemSettings = require("../models/EmailSystemSettings");
 const { encryptEmailPassword } = require("../services/emailCredentials.service");
 const { sendEmailSystemTest } = require("../services/inquiryEmail.service");
+const auditService = require("../services/audit.service");
+const { AUDIT_ACTIONS } = require("../config/auditActions");
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const SETTINGS_KEY = "primary";
@@ -86,6 +88,11 @@ const updateEmailSystemSettings = async (req, res) => {
       { $set: values, $setOnInsert: { settingsKey: SETTINGS_KEY } },
       { new: true, upsert: true, runValidators: true, setDefaultsOnInsert: true },
     ).select("-smtpPasswordEncrypted").lean();
+
+    const fields = ["smtpHost", "smtpPort", "smtpSecure", "fromName", "fromEmail", "notificationEmail"];
+    const before = Object.fromEntries(fields.map((field) => [field, existing?.[field] ?? null]));
+    const after = Object.fromEntries(fields.map((field) => [field, values[field]]));
+    if (JSON.stringify(before) !== JSON.stringify(after)) await auditService.record({ req, action: AUDIT_ACTIONS.SETTINGS_UPDATED, entityType: "EMAIL_SETTINGS", entityId: settings._id, before, after, metadata: { passwordConfigured: Boolean(settings.smtpPasswordEncrypted) } });
 
     return res.json({
       success: true,

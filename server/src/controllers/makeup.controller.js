@@ -5,6 +5,7 @@ const Attendance = require("../models/Attendance");
 const Student = require("../models/Student");
 const CoachStudentAssignment = require("../models/CoachStudentAssignment");
 const { safelyNotify } = require("../services/notification.service");
+const { findEnrollmentForDate } = require("../services/enrollmentLifecycle.service");
 const {
   validateMakeupDate: validateCentralMakeupDate,
 } = require("../services/branchSchedule.service");
@@ -898,7 +899,7 @@ const scheduleMakeup = async (req, res) => {
     }
     const selectedStart = getStartOfDay(String(makeupDate));
     const selectedEnd = getEndOfDay(String(makeupDate));
-    const enrollment = (studentRecord.planEnrollments || []).find((item) => item.status === "ACTIVE" && new Date(item.startDate) <= selectedEnd && (!item.endDate || new Date(item.endDate) > selectedStart));
+    const enrollment = findEnrollmentForDate(studentRecord.planEnrollments, selectedStart, selectedEnd);
     if (studentRecord.planEnrollments?.length && !enrollment) {
       return res.status(409).json({ success: false, message: "The student has no active plan enrollment on the selected makeup date" });
     }
@@ -1134,9 +1135,7 @@ const completeMakeup = async (req, res) => {
     if (!student || student.status !== "ACTIVE") {
       return res.status(400).json({ success: false, message: "Only active students can complete a makeup" });
     }
-    const enrollment = (student.planEnrollments || []).find((item) =>
-      item.status === "ACTIVE" && new Date(item.startDate) <= dayEnd && (!item.endDate || new Date(item.endDate) > dayStart),
-    );
+    const enrollment = findEnrollmentForDate(student.planEnrollments, dayStart, dayEnd);
     if (enrollment && makeup.enrollment && String(enrollment._id) !== String(makeup.enrollment)) {
       return res.status(409).json({ success: false, message: "The student's plan enrollment changed after this makeup was scheduled. Review the plan before completing it." });
     }

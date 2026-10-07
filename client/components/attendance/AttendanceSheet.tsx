@@ -14,7 +14,7 @@ import {
 import {
   Badge,
   Button,
-  Card,
+  DataTableSection,
   DataFilters,
   DataSort,
   EmptyState,
@@ -38,6 +38,8 @@ type AttendanceSheetProps = {
 
   onMark: (row: DailyAttendanceRow, status: "PRESENT" | "ABSENT") => void;
   onUndo: (row: DailyAttendanceRow) => void;
+  canRequestCorrection?: boolean;
+  onRequestCorrection?: (row: DailyAttendanceRow) => void;
 };
 
 type AttendanceFilter = "ALL" | "PRESENT" | "ABSENT" | "NOT_MARKED" | "HOLIDAY";
@@ -78,6 +80,8 @@ export default function AttendanceSheet({
   canManage,
   onMark,
   onUndo,
+  canRequestCorrection = false,
+  onRequestCorrection,
 }: AttendanceSheetProps) {
   const [search, setSearch] = useState("");
 
@@ -217,7 +221,8 @@ export default function AttendanceSheet({
   ]);
 
   useEffect(() => {
-    setPage(1);
+    const timer = window.setTimeout(() => setPage(1), 0);
+    return () => window.clearTimeout(timer);
   }, [
     search,
     branchFilter,
@@ -294,74 +299,7 @@ export default function AttendanceSheet({
   }
 
   return (
-    <Card padding="none" className="mt-6">
-      {/* ======================================
-            HEADER
-        ====================================== */}
-
-      <div
-        className="
-            border-b border-(--line)
-            px-5 py-5
-            sm:px-6
-          "
-      >
-        {/* ====================================
-              TITLE + SEARCH + FILTERS
-          ==================================== */}
-
-        <div
-          className="
-              flex flex-col
-              gap-5
-              lg:flex-row
-              lg:items-start
-              lg:justify-between
-            "
-        >
-          {/* TITLE */}
-
-          <div className="min-w-0">
-            <div className="flex items-center gap-3">
-              <div
-                className="
-                    flex h-9 w-9 shrink-0
-                    items-center justify-center
-                    rounded-xl
-                    bg-(--accent-soft)
-                    text-(--accent)
-                  "
-              >
-                <ClipboardCheck size={18} />
-              </div>
-
-              <div>
-                <h2
-                  className="
-                      text-xl font-extrabold
-                      tracking-tight
-                      text-(--foreground)
-                    "
-                >
-                  Daily attendance
-                </h2>
-
-                <p
-                  className="
-                      mt-0.5 text-xs
-                      text-(--ink-muted)
-                      sm:text-sm
-                    "
-                >
-                  Mark attendance for active students and track their training
-                  progress.
-                </p>
-              </div>
-            </div>
-          </div>
-
-          {/* SEARCH + FILTERS */}
-
+    <DataTableSection className="mt-6" title="Daily attendance" description="Mark attendance for active students and track their training progress." icon={<ClipboardCheck size={18} />} toolbar={
           <div
             className="
                 flex w-full
@@ -511,8 +449,7 @@ export default function AttendanceSheet({
               ]}
             />
           </div>
-        </div>
-      </div>
+      }>
 
       {/* ======================================
             LOADING
@@ -658,6 +595,8 @@ export default function AttendanceSheet({
                     saving={savingStudentId === row.student._id}
                     onMark={onMark}
                     onUndo={onUndo}
+                    canRequestCorrection={canRequestCorrection}
+                    onRequestCorrection={onRequestCorrection}
                   />
                 ))}
               </tbody>
@@ -683,6 +622,8 @@ export default function AttendanceSheet({
                 saving={savingStudentId === row.student._id}
                 onMark={onMark}
                 onUndo={onUndo}
+                canRequestCorrection={canRequestCorrection}
+                onRequestCorrection={onRequestCorrection}
               />
             ))}
           </div>
@@ -704,7 +645,7 @@ export default function AttendanceSheet({
           }}
         />
       )}
-    </Card>
+    </DataTableSection>
   );
 }
 
@@ -718,6 +659,8 @@ function AttendanceMobileCard({
   saving,
   onMark,
   onUndo,
+  canRequestCorrection = false,
+  onRequestCorrection,
 }: {
   row: DailyAttendanceRow;
   canManage: boolean;
@@ -725,6 +668,8 @@ function AttendanceMobileCard({
 
   onMark: (row: DailyAttendanceRow, status: "PRESENT" | "ABSENT") => void;
   onUndo: (row: DailyAttendanceRow) => void;
+  canRequestCorrection?: boolean;
+  onRequestCorrection?: (row: DailyAttendanceRow) => void;
 }) {
   const status = row.attendance?.status;
 
@@ -950,6 +895,7 @@ function AttendanceMobileCard({
                   {sessionName || "Session details unavailable"}
                   {(sessionStart || sessionEnd) &&
                     ` · ${formatTime(sessionStart)} – ${formatTime(sessionEnd)}`}
+                  {selectedSession?.capacity != null && ` · ${selectedSession.currentEnrollment ?? 0}/${selectedSession.capacity} enrolled · ${selectedSession.availableSeats ?? 0} seats available`}
                 </span>
               </p>
             ) : scheduledSessions.length ? (
@@ -968,6 +914,7 @@ function AttendanceMobileCard({
                         session.programName ||
                         "Training session"}
                       {` · ${formatTime(session.startTime)} – ${formatTime(session.endTime)}`}
+                      {session.capacity != null && ` · ${session.currentEnrollment ?? 0}/${session.capacity} enrolled · ${session.availableSeats ?? 0} seats available`}
                     </span>
                   </p>
                 ))}
@@ -1001,10 +948,9 @@ function AttendanceMobileCard({
           Day {row.planDay}
         </span>
 
-        {!isHoliday &&
-        canManage &&
-        row.attendance &&
-        row.attendance.attendanceType !== "MAKEUP" ? (
+        {!isHoliday && row.attendance && canRequestCorrection && row.attendance.attendanceType !== "MAKEUP" ? (
+          <button type="button" disabled={saving || !row.attendance._id} onClick={() => onRequestCorrection?.(row)} className="inline-flex items-center gap-1.5 rounded-lg border border-(--line) px-3 py-2 text-xs font-bold text-(--foreground-soft) hover:bg-(--hover-bg) disabled:opacity-50"><ClipboardCheck size={14}/> Request correction</button>
+        ) : !isHoliday && row.attendance && canManage && row.attendance.attendanceType !== "MAKEUP" ? (
           <button
             type="button"
             disabled={saving || !row.attendance._id}
@@ -1013,9 +959,7 @@ function AttendanceMobileCard({
           >
             <RotateCcw size={14} /> Undo
           </button>
-        ) : (
-          !isHoliday &&
-          canManage && (
+        ) : !isHoliday && !row.attendance && canManage ? (
             <div className="flex gap-2">
               <button
                 type="button"
@@ -1079,8 +1023,7 @@ function AttendanceMobileCard({
                 Absent
               </button>
             </div>
-          )
-        )}
+        ) : null}
 
         {isHoliday && (
           <span

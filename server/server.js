@@ -50,7 +50,11 @@ const publicWebsiteRoutes = require("./src/routes/publicWebsite.routes");
 const maintenanceRoutes = require("./src/routes/maintenance.routes");
 const notificationRoutes = require("./src/routes/notification.routes");
 const financeRoutes = require("./src/routes/finance.routes");
+const auditLogRoutes = require("./src/routes/auditLog.routes");
+const enrollmentRoutes = require("./src/routes/enrollment.routes");
 const { refreshFinanceReminders } = require("./src/services/financeReminder.service");
+const { refreshEnrollmentReminders } = require("./src/services/enrollmentReminder.service");
+const { notifyOverdueFollowUps } = require("./src/controllers/crm.controller");
 
 /*
  * Branch Schedule
@@ -248,6 +252,8 @@ app.use("/api/performance", performanceRoutes);
 app.use("/api/maintenance", maintenanceRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/finance", financeRoutes);
+app.use("/api/audit-logs", auditLogRoutes);
+app.use("/api/enrollments", enrollmentRoutes);
 
 /* -------------------------
    Student Progress
@@ -428,10 +434,20 @@ const startServer = async () => {
 
     // Reminder events are event-keyed, so retrying this scheduler cannot spam.
     refreshFinanceReminders().catch((error) => console.error("Finance reminder refresh failed", { name: error?.name || "Error" }));
+    refreshEnrollmentReminders().catch((error) => console.error("Membership reminder refresh failed", { name: error?.name || "Error" }));
+    notifyOverdueFollowUps().catch((error) => console.error("Lead follow-up reminder refresh failed", { name: error?.name || "Error" }));
     const financeReminderTimer = setInterval(() => {
       refreshFinanceReminders().catch((error) => console.error("Finance reminder refresh failed", { name: error?.name || "Error" }));
     }, 60 * 60 * 1000);
     financeReminderTimer.unref?.();
+    const membershipReminderTimer = setInterval(() => {
+      refreshEnrollmentReminders().catch((error) => console.error("Membership reminder refresh failed", { name: error?.name || "Error" }));
+    }, 60 * 60 * 1000);
+    membershipReminderTimer.unref?.();
+    const leadFollowUpTimer = setInterval(() => {
+      notifyOverdueFollowUps().catch((error) => console.error("Lead follow-up reminder refresh failed", { name: error?.name || "Error" }));
+    }, 60 * 60 * 1000);
+    leadFollowUpTimer.unref?.();
 
     /*
      * Start HTTP server only after

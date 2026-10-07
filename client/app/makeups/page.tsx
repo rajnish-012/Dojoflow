@@ -21,7 +21,7 @@ import {
 import {
   Badge,
   Button,
-  Card,
+  DataTableSection,
   DataFilters,
   DataSort,
   EmptyState,
@@ -1101,54 +1101,7 @@ export default function MakeupsPage() {
           overdue={overdueCount}
         />
 
-        <Card padding="none" className="mt-6 overflow-hidden">
-          <div
-            className="
-              flex flex-col justify-between gap-5
-              border-b border-(--line)
-              px-5 py-5
-              sm:px-6
-              lg:flex-row lg:items-center
-            "
-          >
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <div
-                  className="
-                    flex h-9 w-9
-                    items-center justify-center
-                    rounded-xl
-                    bg-(--accent-soft)
-                    text-(--accent)
-                  "
-                >
-                  <CalendarDays size={18} />
-                </div>
-
-                <div>
-                  <h2
-                    className="
-                      text-xl font-extrabold
-                      tracking-tight
-                      text-(--foreground)
-                    "
-                  >
-                    Missed classes
-                  </h2>
-
-                  <p
-                    className="
-                      mt-0.5 text-xs
-                      text-(--ink-muted)
-                      sm:text-sm
-                    "
-                  >
-                    View and manage every makeup class in your academy.
-                  </p>
-                </div>
-              </div>
-            </div>
-
+        <DataTableSection className="mt-6" title="Missed classes" description="View and manage every makeup class in your academy." icon={<CalendarDays size={18} />} toolbar={
             <div className="flex w-full flex-col gap-3 lg:w-auto lg:flex-row lg:items-center">
               <div className="relative w-full lg:w-[340px]">
                 <Search
@@ -1232,7 +1185,7 @@ export default function MakeupsPage() {
                 ]}
               />
             </div>
-          </div>
+        }>
 
           {!loading && !error && (
             <>
@@ -1276,7 +1229,7 @@ export default function MakeupsPage() {
               onPageSizeChange={(pageSize) => void loadMakeups(false, 1, pageSize)}
             />
           )}
-        </Card>
+        </DataTableSection>
       </div>
 
       {/* ==================================================

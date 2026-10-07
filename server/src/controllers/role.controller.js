@@ -8,6 +8,8 @@ const {
   ALL_PERMISSIONS,
   PERMISSION_MODULE_KEYS,
 } = require("../config/permissions");
+const auditService = require("../services/audit.service");
+const { AUDIT_ACTIONS } = require("../config/auditActions");
 
 const DATA_SCOPES = ["ALL", "BRANCH"];
 
@@ -265,6 +267,7 @@ const createRole = async (req, res) => {
       permissionsVersion: 1,
       isSystem: false,
     });
+    await auditService.record({ req, action: AUDIT_ACTIONS.ROLE_CREATED, entityType: "ROLE", entityId: created._id, branchId: req.user.branch, after: { key: created.key, name: created.name, dataScope: created.dataScope, permissions: created.permissions } });
 
     return res.status(201).json({
       success: true,
@@ -327,6 +330,7 @@ const updateRole = async (req, res) => {
         "You cannot change authorization for a role with broader data scope than your own",
       );
     }
+    const auditBefore = { key: role.key, name: role.name, dataScope: role.dataScope, permissions: [...(role.permissions || [])] };
 
     if (
       changesAuthorization &&
@@ -522,6 +526,12 @@ const updateRole = async (req, res) => {
 
     await role.save();
 
+    const auditAfter = { key: role.key, name: role.name, dataScope: role.dataScope, permissions: [...(role.permissions || [])] };
+    await auditService.record({ req, action: AUDIT_ACTIONS.ROLE_UPDATED, entityType: "ROLE", entityId: role._id, branchId: req.user.branch, before: auditBefore, after: auditAfter });
+    const previous = new Set(auditBefore.permissions); const next = new Set(auditAfter.permissions);
+    for (const permission of next) if (!previous.has(permission) && ALL_PERMISSIONS.includes(permission)) await auditService.record({ req, action: AUDIT_ACTIONS.PERMISSION_ASSIGNED, entityType: "ROLE", entityId: role._id, branchId: req.user.branch, before: { permission, assigned: false }, after: { permission, assigned: true } });
+    for (const permission of previous) if (!next.has(permission) && ALL_PERMISSIONS.includes(permission)) await auditService.record({ req, action: AUDIT_ACTIONS.PERMISSION_REVOKED, entityType: "ROLE", entityId: role._id, branchId: req.user.branch, before: { permission, assigned: true }, after: { permission, assigned: false } });
+
     return res.status(200).json({
       success: true,
       message: "Role updated successfully",
@@ -572,6 +582,7 @@ const deleteRole = async (req, res) => {
     }
 
     await Role.findByIdAndDelete(id);
+    await auditService.record({ req, action: AUDIT_ACTIONS.ROLE_DELETED, entityType: "ROLE", entityId: role._id, branchId: req.user.branch, before: { key: role.key, name: role.name, dataScope: role.dataScope, permissions: role.permissions } });
 
     /*
      * Keep existing module configuration consistent.

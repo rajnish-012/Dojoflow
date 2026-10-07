@@ -21,11 +21,11 @@ export default function SummaryCard({
     <div
       className={`
         group
-        rounded-2xl
+        rounded-xl
         border
         border-(--line)
         bg-(--card)
-        p-5
+        p-6
         text-(--foreground)
         shadow-none
         transition-all
@@ -37,39 +37,20 @@ export default function SummaryCard({
         ${className}
       `}
     >
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <p className="text-xs font-semibold text-(--ink-muted)">
-            {title}
-          </p>
-
-          <p className="mt-2 text-[28px] font-extrabold tracking-tight text-(--foreground)">
-            {value}
-          </p>
-
-          {subtitle && (
-            <p className="mt-1 text-xs text-(--ink-muted)">
-              {subtitle}
-            </p>
-          )}
-
-          {trend && (
-            <p className="mt-2 text-xs font-semibold text-(--accent)">
-              {trend}
-            </p>
-          )}
-        </div>
-
+      <div className="flex items-center justify-between gap-4">
+        <p className="min-w-0 text-sm font-medium text-(--ink-muted)">
+          {title}
+        </p>
         {icon && (
           <div
             className="
               flex
-              h-10
-              w-10
+              h-8
+              w-8
               shrink-0
               items-center
               justify-center
-              rounded-xl
+              rounded-2xl
               bg-(--accent-soft)
               text-(--accent)
               transition-transform
@@ -82,6 +63,19 @@ export default function SummaryCard({
           </div>
         )}
       </div>
+      <p className="mt-1 break-words text-2xl font-bold tracking-tight text-(--foreground) 2xl:text-2xl">
+        {value}
+      </p>
+      {subtitle && (
+        <p className="mt-1 text-xs text-(--ink-muted)">
+          {subtitle}
+        </p>
+      )}
+      {trend && (
+        <p className="mt-2 text-sm font-semibold text-(--accent)">
+          {trend}
+        </p>
+      )}
     </div>
   );
 }

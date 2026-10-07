@@ -4,8 +4,6 @@ import { confirmAction, toast } from "@/lib/toast";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
-  ArrowUpRight,
-  CheckCircle2,
   Link2,
   Plus,
   RefreshCw,
@@ -35,12 +33,11 @@ import { PERMISSIONS, useCan } from "@/lib/permissions";
 import {
   Badge,
   Button,
-  Card,
+  DataTableSection,
   DataFilters,
   DataSort,
   EmptyState,
   ErrorState,
-  IconButton,
   Input,
   LoadingSpinner,
   Modal,
@@ -540,60 +537,7 @@ export default function CoachAssignmentsPage() {
 
       {/* Main table */}
 
-      <Card padding="none" className="mt-6 overflow-hidden">
-        <div
-          className="
-            flex flex-col
-            justify-between gap-5
-            border-b border-(--line)
-            px-5 py-5
-            sm:px-6
-            lg:flex-row
-            lg:items-center
-          "
-        >
-          {/* Table title */}
-
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <div
-                className="
-                  flex h-9 w-9
-                  items-center justify-center
-                  rounded-xl
-                  bg-(--accent-soft)
-                  text-(--accent)
-                "
-              >
-                <UserCheck size={18} />
-              </div>
-
-              <div>
-                <h2
-                  className="
-                    text-xl font-extrabold
-                    tracking-tight
-                    text-(--foreground)
-                  "
-                >
-                  All assignments
-                </h2>
-
-                <p
-                  className="
-                    mt-0.5 text-xs
-                    text-(--ink-muted)
-                    sm:text-sm
-                  "
-                >
-                  View and manage every coach-student assignment.
-                </p>
-              </div>
-            </div>
-          </div>
-
-          {/* Search / filters / sort */}
-
+      <DataTableSection className="mt-6" title="All assignments" description="View and manage every coach-student assignment." icon={<UserCheck size={18} />} toolbar={
           <div
             className="
               flex w-full
@@ -770,8 +714,8 @@ export default function CoachAssignmentsPage() {
                 },
               ]}
             />
-          </div>
         </div>
+      }>
 
         {/* Desktop table */}
 
@@ -825,7 +769,7 @@ export default function CoachAssignmentsPage() {
             onPageSizeChange={(pageSize) => void loadAssignments(1, pageSize)}
           />
         )}
-      </Card>
+      </DataTableSection>
 
       {/* Assign modal */}
 

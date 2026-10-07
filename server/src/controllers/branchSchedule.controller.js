@@ -3,6 +3,9 @@ const mongoose = require("mongoose");
 const Branch = require("../models/Branch");
 const BranchSchedule = require("../models/BranchSchedule");
 const TrainingSessionType = require("../models/TrainingSessionType");
+const Student = require("../models/Student");
+const User = require("../models/User");
+const CoachAvailability = require("../models/CoachAvailability");
 
 const {
   getBranchMonthAvailability,
@@ -304,7 +307,7 @@ function normalizeWeeklySchedule(weeklySchedule) {
    SCHEDULE VALIDATION
 ========================================================= */
 
-async function validateSchedulePayload(body, existingSchedule) {
+async function validateSchedulePayload(body, existingSchedule, branchId, allowCapacityOverride = false) {
   const openingTime = String(body?.openingTime || "").trim();
 
   const closingTime = String(body?.closingTime || "").trim();
@@ -347,13 +350,19 @@ async function validateSchedulePayload(body, existingSchedule) {
     for (const slot of day.slots || []) existingSlots.set(String(slot._id), slot);
   }
   const submittedIds = [];
-  for (const day of weeklySchedule) for (const slot of day.slots || []) {
+  const assignedCoachIds = [];
+  for (const day of weeklySchedule) for (const slot of (day.isClosed ? [] : day.slots || [])) {
     if (slot?.sessionTypeId != null) {
       if (!mongoose.Types.ObjectId.isValid(slot.sessionTypeId)) return { valid: false, message: "Invalid training session type reference." };
       submittedIds.push(String(slot.sessionTypeId));
     } else if (!existingSlots.has(String(slot?._id || ""))) {
       return { valid: false, message: "Select a training session type for every new session." };
   }
+    const coachId = slot?.coach || existingSlots.get(String(slot?._id || ""))?.coach;
+    if (coachId) {
+      if (!mongoose.Types.ObjectId.isValid(coachId)) return { valid: false, message: "Invalid coach assignment." };
+      assignedCoachIds.push(String(coachId));
+    }
   }
   const typeDocs = submittedIds.length ? await TrainingSessionType.find({ _id: { $in: [...new Set(submittedIds)] } }).select("_id isActive").lean() : [];
   const typesById = new Map(typeDocs.map((type) => [String(type._id), type]));
@@ -403,6 +412,10 @@ async function validateSchedulePayload(body, existingSchedule) {
       const startTime = String(slot?.startTime || "").trim();
 
       const endTime = String(slot?.endTime || "").trim();
+      const existingSlot = existingSlots.get(String(slot?._id || ""));
+      const rawCapacity = slot?.capacity === undefined ? existingSlot?.capacity : slot.capacity;
+      const capacity = rawCapacity === "" || rawCapacity == null ? null : Number(rawCapacity);
+      if (capacity !== null && (!Number.isInteger(capacity) || capacity < 1 || capacity > 1000)) return { valid: false, message: "Session capacity must be a whole number between 1 and 1000." };
 
       if (!TIME_PATTERN.test(startTime)) {
         return {
@@ -469,6 +482,8 @@ async function validateSchedulePayload(body, existingSchedule) {
         startTime,
         endTime,
         isActive: slot?.isActive !== false,
+        capacity,
+        coach: slot?.coach || existingSlot?.coach || null,
       });
     }
 
@@ -485,6 +500,64 @@ async function validateSchedulePayload(body, existingSchedule) {
         const requested = existing === first ? second : first;
         return { valid: false, message: `${DAY_NAMES[day.dayOfWeek]} already has a session scheduled from ${formatTimeForDisplay(existing.startTime)} to ${formatTimeForDisplay(existing.endTime)}. The requested time ${formatTimeForDisplay(requested.startTime)} to ${formatTimeForDisplay(requested.endTime)} overlaps with it.` };
       }
+    }
+    day.slots = normalizedSlots;
+  }
+
+  if (assignedCoachIds.length) {
+    const coachIds = [...new Set(assignedCoachIds)];
+    const coaches = await User.find({ _id: { $in: coachIds }, role: "COACH", branch: branchId, isActive: true }).select("_id name").lean();
+    const coachById = new Map(coaches.map((coach) => [String(coach._id), coach]));
+    if (coachById.size !== coachIds.length) return { valid: false, message: "Choose active coaches assigned to this branch." };
+    const availabilityRecords = await CoachAvailability.find({ coach: { $in: coachIds }, branch: branchId }).lean();
+    const availabilityByCoach = new Map(availabilityRecords.map((item) => [String(item.coach), item]));
+    for (const day of weeklySchedule) for (const slot of day.slots || []) {
+      if (!slot.coach || slot.isActive === false || day.isClosed) continue;
+      const coachName = coachById.get(String(slot.coach))?.name || "The coach";
+      const availability = availabilityByCoach.get(String(slot.coach));
+      if (availability) {
+        const hours = (availability.workingHours || []).filter((item) => item.dayOfWeek === day.dayOfWeek);
+        if (hours.length && !hours.some((item) => item.startTime <= slot.startTime && item.endTime >= slot.endTime)) return { valid: false, message: `${coachName} is not available for ${DAY_NAMES[day.dayOfWeek]} ${slot.startTime}–${slot.endTime}.` };
+        const unavailable = (availability.unavailableSlots || []).some((item) => item.dayOfWeek === day.dayOfWeek && item.startTime < slot.endTime && item.endTime > slot.startTime);
+        if (unavailable) return { valid: false, message: `${coachName} has an unavailable time during this class.` };
+        const onLeave = (availability.leave || []).some((item) => {
+          const firstDate = new Date(item.startDate); const lastDate = new Date(item.endDate);
+          firstDate.setHours(0, 0, 0, 0); lastDate.setHours(23, 59, 59, 999);
+          firstDate.setDate(firstDate.getDate() + ((day.dayOfWeek - firstDate.getDay() + 7) % 7));
+          return firstDate <= lastDate;
+        });
+        if (onLeave) return { valid: false, message: `${coachName} is on leave on a scheduled ${DAY_NAMES[day.dayOfWeek]}.` };
+        const dateUnavailable = (availability.unavailableSlots || []).some((item) => item.date && new Date(item.date).getDay() === day.dayOfWeek && item.startTime < slot.endTime && item.endTime > slot.startTime);
+        if (dateUnavailable) return { valid: false, message: `${coachName} has a dated unavailable time during this class.` };
+      }
+    }
+    const otherSchedules = await BranchSchedule.find({ branch: { $ne: branchId }, "weeklySchedule.slots.coach": { $in: coachIds } }).select("weeklySchedule").lean();
+    for (const day of weeklySchedule) for (const slot of day.slots || []) {
+      if (!slot.coach || slot.isActive === false || day.isClosed) continue;
+      const clash = otherSchedules.some((schedule) => (schedule.weeklySchedule || []).some((otherDay) => otherDay.dayOfWeek === day.dayOfWeek && !otherDay.isClosed && (otherDay.slots || []).some((other) => String(other.coach || "") === String(slot.coach) && other.isActive !== false && other.startTime < slot.endTime && other.endTime > slot.startTime)));
+      if (clash) return { valid: false, message: `${coachById.get(String(slot.coach))?.name || "This coach"} already has a conflicting session at another branch on ${DAY_NAMES[day.dayOfWeek]}.` };
+    }
+  }
+
+  const capacitiesByProgram = new Map();
+  for (const day of weeklySchedule) for (const slot of day.slots || []) {
+    const programId = String(slot.sessionTypeId || "");
+    if (!programId || slot.isActive === false) continue;
+    if (!capacitiesByProgram.has(programId)) capacitiesByProgram.set(programId, { total: 0, unlimited: false });
+    const entry = capacitiesByProgram.get(programId);
+    if (slot.capacity == null) entry.unlimited = true;
+    else entry.total += slot.capacity;
+  }
+  const finiteCapacities = [...capacitiesByProgram.entries()].filter(([, value]) => !value.unlimited);
+  if (branchId && finiteCapacities.length) {
+    const students = await Student.find({ branch: branchId, status: "ACTIVE" }).select("plan planEnrollments").populate("plan", "programs").lean();
+    for (const [programId, capacity] of finiteCapacities) {
+      const enrollmentCount = students.filter((student) => {
+        const current = [...(student.planEnrollments || [])].reverse().find((item) => item.status === "ACTIVE");
+        const enrolledPrograms = current?.programs?.map((item) => String(item.program?._id || item.program)) || (current?.program ? [String(current.program)] : student.plan?.programs?.map((item) => String(item.program?._id || item.program)) || []);
+        return enrolledPrograms.includes(programId);
+      }).length;
+      if (enrollmentCount > capacity.total && !allowCapacityOverride) return { valid: false, message: `This program has ${enrollmentCount} active enrollments but only ${capacity.total} seats. Increase capacity or use an account with branch_schedule.capacity.override.` };
     }
   }
 
@@ -1010,6 +1083,7 @@ const getBranchSchedule = async (req, res) => {
       branch: branchId,
     })
       .populate("updatedBy", "name email role")
+      .populate("weeklySchedule.slots.coach", "_id name")
       .lean();
 
     /*
@@ -1029,9 +1103,12 @@ const getBranchSchedule = async (req, res) => {
       };
     }
 
+    const coaches = await User.find({ branch: branchId, role: "COACH", isActive: true }).select("_id name").sort({ name: 1 }).lean();
+
     return res.status(200).json({
       success: true,
       branch,
+      coaches,
       schedule: serializeSchedule(schedule),
     });
   } catch (error) {
@@ -1084,7 +1161,8 @@ const upsertBranchSchedule = async (req, res) => {
     }
 
     const existingSchedule = await BranchSchedule.findOne({ branch: branchId }).lean();
-    const validation = await validateSchedulePayload(req.body, existingSchedule);
+    const allowCapacityOverride = req.user.role === "SUPER_ADMIN" || (req.user.permissions || []).includes("branch_schedule.capacity.override");
+    const validation = await validateSchedulePayload(req.body, existingSchedule, branchId, allowCapacityOverride);
 
     if (!validation.valid) {
       return res.status(400).json({

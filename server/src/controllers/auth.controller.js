@@ -1,5 +1,6 @@
 const bcrypt = require("bcryptjs");
 const crypto = require("crypto");
+const mongoose = require("mongoose");
 const jwt = require("jsonwebtoken");
 const User = require("../models/User");
 const Role = require("../models/Role");
@@ -7,6 +8,8 @@ const Branch = require("../models/Branch");
 const PasswordResetToken = require("../models/PasswordResetToken");
 const { validatePassword, sessionInvalidationTime } = require("../utils/passwordPolicy");
 const { sendPasswordResetEmail } = require("../services/inquiryEmail.service");
+const auditService = require("../services/audit.service");
+const { AUDIT_ACTIONS } = require("../config/auditActions");
 
 const SESSION_COOKIE = "forcestrike_session";
 const DUMMY_PASSWORD_HASH = bcrypt.hashSync(crypto.randomBytes(32).toString("hex"), 12);
@@ -24,6 +27,18 @@ const clearSessionCookie = (res) =>
     sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
     path: "/",
   });
+
+function maskedAccount(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  const [name, domain] = normalized.split("@");
+  if (!name || !domain) return "invalid-format";
+  return `${name.slice(0, 1)}***@${domain.slice(0, 120)}`;
+}
+
+async function recordSecurityEvent(values) {
+  try { await auditService.recordAuthentication(values); }
+  catch (error) { console.error("Authentication event could not be audited", { name: error?.name || "Error" }); }
+}
 
 /* =========================================================
    HELPERS
@@ -126,6 +141,7 @@ const login = async (req, res) => {
 
     if (!user) {
       await bcrypt.compare(password, DUMMY_PASSWORD_HASH);
+      await recordSecurityEvent({ action: AUDIT_ACTIONS.LOGIN_FAILED, req, metadata: { failureCategory: "INVALID_CREDENTIALS", accountHint: maskedAccount(email) } });
       return res.status(401).json({
         success: false,
         message: "Invalid email or password",
@@ -140,6 +156,7 @@ const login = async (req, res) => {
     const isPasswordValid = await bcrypt.compare(password, user.password);
 
     if (!isPasswordValid || user.isActive === false) {
+      await recordSecurityEvent({ action: AUDIT_ACTIONS.LOGIN_FAILED, req, user, metadata: { failureCategory: "INVALID_CREDENTIALS", accountHint: maskedAccount(email) } });
       return res.status(401).json({
         success: false,
         message: "Invalid email or password",
@@ -147,6 +164,7 @@ const login = async (req, res) => {
     }
 
     if (user.mustResetPassword) {
+      await recordSecurityEvent({ action: AUDIT_ACTIONS.LOGIN_FAILED, req, user, metadata: { failureCategory: "PASSWORD_RESET_REQUIRED", accountHint: maskedAccount(email) } });
       return res.status(403).json({
         success: false,
         message: "Password reset required. Use Forgot password to recover account access.",
@@ -168,10 +186,11 @@ const login = async (req, res) => {
       : [];
 
     const token = generateToken(user);
-    res.cookie(SESSION_COOKIE, token, sessionCookieOptions());
     const branchRecord = user.branch
       ? await Branch.findById(user.branch).select("name").lean()
       : null;
+    await auditService.recordAuthentication({ action: AUDIT_ACTIONS.LOGIN_SUCCESS, req, user, metadata: { accountHint: maskedAccount(user.email) } });
+    res.cookie(SESSION_COOKIE, token, sessionCookieOptions());
 
     res.status(200).json({
       success: true,
@@ -305,7 +324,14 @@ const changePassword = async (req, res) => {
     user.passwordChangedAt = sessionInvalidationTime();
     user.mustResetPassword = false;
 
-    await user.save();
+    const session = await mongoose.startSession();
+    try {
+      await session.withTransaction(async () => {
+        await user.save({ session });
+        await auditService.record({ req, action: AUDIT_ACTIONS.PASSWORD_CHANGED, entityType: "USER", entityId: user._id, branchId: user.branch, before: { passwordChangedAt: req.user.passwordChangedAt || null }, after: { passwordChangedAt: user.passwordChangedAt }, metadata: { sessionsInvalidated: true }, session });
+        await auditService.record({ req, action: AUDIT_ACTIONS.SESSION_INVALIDATED, entityType: "USER", entityId: user._id, branchId: user.branch, metadata: { reason: "PASSWORD_CHANGED" }, session });
+      });
+    } finally { await session.endSession(); }
     clearSessionCookie(res);
 
     res.status(200).json({
@@ -342,6 +368,7 @@ const requestPasswordReset = async (req, res) => {
       tokenHash: crypto.createHash("sha256").update(token).digest("hex"),
       expiresAt: new Date(Date.now() + 30 * 60 * 1000),
     });
+    await auditService.recordAuthentication({ action: AUDIT_ACTIONS.PASSWORD_RESET_REQUESTED, req, user, metadata: { accountHint: maskedAccount(user.email) } });
     const clientOrigin = process.env.CLIENT_URL.split(",")[0].trim().replace(/\/$/, "");
     const resetUrl = `${clientOrigin}/reset-password#token=${encodeURIComponent(token)}`;
     void sendPasswordResetEmail(email, resetUrl).catch(async () => {
@@ -380,8 +407,15 @@ const resetPassword = async (req, res) => {
     user.mustResetPassword = false;
     // Validate the fields changed in this reset. Legacy profile data may not
     // satisfy newer unrelated validators, and should not block account recovery.
-    await user.save({ validateModifiedOnly: true });
-    passwordWasUpdated = true;
+    const session = await mongoose.startSession();
+    try {
+      await session.withTransaction(async () => {
+        await user.save({ session, validateModifiedOnly: true });
+        await auditService.recordAuthentication({ action: AUDIT_ACTIONS.PASSWORD_CHANGED, req, user, metadata: { resetFlow: true, sessionsInvalidated: true }, session });
+        await auditService.recordAuthentication({ action: AUDIT_ACTIONS.SESSION_INVALIDATED, req, user, metadata: { reason: "PASSWORD_RESET" }, session });
+      });
+      passwordWasUpdated = true;
+    } finally { await session.endSession(); }
     try {
       await PasswordResetToken.deleteMany({ user: user._id });
     } catch (cleanupError) {

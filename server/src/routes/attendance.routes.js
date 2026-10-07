@@ -14,6 +14,7 @@ const {
 const protect = require("../middleware/auth.middleware");
 const authorize = require("../middleware/role.middleware");
 const { authorizePermission } = require("../middleware/permission.middleware");
+const correctionController = require("../controllers/attendanceCorrection.controller");
 
 const router = express.Router();
 
@@ -33,6 +34,7 @@ router.get(
 ============================== */
 
 router.get("/", protect, authorizePermission("attendance.view"), getAttendance);
+router.get("/corrections", protect, authorizePermission("attendance.correct.approve"), correctionController.getCorrectionRequests);
 
 /* ==============================
    STUDENT'S OWN ATTENDANCE
@@ -79,6 +81,10 @@ router.post(
   authorizePermission("attendance.manage"),
   markAllAttendancePresent,
 );
+
+router.post("/:id/corrections", protect, authorizePermission("attendance.correct"), correctionController.requestCorrection);
+router.post("/corrections/:correctionId/approve", protect, authorizePermission("attendance.correct.approve"), correctionController.approveCorrection);
+router.post("/corrections/:correctionId/reject", protect, authorizePermission("attendance.correct.approve"), correctionController.rejectCorrection);
 
 router.post(
   "/:id/undo",

@@ -2,6 +2,8 @@ const mongoose = require("mongoose");
 
 const Branch = require("../models/Branch");
 const { normalizePhone } = require("../utils/phone");
+const auditService = require("../services/audit.service");
+const { AUDIT_ACTIONS } = require("../config/auditActions");
 
 const sendError = (res, status, message) =>
   res.status(status).json({ success: false, message });
@@ -130,6 +132,7 @@ const createBranch = async (req, res) => {
     }
 
     const branch = await Branch.create({ name, address, phone: normalizedPhone, isActive: true });
+    await auditService.record({ req, action: AUDIT_ACTIONS.BRANCH_CREATED, entityType: "BRANCH", entityId: branch._id, branchId: branch._id, after: { name, address, isActive: true } });
 
     return res.status(201).json({
       success: true,
@@ -156,6 +159,7 @@ const updateBranch = async (req, res) => {
 
     const branch = await Branch.findById(id);
     if (!branch) return sendError(res, 404, "Branch not found");
+    const before = { name: branch.name, address: branch.address, isActive: branch.isActive };
 
     const { name, address, phone } = normalizeBranchPayload(req.body);
 
@@ -184,6 +188,8 @@ const updateBranch = async (req, res) => {
     }
 
     await branch.save();
+    const after = { name: branch.name, address: branch.address, isActive: branch.isActive };
+    await auditService.record({ req, action: branch.isActive === false && before.isActive !== false ? AUDIT_ACTIONS.BRANCH_DEACTIVATED : AUDIT_ACTIONS.BRANCH_UPDATED, entityType: "BRANCH", entityId: branch._id, branchId: branch._id, before, after });
 
     return res.status(200).json({
       success: true,

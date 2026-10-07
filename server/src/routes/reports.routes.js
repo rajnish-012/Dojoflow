@@ -9,12 +9,15 @@ const {
   getBeltReports,
   getReportBranches,
   getAdmissionReports,
+  getAttendanceAnalytics,
 } = require("../controllers/reports.controller");
 
 const protect = require("../middleware/auth.middleware");
 const { authorizePermission } = require("../middleware/permission.middleware");
 
 const router = express.Router();
+
+router.get("/attendance-analytics", protect, authorizePermission("report.view"), getAttendanceAnalytics);
 
 /*
  * =========================================================

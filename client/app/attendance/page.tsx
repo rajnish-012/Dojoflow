@@ -2,6 +2,7 @@
 import { toast } from "@/lib/toast";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 
 import { CalendarDays, CheckCheck, RefreshCw } from "lucide-react";
 
@@ -10,7 +11,10 @@ import {
   Card,
   ConfirmationDialog,
   ErrorState,
+  Modal,
   PageHeader,
+  Select,
+  Textarea,
 } from "@/components/ui";
 import AttendanceStats from "@/components/attendance/AttendanceStats";
 import AttendanceSheet from "@/components/attendance/AttendanceSheet";
@@ -23,6 +27,7 @@ import {
   markAllAttendancePresent,
   markAttendance,
   undoAttendance,
+  requestAttendanceCorrection,
 } from "@/lib/attendanceApi";
 import { PERMISSIONS, useCan } from "@/lib/permissions";
 
@@ -131,6 +136,8 @@ function getDisplayPlanDay(row: DailyAttendanceRow, selectedDate: string) {
 export default function AttendancePage() {
   const canViewAttendance = useCan(PERMISSIONS.ATTENDANCE_VIEW);
   const canManageAttendance = useCan(PERMISSIONS.ATTENDANCE_MANAGE);
+  const canApproveCorrections = useCan(PERMISSIONS.ATTENDANCE_CORRECT_APPROVE);
+  const canRequestCorrections = useCan(PERMISSIONS.ATTENDANCE_CORRECT);
 
   /*
    * Attendance rules:
@@ -158,6 +165,11 @@ export default function AttendancePage() {
   const [markingAll, setMarkingAll] = useState(false);
   const [undoRow, setUndoRow] = useState<DailyAttendanceRow | null>(null);
   const [undoing, setUndoing] = useState(false);
+  const [correctionRow, setCorrectionRow] = useState<DailyAttendanceRow | null>(null);
+  const [correctionStatus, setCorrectionStatus] = useState<"PRESENT" | "ABSENT">("PRESENT");
+  const [correctionReason, setCorrectionReason] = useState("");
+  const [correctionError, setCorrectionError] = useState("");
+  const [submittingCorrection, setSubmittingCorrection] = useState(false);
 
   /* ==========================================
      LOAD ATTENDANCE SHEET
@@ -192,7 +204,8 @@ export default function AttendancePage() {
   }, [selectedDate, canViewAttendance]);
 
   useEffect(() => {
-    loadSheet();
+    const timer = window.setTimeout(() => loadSheet(), 0);
+    return () => window.clearTimeout(timer);
   }, [loadSheet]);
 
   /* ==========================================
@@ -258,6 +271,17 @@ export default function AttendancePage() {
       setSavingStudentId(null);
       setUndoing(false);
     }
+  }
+
+  async function submitAttendanceCorrection() {
+    const attendanceId = correctionRow?.attendance?._id;
+    if (!attendanceId || !correctionReason.trim() || submittingCorrection) return;
+    setSubmittingCorrection(true); setCorrectionError("");
+    try {
+      await requestAttendanceCorrection(attendanceId, correctionStatus, correctionReason.trim());
+      setCorrectionRow(null); setCorrectionReason(""); await loadSheet(); toast.success("Correction request sent for approval.");
+    } catch (err) { setCorrectionError(err instanceof Error ? err.message : "Unable to submit correction request."); }
+    finally { setSubmittingCorrection(false); }
   }
 
   /* ==========================================
@@ -596,6 +620,7 @@ export default function AttendancePage() {
           description="Manage daily attendance, training days and curriculum progress for your academy."
           actions={
             <div className="flex flex-wrap items-center justify-end gap-2">
+              {canApproveCorrections && <Link href="/attendance/corrections" className="inline-flex h-11 items-center gap-2 rounded-xl border border-(--line) px-4 text-sm font-semibold text-(--foreground) hover:bg-(--hover-bg)"><CalendarDays size={16}/> Corrections</Link>}
               <Button
                 type="button"
                 variant="outline"
@@ -892,9 +917,15 @@ export default function AttendancePage() {
           error=""
           savingStudentId={savingStudentId}
           canManage={canManageAttendance}
+          canRequestCorrection={canRequestCorrections && selectedDate < today}
           onMark={openMarkModal}
           onUndo={setUndoRow}
+          onRequestCorrection={(row) => { setCorrectionRow(row); setCorrectionStatus(row.attendance?.status === "ABSENT" ? "PRESENT" : "ABSENT"); setCorrectionReason(""); setCorrectionError(""); }}
         />
+
+        <Modal open={Boolean(correctionRow)} onClose={() => setCorrectionRow(null)} title="Request attendance correction" description="Historical attendance changes require review by another authorized administrator." footer={<><Button variant="outline" onClick={() => setCorrectionRow(null)} disabled={submittingCorrection}>Cancel</Button><Button onClick={() => void submitAttendanceCorrection()} disabled={submittingCorrection || !correctionReason.trim()}>{submittingCorrection ? "Submitting…" : "Submit request"}</Button></>}>
+          {correctionRow && <div className="space-y-4"><p className="text-sm text-(--ink-muted)">{correctionRow.student.name}: currently <strong>{correctionRow.attendance?.status}</strong></p><label className="block text-xs font-semibold text-(--ink-muted)">Correct status<Select className="mt-1" value={correctionStatus} onChange={(event) => setCorrectionStatus(event.target.value as "PRESENT" | "ABSENT")}><option value="PRESENT">Present</option><option value="ABSENT">Absent</option></Select></label><label className="block text-xs font-semibold text-(--ink-muted)">Reason required<Textarea className="mt-1 min-h-28" maxLength={500} value={correctionReason} onChange={(event) => setCorrectionReason(event.target.value)} placeholder="Explain why the historical attendance should change"/></label>{correctionError && <p role="alert" className="text-sm text-(--danger)">{correctionError}</p>}</div>}
+        </Modal>
 
         {/* ==================================
             ATTENDANCE MODAL

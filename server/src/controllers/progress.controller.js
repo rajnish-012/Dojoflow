@@ -12,6 +12,7 @@ const CoachStudentAssignment = require("../models/CoachStudentAssignment");
 const { getProgramLearningProgress } = require("../services/programProgress.service");
 const { resolveProgramCurriculum } = require("../services/curriculumResolver.service");
 const { withAttendanceSessionDetails } = require("../utils/attendanceSession");
+const { findEnrollmentForDate } = require("../services/enrollmentLifecycle.service");
 
 const indiaDateFormatter = new Intl.DateTimeFormat("en-CA", {
   timeZone: "Asia/Kolkata",
@@ -424,6 +425,7 @@ const updateStudent = async (req, res) => {
       student.email = email.trim();
     }
 
+
     if (branch !== undefined) {
       if (!mongoose.Types.ObjectId.isValid(branch)) {
         return res.status(400).json({
@@ -687,10 +689,7 @@ const getStudentProgress = async (req, res) => {
     }
 
     const today = new Date(); today.setHours(0, 0, 0, 0);
-    const currentEnrollment = (student.planEnrollments || []).find((item) => {
-      const start = new Date(item.startDate); const end = item.endDate ? new Date(item.endDate) : null;
-      return start <= today && (!end || today < end);
-    });
+    const currentEnrollment = findEnrollmentForDate(student.planEnrollments, today);
     const entitlements = currentEnrollment?.programs?.length
       ? currentEnrollment.programs
       : student.plan.programs || [];

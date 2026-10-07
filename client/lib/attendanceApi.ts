@@ -502,3 +502,34 @@ export async function undoAttendance(attendanceId: string): Promise<AttendanceAp
   });
   return parseResponse<AttendanceApiResponse>(response);
 }
+
+export type AttendanceCorrection = {
+  _id: string; status: "PENDING" | "APPROVED" | "REJECTED" | "CANCELLED";
+  reason: string; rejectionReason?: string; requestedAt: string; approvedAt?: string;
+  original: { status: string }; proposed: { status: string };
+  student?: { _id: string; name: string };
+  attendance?: { date: string; status: string };
+  requestedBy?: { name: string }; approvedBy?: { name: string };
+  branch?: { name: string };
+};
+
+async function correctionRequest(path: string, body?: unknown) {
+  const response = await fetchWithSession(`${API_URL}/attendance${path}`, {
+    method: body === undefined ? "GET" : "POST",
+    headers: { "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+    cache: "no-store",
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(result.message || "Attendance correction request failed.");
+  return result;
+}
+export async function getAttendanceCorrections(status = "PENDING", page = 1, pageSize = 25) {
+  return correctionRequest(`/corrections?status=${encodeURIComponent(status)}&page=${page}&pageSize=${pageSize}`) as Promise<{ corrections: AttendanceCorrection[]; page: number; pageSize: number; totalItems: number; totalPages: number }>;
+}
+export async function decideAttendanceCorrection(id: string, decision: "approve" | "reject", reason?: string) {
+  return correctionRequest(`/corrections/${encodeURIComponent(id)}/${decision}`, decision === "reject" ? { reason } : {}) as Promise<{ correction: AttendanceCorrection }>;
+}
+export async function requestAttendanceCorrection(attendanceId: string, proposedStatus: "PRESENT" | "ABSENT", reason: string) {
+  return correctionRequest(`/${encodeURIComponent(attendanceId)}/corrections`, { proposedStatus, reason }) as Promise<{ correction: AttendanceCorrection }>;
+}

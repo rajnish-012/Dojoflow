@@ -21,6 +21,7 @@ import {
   Badge,
   Button,
   Card,
+  DataTableSection,
   EmptyState,
   ErrorState,
   IconButton,
@@ -30,6 +31,8 @@ import {
   PageHeader,
   Select,
   SummaryCard,
+  TablePagination,
+  TableHeading,
 } from "@/components/ui";
 
 import { getRoles, type RoleRecord } from "@/lib/api";
@@ -177,6 +180,11 @@ export default function SettingsSectionPage({
   const isBranchScoped = currentUser?.dataScope === "BRANCH";
 
   const [users, setUsers] = useState<StaffUser[]>([]);
+  const [usersPage, setUsersPage] = useState(1);
+  const [usersPageSize, setUsersPageSize] = useState(25);
+  const usersTotalPages = Math.max(1, Math.ceil(users.length / usersPageSize));
+  const usersCurrentPage = Math.min(usersPage, usersTotalPages);
+  const visibleUsers = users.slice((usersCurrentPage - 1) * usersPageSize, usersCurrentPage * usersPageSize);
 
   const [branches, setBranches] = useState<Branch[]>([]);
 
@@ -1067,43 +1075,9 @@ export default function SettingsSectionPage({
             />
           </div>
 
-          <Card padding="none">
-            <div
-              className="
-                flex flex-col gap-4
-                border-b border-(--line)
-                px-5 py-5
-                sm:px-6
-                lg:flex-row
-                lg:items-center
-                lg:justify-between
-              "
-            >
-              <div>
-                <div className="flex items-center gap-2">
-                  <h2
-                    className="
-                      text-lg font-extrabold
-                      tracking-tight
-                      text-(--foreground)
-                    "
-                  >
-                    Staff Accounts
-                  </h2>
-
-                  <Badge variant="neutral">{users.length}</Badge>
-                </div>
-
-                <p
-                  className="
-                    mt-1 text-sm
-                    text-(--ink-muted)
-                  "
-                >
-                  Users who can access the DojoFlow management system.
-                </p>
-              </div>
-
+          <DataTableSection title="Staff Accounts" description="Users who can access the DojoFlow management system." icon={<Users size={18} />} toolbar={
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant="neutral">{users.length} accounts</Badge>
               <div
                 className="
                   rounded-xl border
@@ -1118,6 +1092,7 @@ export default function SettingsSectionPage({
                 {activeBranches.length === 1 ? "" : "es"}
               </div>
             </div>
+          }>
 
             {users.length === 0 ? (
               <div className="p-6">
@@ -1152,75 +1127,15 @@ export default function SettingsSectionPage({
                     "
                   >
                     <tr>
-                      <th
-                        className="
-                          px-6 py-4
-                          text-left
-                          text-[11px]
-                          font-bold
-                          uppercase
-                          tracking-[0.12em]
-                          text-(--ink-faint)
-                        "
-                      >
-                        Staff
-                      </th>
+                      <TableHeading>Staff</TableHeading>
 
-                      <th
-                        className="
-                          px-6 py-4
-                          text-left
-                          text-[11px]
-                          font-bold
-                          uppercase
-                          tracking-[0.12em]
-                          text-(--ink-faint)
-                        "
-                      >
-                        Role
-                      </th>
+                      <TableHeading>Role</TableHeading>
 
-                      <th
-                        className="
-                          px-6 py-4
-                          text-left
-                          text-[11px]
-                          font-bold
-                          uppercase
-                          tracking-[0.12em]
-                          text-(--ink-faint)
-                        "
-                      >
-                        Branch
-                      </th>
+                      <TableHeading>Branch</TableHeading>
 
-                      <th
-                        className="
-                          px-6 py-4
-                          text-left
-                          text-[11px]
-                          font-bold
-                          uppercase
-                          tracking-[0.12em]
-                          text-(--ink-faint)
-                        "
-                      >
-                        Created
-                      </th>
+                      <TableHeading>Created</TableHeading>
 
-                      <th
-                        className="
-                          px-6 py-4
-                          text-right
-                          text-[11px]
-                          font-bold
-                          uppercase
-                          tracking-[0.12em]
-                          text-(--ink-faint)
-                        "
-                      >
-                        Actions
-                      </th>
+                      <TableHeading align="right">Actions</TableHeading>
                     </tr>
                   </thead>
 
@@ -1229,7 +1144,7 @@ export default function SettingsSectionPage({
                       divide-y divide-(--line)
                     "
                   >
-                    {users.map((user) => {
+                    {visibleUsers.map((user) => {
                       const RoleIcon = getRoleIcon(user.role);
 
                       return (
@@ -1366,7 +1281,18 @@ export default function SettingsSectionPage({
                 </table>
               </div>
             )}
-          </Card>
+            <TablePagination
+              currentPage={usersCurrentPage}
+              totalPages={usersTotalPages}
+              totalItems={users.length}
+              visibleItems={visibleUsers.length}
+              pageSize={usersPageSize}
+              entityLabel="staff accounts"
+              onPrevious={() => setUsersPage((value) => Math.max(1, value - 1))}
+              onNext={() => setUsersPage((value) => Math.min(usersTotalPages, value + 1))}
+              onPageSizeChange={(value) => { setUsersPageSize(value); setUsersPage(1); }}
+            />
+          </DataTableSection>
 
           <p
             className="

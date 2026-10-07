@@ -2,6 +2,7 @@
 
 import {
   ArrowLeft,
+  History,
   CalendarDays,
   CheckCircle2,
   Clock3,
@@ -176,6 +177,7 @@ export default function StudentTimelinePage() {
     student,
     summary,
     timeline,
+    activity = [],
   } = data;
 
   return (
@@ -527,6 +529,21 @@ export default function StudentTimelinePage() {
         <TrainingTimeline
           items={timeline}
         />
+      </div>
+      <div className="mt-6 rounded-2xl border border-[var(--line)] bg-[var(--card)] p-5">
+        <div className="mb-4 flex items-center gap-3">
+          <History size={19} className="text-[var(--accent)]" />
+          <div>
+            <h2 className="text-lg font-bold text-[var(--text-primary)]">Activity history</h2>
+            <p className="text-sm text-[var(--text-secondary)]">Registration, enrollment, attendance, makeups, promotions, and finance events.</p>
+          </div>
+        </div>
+        {activity.length ? <ol className="divide-y divide-[var(--line)]">
+          {activity.map((item, index) => <li key={`${item.type}-${item.date}-${index}`} className="flex flex-wrap items-start justify-between gap-3 py-3">
+            <div><p className="font-semibold text-[var(--text-primary)]">{item.title}</p>{item.details && <p className="mt-1 text-sm text-[var(--text-secondary)]">{item.details}</p>}</div>
+            <div className="flex items-center gap-2"><Badge variant="neutral">{item.type.replaceAll("_", " ")}</Badge><span className="text-sm text-[var(--text-muted)]">{formatDate(item.date)}</span></div>
+          </li>)}
+        </ol> : <p className="text-sm text-[var(--text-secondary)]">No activity recorded yet.</p>}
       </div>
     </div>
   );

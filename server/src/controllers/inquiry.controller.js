@@ -6,6 +6,7 @@ const Plan = require("../models/Plan");
 const TrainingSessionType = require("../models/TrainingSessionType");
 const { isBranchScoped } = require("../utils/access");
 const { isValidPhoneNumber } = require("libphonenumber-js");
+const { normalizePhone } = require("../utils/phone");
 const { getBranchDateAvailability, getBranchSchedule, formatDate, validateDate, DAY_NAMES } = require("../services/branchSchedule.service");
 const { sendInquiryNotification } = require("../services/inquiryEmail.service");
 const { safelyNotify } = require("../services/notification.service");
@@ -56,10 +57,11 @@ const createInquiry = async (req, res) => {
     if (!isValidPhoneNumber(cleanPhone)) {
       return res.status(400).json({ message: "Enter a valid phone number with its country code." });
     }
+    const canonicalPhone = normalizePhone(cleanPhone) || cleanPhone;
 
     const recentDuplicate = await Inquiry.exists({
       email: cleanEmail,
-      phone: cleanPhone,
+      phone: canonicalPhone,
       createdAt: { $gte: new Date(Date.now() - 15 * 60 * 1000) },
     });
     if (recentDuplicate) {
@@ -234,6 +236,8 @@ const createInquiry = async (req, res) => {
       preferredDate: preferredDate || "",
       preferredSession: savedSession || undefined,
       preferredWeeklySessions: savedWeeklySessions,
+      source: "WEBSITE",
+      statusHistory: [{ from: null, to: "NEW", note: "Inquiry received" }],
     });
 
     await safelyNotify({

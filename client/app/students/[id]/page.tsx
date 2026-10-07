@@ -79,6 +79,17 @@ type Student = {
   currentBelt: string;
   status: "ACTIVE" | "INACTIVE" | "COMPLETED";
   joinDate: string;
+  guardians?: Guardian[];
+};
+
+type Guardian = {
+  _id?: string;
+  name: string;
+  relationship: "FATHER" | "MOTHER" | "GUARDIAN";
+  phone: string;
+  email: string;
+  emergencyContact: boolean;
+  pickupAuthorized: boolean;
 };
 
 type Progress = {
@@ -153,6 +164,7 @@ type EditForm = {
   currentBelt: string;
   status: Student["status"];
   password: string;
+  guardians: Guardian[];
 };
 
 const initialEditForm: EditForm = {
@@ -164,6 +176,7 @@ const initialEditForm: EditForm = {
   currentBelt: "",
   status: "ACTIVE",
   password: "",
+  guardians: [],
 };
 
 function extractRecords(response: unknown, keys: string[]): any[] {
@@ -731,6 +744,7 @@ export default function StudentDetailsPage() {
       currentBelt: student.currentBelt || "White",
       status: student.status || "ACTIVE",
       password: "",
+      guardians: (student.guardians || []).map((guardian) => ({ ...guardian })),
     });
 
     setShowEditModal(true);
@@ -811,6 +825,7 @@ export default function StudentDetailsPage() {
         currentBelt: editForm.currentBelt,
         status: editForm.status,
         password: editForm.password.trim() || undefined,
+        guardians: editForm.guardians,
       });
 
       await loadStudent();
@@ -922,8 +937,8 @@ export default function StudentDetailsPage() {
         "
       >
         <div className="mx-auto max-w-[1500px]">
-          <Button variant="ghost" onClick={() => router.push("/students")}>
-            <ArrowLeft size={17} />
+          <Button variant="back" onClick={() => router.push("/students")}>
+            <ArrowLeft size={16} />
             Back to Students
           </Button>
 
@@ -946,12 +961,7 @@ export default function StudentDetailsPage() {
   return (
     <main
       className="
-        min-h-[calc(100vh-76px)]
-        bg-(--background)
-        px-4 py-6
-        sm:px-6
-        lg:px-8
-        xl:px-10
+        df-page
       "
     >
       <div
@@ -968,32 +978,11 @@ export default function StudentDetailsPage() {
             gap-3
           "
         >
-          <Button variant="ghost" onClick={() => router.push("/students")}>
-            <ArrowLeft size={17} />
+          <Button variant="back" onClick={() => router.push("/students")}>
+            <ArrowLeft size={16} />
             Back to Students
           </Button>
 
-          <div
-            className="
-              hidden items-center gap-2
-              text-xs font-medium
-              text-(--ink-faint)
-              sm:flex
-            "
-          >
-            <span>Students</span>
-
-            <ChevronRight size={14} />
-
-            <span
-              className="
-                font-semibold
-                text-(--ink-muted)
-              "
-            >
-              {student.name}
-            </span>
-          </div>
         </div>
 
         {/* Student Hero */}
@@ -1328,6 +1317,8 @@ export default function StudentDetailsPage() {
             </div>
           </Card>
 
+
+
           <Card padding="lg" className="xl:col-span-4">
             <SectionHeading
               eyebrow="Subscription"
@@ -1565,6 +1556,32 @@ export default function StudentDetailsPage() {
                 />
               </div>
             </div>
+          </Card>
+          <Card padding="lg" className="xl:col-span-12">
+            <SectionHeading
+              eyebrow="Family contacts"
+              title="Guardian Information"
+              icon={<Users size={19} />}
+              action={canEditStudent ? <Button variant="outline" size="sm" onClick={openEditModal}>Manage guardians</Button> : undefined}
+            />
+            {student.guardians?.length ? (
+              <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                {student.guardians.map((guardian, index) => (
+                  <div key={guardian._id || `${guardian.name}-${index}`} className="rounded-xl border border-(--line) bg-(--surface) p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="font-bold text-(--foreground)">{guardian.name}</p>
+                        <p className="mt-1 text-xs text-(--ink-muted)">{guardian.relationship.charAt(0) + guardian.relationship.slice(1).toLowerCase()}</p>
+                      </div>
+                      {guardian.emergencyContact && <Badge variant="warning">Emergency</Badge>}
+                    </div>
+                    {guardian.phone && <p className="mt-3 text-sm text-(--foreground-soft)">{guardian.phone}</p>}
+                    {guardian.email && <p className="mt-1 break-all text-sm text-(--ink-muted)">{guardian.email}</p>}
+                    <p className="mt-3 text-xs text-(--ink-muted)">{guardian.pickupAuthorized ? "Authorized for pickup" : "Pickup not authorized"}</p>
+                  </div>
+                ))}
+              </div>
+            ) : <EmptyState className="mt-4" title="No guardians added" description="Add parent or guardian contacts, emergency contacts, and pickup authorization." icon={<Users size={22} />} />}
           </Card>
         </div>
 
@@ -2312,6 +2329,32 @@ export default function StudentDetailsPage() {
                 <option value="COMPLETED">Completed</option>
               </Select>
             </FormField>
+          </FormSection>
+
+          <FormSection title="Guardians and Pickup Authorization">
+            <div className="space-y-4">
+              {editForm.guardians.map((guardian, index) => (
+                <div key={guardian._id || index} className="rounded-xl border border-(--line) bg-(--surface) p-4">
+                  <div className="mb-3 flex items-center justify-between">
+                    <p className="text-sm font-bold text-(--foreground)">Guardian {index + 1}</p>
+                    <Button type="button" variant="ghost" size="sm" onClick={() => setEditForm((current) => ({ ...current, guardians: current.guardians.filter((_, itemIndex) => itemIndex !== index) }))}>Remove</Button>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <Input aria-label="Guardian name" placeholder="Full name" value={guardian.name} onChange={(event) => setEditForm((current) => ({ ...current, guardians: current.guardians.map((item, itemIndex) => itemIndex === index ? { ...item, name: event.target.value } : item) }))} />
+                    <Select aria-label="Relationship" value={guardian.relationship} onChange={(event) => setEditForm((current) => ({ ...current, guardians: current.guardians.map((item, itemIndex) => itemIndex === index ? { ...item, relationship: event.target.value as Guardian["relationship"] } : item) }))}>
+                      <option value="FATHER">Father</option><option value="MOTHER">Mother</option><option value="GUARDIAN">Guardian</option>
+                    </Select>
+                    <Input aria-label="Guardian phone" type="tel" placeholder="Phone with country code" value={guardian.phone} onChange={(event) => setEditForm((current) => ({ ...current, guardians: current.guardians.map((item, itemIndex) => itemIndex === index ? { ...item, phone: event.target.value } : item) }))} />
+                    <Input aria-label="Guardian email" type="email" placeholder="Email" value={guardian.email} onChange={(event) => setEditForm((current) => ({ ...current, guardians: current.guardians.map((item, itemIndex) => itemIndex === index ? { ...item, email: event.target.value } : item) }))} />
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-5 text-sm text-(--foreground-soft)">
+                    <label className="flex items-center gap-2"><input type="checkbox" checked={guardian.emergencyContact} onChange={(event) => setEditForm((current) => ({ ...current, guardians: current.guardians.map((item, itemIndex) => itemIndex === index ? { ...item, emergencyContact: event.target.checked } : item) }))} /> Emergency contact</label>
+                    <label className="flex items-center gap-2"><input type="checkbox" checked={guardian.pickupAuthorized} onChange={(event) => setEditForm((current) => ({ ...current, guardians: current.guardians.map((item, itemIndex) => itemIndex === index ? { ...item, pickupAuthorized: event.target.checked } : item) }))} /> Authorized for pickup</label>
+                  </div>
+                </div>
+              ))}
+              <Button type="button" variant="outline" disabled={editForm.guardians.length >= 8} onClick={() => setEditForm((current) => ({ ...current, guardians: [...current.guardians, { name: "", relationship: "GUARDIAN", phone: "", email: "", emergencyContact: false, pickupAuthorized: false }] }))}>Add guardian</Button>
+            </div>
           </FormSection>
 
           <FormSection title="Account Security">

@@ -15,6 +15,10 @@ const PERMISSIONS = Object.freeze({
   STUDENT_UPDATE: "student.update",
   STUDENT_DELETE: "student.delete",
 
+  // Memberships / enrollments
+  MEMBERSHIP_VIEW: "membership.view",
+  MEMBERSHIP_MANAGE: "membership.manage",
+
   // Coach assignments
   COACH_ASSIGNMENT_VIEW: "coach_assignment.view",
   COACH_ASSIGNMENT_MANAGE: "coach_assignment.manage",
@@ -30,6 +34,8 @@ const PERMISSIONS = Object.freeze({
   // Attendance
   ATTENDANCE_VIEW: "attendance.view",
   ATTENDANCE_MANAGE: "attendance.manage",
+  ATTENDANCE_CORRECT: "attendance.correct",
+  ATTENDANCE_CORRECT_APPROVE: "attendance.correct.approve",
 
   // Holidays
   HOLIDAY_VIEW: "holiday.view",
@@ -38,6 +44,7 @@ const PERMISSIONS = Object.freeze({
   // Branch schedules
   BRANCH_SCHEDULE_VIEW: "branch_schedule.view",
   BRANCH_SCHEDULE_MANAGE: "branch_schedule.manage",
+  BRANCH_SCHEDULE_CAPACITY_OVERRIDE: "branch_schedule.capacity.override",
   TRAINING_SESSION_TYPE_VIEW: "training_session_type.view",
   TRAINING_SESSION_TYPE_CREATE: "training_session_type.create",
   TRAINING_SESSION_TYPE_UPDATE: "training_session_type.update",
@@ -88,6 +95,7 @@ const PERMISSIONS = Object.freeze({
   // Roles
   ROLE_VIEW: "role.view",
   ROLE_MANAGE: "role.manage",
+  AUDIT_VIEW: "audit.view",
 
   // Modules
   MODULE_VIEW: "module.view",
@@ -124,6 +132,8 @@ const PERMISSION_MODULE_KEYS = Object.freeze({
   "student.create": "students",
   "student.update": "students",
   "student.delete": "students",
+  "membership.view": "memberships",
+  "membership.manage": "memberships",
   "coach_assignment.view": "coach-assignments",
   "coach_assignment.manage": "coach-assignments",
   "plan.view": "plans",
@@ -132,10 +142,13 @@ const PERMISSION_MODULE_KEYS = Object.freeze({
   "curriculum.manage": "curriculum",
   "attendance.view": "attendance",
   "attendance.manage": "attendance",
+  "attendance.correct": "attendance",
+  "attendance.correct.approve": "attendance",
   "holiday.view": "holidays",
   "holiday.manage": "holidays",
   "branch_schedule.view": "branch-schedules",
   "branch_schedule.manage": "branch-schedules",
+  "branch_schedule.capacity.override": "branch-schedules",
   "training_session_type.view": "training-session-types",
   "training_session_type.create": "training-session-types",
   "training_session_type.update": "training-session-types",
@@ -165,6 +178,7 @@ const PERMISSION_MODULE_KEYS = Object.freeze({
   "user.delete": "settings-staff",
   "role.view": "roles",
   "role.manage": "roles",
+  "audit.view": "audit-logs",
   "module.view": "modules",
   "module.manage": "modules",
   "settings.view": "settings-branding",
@@ -194,11 +208,15 @@ const DEFAULT_ROLE_PERMISSIONS = Object.freeze({
 
   BRANCH_ADMIN: [
     PERMISSIONS.DASHBOARD_VIEW,
+    PERMISSIONS.AUDIT_VIEW,
 
     PERMISSIONS.STUDENT_VIEW,
     PERMISSIONS.STUDENT_CREATE,
     PERMISSIONS.STUDENT_UPDATE,
     PERMISSIONS.STUDENT_DELETE,
+
+    PERMISSIONS.MEMBERSHIP_VIEW,
+    PERMISSIONS.MEMBERSHIP_MANAGE,
 
     PERMISSIONS.COACH_ASSIGNMENT_VIEW,
     PERMISSIONS.COACH_ASSIGNMENT_MANAGE,
@@ -211,6 +229,8 @@ const DEFAULT_ROLE_PERMISSIONS = Object.freeze({
 
     PERMISSIONS.ATTENDANCE_VIEW,
     PERMISSIONS.ATTENDANCE_MANAGE,
+    PERMISSIONS.ATTENDANCE_CORRECT,
+    PERMISSIONS.ATTENDANCE_CORRECT_APPROVE,
 
     PERMISSIONS.HOLIDAY_VIEW,
     PERMISSIONS.HOLIDAY_MANAGE,
@@ -260,11 +280,13 @@ const DEFAULT_ROLE_PERMISSIONS = Object.freeze({
 
     PERMISSIONS.STUDENT_VIEW,
     PERMISSIONS.STUDENT_UPDATE,
+    PERMISSIONS.MEMBERSHIP_VIEW,
 
     PERMISSIONS.CURRICULUM_VIEW,
 
     PERMISSIONS.ATTENDANCE_VIEW,
     PERMISSIONS.ATTENDANCE_MANAGE,
+    PERMISSIONS.ATTENDANCE_CORRECT,
     PERMISSIONS.HOLIDAY_VIEW,
 
     PERMISSIONS.PERFORMANCE_VIEW,

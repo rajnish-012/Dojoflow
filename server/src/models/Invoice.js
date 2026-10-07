@@ -42,6 +42,7 @@ invoiceSchema.index({ enrollment: 1, cycleKey: 1 }, {
   partialFilterExpression: { status: { $in: ["DRAFT", "ISSUED", "PARTIALLY_PAID", "PAID", "OVERDUE", "REFUNDED"] } },
 });
 invoiceSchema.index({ branch: 1, status: 1, dueDate: 1 });
+invoiceSchema.index({ branch: 1, issuedAt: -1, status: 1 });
 invoiceSchema.index({ student: 1, createdAt: -1 });
 
 module.exports = mongoose.model("Invoice", invoiceSchema);

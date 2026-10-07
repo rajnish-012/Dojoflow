@@ -8,7 +8,8 @@ type ButtonVariant =
   | "outline"
   | "danger"
   | "success"
-  | "ghost";
+  | "ghost"
+  | "back";
 
 type ButtonSize = "sm" | "md" | "lg";
 
@@ -64,6 +65,7 @@ export default function Button({
       text-white
       hover:opacity-90
     `,
+
     success: `
       border-(--success)
       bg-(--success)
@@ -77,6 +79,15 @@ export default function Button({
       text-(--ink-muted)
       hover:bg-(--hover-bg)
       hover:text-(--foreground)
+    `,
+
+    back: `
+      border-(--line)
+      bg-(--surface)
+      text-(--ink-muted)
+      hover:bg-(--hover-bg)
+      hover:text-(--foreground)
+      hover:border-(--line-strong)
     `,
   };
 
@@ -140,7 +151,9 @@ export default function Button({
           "
         />
       )}
+
       {!loading && leftIcon}
+
       {children}
     </button>
   );

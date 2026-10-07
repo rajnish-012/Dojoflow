@@ -119,6 +119,7 @@ export interface StudentTimelineResponse {
   summary: StudentTimelineSummary;
 
   timeline: TrainingTimelineItem[];
+  activity?: Array<{ type: string; title: string; date: string; details?: string }>;
   program?: { _id: string; name?: string } | string;
   programs?: ({ _id: string; name?: string } | string)[];
 }

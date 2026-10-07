@@ -16,7 +16,7 @@ import {
 import {
   Badge,
   Button,
-  Card,
+  DataTableSection,
   EmptyState,
   ErrorState,
   IconButton,
@@ -25,6 +25,8 @@ import {
   Modal,
   PageHeader,
   Select,
+  TableHeading,
+  TablePagination,
 } from "@/components/ui";
 
 import {
@@ -45,6 +47,7 @@ import {
 } from "@/lib/navigation-icons";
 import { PERMISSIONS, useCan } from "@/lib/permissions";
 import {
+  getNavigationSectionLabel,
   getNavigationGroupId,
   NAVIGATION_GROUPS,
 } from "@/lib/navigation-groups";
@@ -68,6 +71,8 @@ type ModuleForm = {
   icon: string;
   requiredPermission: string;
   group: string;
+  customGroup: string;
+  isCustomGroup: boolean;
   allowedRoles: string[];
   isSystem: boolean;
 };
@@ -79,7 +84,9 @@ const EMPTY_FORM: ModuleForm = {
   href: "/",
   icon: "LayoutGrid",
   requiredPermission: "",
-  group: "",
+  group: "Academy",
+  customGroup: "",
+  isCustomGroup: false,
   allowedRoles: ["SUPER_ADMIN"],
   isSystem: false,
 };
@@ -94,6 +101,7 @@ function slugify(value: string) {
 
 const LOCKED_MODULE_KEYS = ["modules", "roles"];
 const SIDEBAR_HIDDEN_MODULE_KEYS = ["settings", "academy-settings", "branding"];
+const CUSTOM_GROUP_OPTION = "__create_custom_sidebar_section__";
 
 function roleLabel(value: string, options: { value: string; label: string }[]) {
   return options.find((role) => role.value === value)?.label || value;
@@ -108,6 +116,8 @@ export default function ModulesPage() {
   const canManageModules = useCan(PERMISSIONS.MODULE_MANAGE);
 
   const [modules, setModules] = useState<ManagedModule[]>([]);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -209,12 +219,42 @@ export default function ModulesPage() {
           : [];
       }),
     ];
+    const customGroupIds = [
+      ...new Set(
+        sidebarModules
+          .map((item) => getNavigationGroupId(item))
+          .filter((id): id is string => Boolean(id?.startsWith("custom:"))),
+      ),
+    ];
+    customGroupIds.forEach((id) => {
+      const items = sidebarModules.filter(
+        (item) => getNavigationGroupId(item) === id,
+      );
+      items.forEach((item) => groupedKeys.add(item.key));
+      if (items.length) {
+        sections.push({
+          id,
+          label: getNavigationSectionLabel(items[0]),
+          items,
+        });
+      }
+    });
     const ungrouped = sidebarModules.filter((item) => !groupedKeys.has(item.key));
     if (ungrouped.length) {
       sections.push({ id: "ungrouped", label: "Other links", items: ungrouped });
     }
     return sections;
   }, [sidebarModules]);
+  const orderedSidebarModules = useMemo(
+    () => sidebarSections.flatMap((section) => section.items),
+    [sidebarSections],
+  );
+  const totalPages = Math.max(1, Math.ceil(orderedSidebarModules.length / pageSize));
+  const page = Math.min(currentPage, totalPages);
+  const visibleModuleIds = new Set(
+    orderedSidebarModules.slice((page - 1) * pageSize, page * pageSize).map((item) => item._id),
+  );
+  const visibleModulesCount = visibleModuleIds.size;
 
   const refresh = () => {
     setReloadKey((count) => count + 1);
@@ -234,6 +274,19 @@ export default function ModulesPage() {
 
   const openEdit = (item: ManagedModule) => {
     if (!canManageModules) return;
+    const existingGroup = item.group?.trim();
+    const knownGroup = NAVIGATION_GROUPS.find(
+      (group) =>
+        group.id === existingGroup?.toLowerCase() ||
+        group.label.toLowerCase() === existingGroup?.toLowerCase(),
+    );
+    const isOtherLinks = existingGroup?.toLowerCase() === "ungrouped" ||
+      existingGroup?.toLowerCase() === "other links";
+    const sectionLabel = getNavigationSectionLabel(item);
+    const derivedKnownGroup = NAVIGATION_GROUPS.find(
+      (group) => group.label.toLowerCase() === sectionLabel.toLowerCase(),
+    );
+    const isCustomGroup = Boolean(existingGroup && !knownGroup && !isOtherLinks);
     setForm({
       id: item._id,
       key: item.key,
@@ -241,7 +294,12 @@ export default function ModulesPage() {
       href: item.href,
       icon: item.icon,
       requiredPermission: item.requiredPermission || "",
-      group: item.group || "",
+      group: isOtherLinks
+        ? "ungrouped"
+        : knownGroup?.label || derivedKnownGroup?.label ||
+          (sectionLabel === "Other links" ? "ungrouped" : ""),
+      customGroup: isCustomGroup ? existingGroup || "" : "",
+      isCustomGroup,
       allowedRoles: item.allowedRoles,
       isSystem: item.isSystem,
     });
@@ -267,6 +325,14 @@ export default function ModulesPage() {
       return;
     }
 
+    const sidebarSection = form.isCustomGroup
+      ? form.customGroup.trim()
+      : form.group.trim();
+    if (!sidebarSection || sidebarSection === CUSTOM_GROUP_OPTION) {
+      setFormError("Sidebar section is required");
+      return;
+    }
+
     const moduleKey = getModuleKey(form.label, form.key);
     const requiredPermission =
       form.requiredPermission || defaultPermissionForModule(moduleKey);
@@ -285,7 +351,7 @@ export default function ModulesPage() {
           href: form.isSystem ? undefined : form.href,
           icon: form.icon,
           ...(requiredPermission ? { requiredPermission } : {}),
-          group: form.group || null,
+          group: sidebarSection,
           allowedRoles: form.allowedRoles,
         });
 
@@ -297,7 +363,7 @@ export default function ModulesPage() {
           href: form.href,
           icon: form.icon,
           requiredPermission,
-          group: form.group || null,
+          group: sidebarSection,
           allowedRoles: form.allowedRoles,
         });
 
@@ -447,55 +513,29 @@ export default function ModulesPage() {
             description="Add your first module to build the sidebar."
           />
         ) : (
-          <Card padding="none">
-            <div className="flex flex-col gap-4 border-b border-(--line) px-5 py-5 sm:px-6 lg:flex-row lg:items-center lg:justify-between">
-              <div>
-                <div className="flex items-center gap-2">
-                  <h2 className="text-lg font-extrabold tracking-tight text-(--foreground)">
-                    Sidebar Modules
-                  </h2>
-
-                  <Badge variant="neutral">{sidebarModules.length}</Badge>
-                </div>
-
-                <p className="mt-1 text-sm text-(--ink-muted)">
-                  Manage the same sidebar sections and link order. New links can
-                  be placed in a section from the module form.
-                </p>
-              </div>
-
+          <DataTableSection title="Sidebar Modules" description="Manage the same sidebar sections and link order. New links can be placed in a section from the module form." icon={<LayoutGrid size={18} />} toolbar={<div className="flex flex-wrap items-center gap-2"><Badge variant="neutral">{sidebarModules.length} modules</Badge>
               <div className="rounded-xl border border-(--line) bg-(--surface) px-3.5 py-2 text-xs font-semibold text-(--ink-muted)">
                 {sidebarModules.filter((item) => item.isActive).length} visible
               </div>
-            </div>
+            </div>}>
 
             <div className="overflow-x-auto">
               <table className="w-full min-w-[880px]">
                 <thead className="border-b border-(--line) bg-(--surface)">
                   <tr>
-                    <th className="px-6 py-4 text-left text-[11px] font-bold uppercase tracking-[0.12em] text-(--ink-faint)">
-                      Order
-                    </th>
-                    <th className="px-6 py-4 text-left text-[11px] font-bold uppercase tracking-[0.12em] text-(--ink-faint)">
-                      Module
-                    </th>
-                    <th className="px-6 py-4 text-left text-[11px] font-bold uppercase tracking-[0.12em] text-(--ink-faint)">
-                      Route
-                    </th>
-                    <th className="px-6 py-4 text-left text-[11px] font-bold uppercase tracking-[0.12em] text-(--ink-faint)">
-                      Visible to
-                    </th>
-                    <th className="px-6 py-4 text-left text-[11px] font-bold uppercase tracking-[0.12em] text-(--ink-faint)">
-                      Status
-                    </th>
-                    <th className="px-6 py-4 text-right text-[11px] font-bold uppercase tracking-[0.12em] text-(--ink-faint)">
-                      Actions
-                    </th>
+                    <TableHeading>Order</TableHeading>
+                    <TableHeading>Module</TableHeading>
+                    <TableHeading>Route</TableHeading>
+                    <TableHeading>Visible to</TableHeading>
+                    <TableHeading>Status</TableHeading>
+                    <TableHeading align="right">Actions</TableHeading>
                   </tr>
                 </thead>
 
                 <tbody className="divide-y divide-(--line)">
                   {sidebarSections.flatMap((section) => {
+                    const visibleSectionItems = section.items.filter((item) => visibleModuleIds.has(item._id));
+                    if (!visibleSectionItems.length) return [];
                     const SectionIcon =
                       NAVIGATION_GROUPS.find((group) => group.id === section.id)
                         ?.icon || LayoutGrid;
@@ -518,7 +558,8 @@ export default function ModulesPage() {
                           </div>
                         </td>
                       </tr>,
-                      ...section.items.map((item, index) => {
+                      ...visibleSectionItems.map((item) => {
+                        const index = section.items.findIndex((sectionItem) => sectionItem._id === item._id);
                         const Icon = getNavigationIcon(item.icon);
                         return (
                       <tr
@@ -652,7 +693,18 @@ export default function ModulesPage() {
                 </tbody>
               </table>
             </div>
-          </Card>
+            <TablePagination
+              currentPage={page}
+              totalPages={totalPages}
+              totalItems={orderedSidebarModules.length}
+              visibleItems={visibleModulesCount}
+              pageSize={pageSize}
+              entityLabel="modules"
+              onPrevious={() => setCurrentPage((value) => Math.max(1, value - 1))}
+              onNext={() => setCurrentPage((value) => Math.min(totalPages, value + 1))}
+              onPageSizeChange={(value) => { setPageSize(value); setCurrentPage(1); }}
+            />
+          </DataTableSection>
         )}
       </div>
 
@@ -809,7 +861,6 @@ export default function ModulesPage() {
                 form.requiredPermission ||
                 defaultPermissionForModule(getModuleKey(form.label, form.key))
               }
-              disabled={form.isSystem}
               onChange={(event) =>
                 setForm((previous) => ({
                   ...previous,
@@ -839,27 +890,51 @@ export default function ModulesPage() {
             </label>
             <Select
               id="module-sidebar-group"
-              value={form.group}
-              disabled={form.isSystem}
-              onChange={(event) =>
-                setForm((previous) => ({
-                  ...previous,
-                  group: event.target.value,
-                }))
-              }
+              value={form.isCustomGroup ? CUSTOM_GROUP_OPTION : form.group}
+              onChange={(event) => {
+                const value = event.target.value;
+                setForm((previous) => value === CUSTOM_GROUP_OPTION
+                  ? { ...previous, group: "", customGroup: "", isCustomGroup: true }
+                  : { ...previous, group: value, customGroup: "", isCustomGroup: false });
+              }}
+              aria-required="true"
+              aria-invalid={Boolean(formError && !form.group.trim() && !form.customGroup.trim())}
             >
-              <option value="">Automatic from page type</option>
-              <option value="ungrouped">Other links (bottom of sidebar)</option>
+              <option value="">Choose a sidebar section</option>
               {NAVIGATION_GROUPS.map((group) => (
-                <option key={group.id} value={group.id}>
+                <option key={group.id} value={group.label}>
                   {group.label}
                 </option>
               ))}
+              <option value="ungrouped">Other links</option>
+              <option value={CUSTOM_GROUP_OPTION}>Create your own</option>
             </Select>
             <p className="mt-1.5 text-[11px] text-(--ink-muted)">
-              Choose where this link appears in the grouped sidebar. Automatic
-              keeps the current key-based placement.
+              Choose a section for this link, or create a custom section.
             </p>
+            {form.isCustomGroup && (
+              <div className="mt-3">
+                <label
+                  htmlFor="module-custom-sidebar-group"
+                  className="mb-2 block text-xs font-extrabold text-(--foreground-soft)"
+                >
+                  Custom sidebar section
+                </label>
+                <Input
+                  id="module-custom-sidebar-group"
+                  value={form.customGroup}
+                  placeholder="Enter section name"
+                  aria-required="true"
+                  aria-invalid={Boolean(formError && !form.customGroup.trim())}
+                  onChange={(event) =>
+                    setForm((previous) => ({
+                      ...previous,
+                      customGroup: event.target.value,
+                    }))
+                  }
+                />
+              </div>
+            )}
           </div>
 
           <div>
@@ -909,9 +984,10 @@ function getModuleKey(label: string, key: string) {
 }
 
 function defaultPermissionForModule(key: string) {
-  return key === "notifications" || key === "notification"
-    ? PERMISSIONS.NOTIFICATION_VIEW
-    : "";
+  if (key === "notifications" || key === "notification")
+    return PERMISSIONS.NOTIFICATION_VIEW;
+  if (key === "memberships") return PERMISSIONS.MEMBERSHIP_VIEW;
+  return "";
 }
 
 function permissionLabel(permission: string) {

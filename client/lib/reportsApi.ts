@@ -143,6 +143,11 @@ export interface CoachReport {
   };
 
   studentsEvaluated: number;
+  studentsAssigned?: number;
+  activeStudents?: number;
+  completedStudents?: number;
+  promotions?: number;
+  programs?: { _id: string; name: string }[];
 }
 
 export interface BeltReport {

@@ -5,6 +5,8 @@ const Branch = require("../models/Branch");
 const Role = require("../models/Role");
 const { validatePassword, sessionInvalidationTime } = require("../utils/passwordPolicy");
 const { normalizePhone } = require("../utils/phone");
+const auditService = require("../services/audit.service");
+const { AUDIT_ACTIONS } = require("../config/auditActions");
 
 const SUPER_ADMIN_ROLE = "SUPER_ADMIN";
 
@@ -288,6 +290,7 @@ const createStaffUser = async (req, res) => {
       role: selectedRole.key,
       branch: branchResult.branch ? branchResult.branch._id : null,
     });
+    await auditService.record({ req, action: AUDIT_ACTIONS.USER_ROLE_CHANGED, entityType: "USER", entityId: user._id, branchId: user.branch, before: { role: null, branchId: null }, after: { role: user.role, branchId: user.branch }, metadata: { operation: "USER_CREATED" } });
 
     const populatedUser = await User.findById(user._id)
       .populate("branch", "name address phone")
@@ -323,6 +326,9 @@ const updateStaffUser = async (req, res) => {
     if (!user) {
       return sendError(res, 404, "Staff user not found");
     }
+    const priorRole = user.role;
+    const priorBranch = user.branch ? String(user.branch) : null;
+    const priorPasswordChangedAt = user.passwordChangedAt || null;
 
     /*
      * Existing SUPER_ADMIN accounts cannot be
@@ -408,6 +414,13 @@ const updateStaffUser = async (req, res) => {
     }
 
     await user.save();
+    if (priorRole !== user.role) await auditService.record({ req, action: AUDIT_ACTIONS.USER_ROLE_CHANGED, entityType: "USER", entityId: user._id, branchId: user.branch || priorBranch, before: { role: priorRole }, after: { role: user.role } });
+    const nextBranch = user.branch ? String(user.branch) : null;
+    if (priorBranch !== nextBranch) await auditService.record({ req, action: AUDIT_ACTIONS.USER_BRANCH_CHANGED, entityType: "USER", entityId: user._id, branchId: nextBranch || priorBranch, before: { branchId: priorBranch }, after: { branchId: nextBranch } });
+    if (password && String(password).trim()) {
+      await auditService.record({ req, action: AUDIT_ACTIONS.PASSWORD_CHANGED, entityType: "USER", entityId: user._id, branchId: user.branch, before: { passwordChangedAt: priorPasswordChangedAt }, after: { passwordChangedAt: user.passwordChangedAt }, metadata: { changedByAdministrator: true, sessionsInvalidated: true } });
+      await auditService.record({ req, action: AUDIT_ACTIONS.SESSION_INVALIDATED, entityType: "USER", entityId: user._id, branchId: user.branch, metadata: { reason: "ADMIN_PASSWORD_CHANGE" } });
+    }
 
     const updatedUser = await User.findById(user._id)
       .populate("branch", "name address phone")

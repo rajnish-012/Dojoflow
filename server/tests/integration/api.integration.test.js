@@ -23,6 +23,7 @@ let Holiday;
 let Makeup;
 let PasswordResetToken;
 let Inquiry;
+let Trial;
 let TrainingSessionType;
 let BranchSchedule;
 let Performance;
@@ -31,17 +32,25 @@ let Invoice;
 let Payment;
 let Receipt;
 let FinanceAudit;
+let AuditLog;
+let AttendanceCorrection;
 let AcademySettings;
 let fixture;
 
 const permissions = [
   "student.view", "student.create", "student.update", "student.delete",
-  "attendance.view", "attendance.manage", "holiday.view", "holiday.manage",
+  "membership.view", "membership.manage",
+  "attendance.view", "attendance.manage", "attendance.correct", "attendance.correct.approve", "audit.view", "holiday.view", "holiday.manage",
   "makeup.view", "makeup.manage", "branch_schedule.view", "branch_schedule.manage",
-  "performance.view", "promotion.view", "promotion.manage", "report.view", "inquiry.view",
+  "performance.view", "promotion.view", "promotion.manage", "report.view", "inquiry.view", "inquiry.update", "student.create", "plan.view", "finance.manage",
   "finance.view", "finance.manage", "finance.collect", "finance.refund", "finance.report", "student.finance.view",
 ];
 const origin = "http://localhost:3000";
+const calendarDateOffset = (offset = 0) => {
+  const date = new Date();
+  date.setDate(date.getDate() + offset);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+};
 
 const makeCookie = (user, options = {}) => {
   const token = jwt.sign(
@@ -140,6 +149,7 @@ before(async () => {
   Makeup = require("../../src/models/Makeup");
   PasswordResetToken = require("../../src/models/PasswordResetToken");
   Inquiry = require("../../src/models/Inquiry");
+  Trial = require("../../src/models/Trial");
   TrainingSessionType = require("../../src/models/TrainingSessionType");
   BranchSchedule = require("../../src/models/BranchSchedule");
   Performance = require("../../src/models/Performance");
@@ -148,6 +158,8 @@ before(async () => {
   Payment = require("../../src/models/Payment");
   Receipt = require("../../src/models/Receipt");
   FinanceAudit = require("../../src/models/FinanceAudit");
+  AuditLog = require("../../src/models/AuditLog");
+  AttendanceCorrection = require("../../src/models/AttendanceCorrection");
   AcademySettings = require("../../src/models/AcademySettings");
   await mongoose.connect(process.env.MONGO_URI);
   await Attendance.syncIndexes();
@@ -158,6 +170,8 @@ before(async () => {
   await Payment.syncIndexes();
   await Receipt.syncIndexes();
   await FinanceAudit.syncIndexes();
+  await AttendanceCorrection.syncIndexes();
+  await Trial.syncIndexes();
 });
 
 after(async () => {
@@ -719,12 +733,13 @@ test("PRESENT consumes one regular curriculum day and returns the next day witho
 test("undoing PRESENT removes its record and releases the regular curriculum day", async () => {
   const { slotA } = await configureAttendanceFixture();
   const cookie = makeCookie(fixture.userA);
-  const marked = await markRequest(cookie, fixture.studentA, "2026-10-03", "PRESENT", slotA);
+  const today = calendarDateOffset(0);
+  const marked = await markRequest(cookie, fixture.studentA, today, "PRESENT", slotA);
   assert.equal(marked.status, 201, JSON.stringify(marked.body));
   const undone = await request(app).post(`/api/attendance/${marked.body.attendance._id}/undo`).set("Cookie", cookie).set("Origin", origin);
   assert.equal(undone.status, 200, JSON.stringify(undone.body));
   assert.equal(await Attendance.countDocuments({ student: fixture.studentA._id }), 0);
-  const sheet = await request(app).get("/api/attendance/daily-sheet?date=2026-10-03").set("Cookie", cookie);
+  const sheet = await request(app).get(`/api/attendance/daily-sheet?date=${today}`).set("Cookie", cookie);
   assert.equal(sheet.status, 200, JSON.stringify(sheet.body));
   assert.equal(sheet.body.rows.find((row) => String(row.student._id) === String(fixture.studentA._id)).attendance, null);
 });
@@ -732,17 +747,29 @@ test("undoing PRESENT removes its record and releases the regular curriculum day
 test("undoing ABSENT removes its pending makeup with the attendance", async () => {
   const { slotA } = await configureAttendanceFixture();
   const cookie = makeCookie(fixture.userA);
-  const marked = await markRequest(cookie, fixture.studentA, "2026-10-03", "ABSENT", slotA);
+  const marked = await markRequest(cookie, fixture.studentA, calendarDateOffset(0), "ABSENT", slotA);
   const undone = await request(app).post(`/api/attendance/${marked.body.attendance._id}/undo`).set("Cookie", cookie).set("Origin", origin);
   assert.equal(undone.status, 200, JSON.stringify(undone.body));
   assert.equal(await Attendance.countDocuments({ student: fixture.studentA._id }), 0);
   assert.equal(await Makeup.countDocuments({ student: fixture.studentA._id }), 0);
 });
 
+test("historical attendance cannot be undone or deleted without the correction workflow", async () => {
+  const { slotA } = await configureAttendanceFixture();
+  const cookie = makeCookie(fixture.userA);
+  const marked = await markRequest(cookie, fixture.studentA, calendarDateOffset(-1), "PRESENT", slotA);
+  assert.equal(marked.status, 201, JSON.stringify(marked.body));
+  const response = await request(app).post(`/api/attendance/${marked.body.attendance._id}/undo`).set("Cookie", cookie).set("Origin", origin);
+  assert.equal(response.status, 409);
+  assert.equal(response.body.code, "HISTORICAL_ATTENDANCE_REQUIRES_CORRECTION");
+  assert.ok(await Attendance.exists({ _id: marked.body.attendance._id }));
+});
+
 test("attendance undo rejects completed makeup recovery and linked performance history", async () => {
   const { slotA } = await configureAttendanceFixture();
   const cookie = makeCookie(fixture.userA);
-  const absent = await markRequest(cookie, fixture.studentA, "2026-10-03", "ABSENT", slotA);
+  const today = calendarDateOffset(0);
+  const absent = await markRequest(cookie, fixture.studentA, today, "ABSENT", slotA);
   const makeup = await Makeup.findById(absent.body.makeup._id);
   makeup.status = "COMPLETED";
   await makeup.save();
@@ -751,12 +778,13 @@ test("attendance undo rejects completed makeup recovery and linked performance h
   assert.equal(rejected.body.code, "ATTENDANCE_HAS_COMPLETED_MAKEUP");
 
   await Makeup.deleteOne({ _id: makeup._id });
-  const present = await markRequest(cookie, fixture.studentA, "2026-10-04", "PRESENT", slotA);
+  await Attendance.deleteOne({ _id: absent.body.attendance._id });
+  const present = await markRequest(cookie, fixture.studentA, today, "PRESENT", slotA);
   await Performance.create({
     student: fixture.studentA._id, branch: fixture.branchA._id, attendance: present.body.attendance._id,
     plan: fixture.plan._id, sessionTypeId: present.body.attendance.sessionTypeId,
     planDay: 2, curriculumTitle: "Lesson 2", skill: "stance", rating: 4,
-    evaluatedBy: fixture.userA._id, evaluationDate: new Date("2026-10-04T00:00:00Z"),
+    evaluatedBy: fixture.userA._id, evaluationDate: new Date(),
   });
   rejected = await request(app).post(`/api/attendance/${present.body.attendance._id}/undo`).set("Cookie", cookie).set("Origin", origin);
   assert.equal(rejected.status, 409);
@@ -803,7 +831,7 @@ test("a later makeup completion keeps its original lesson snapshot and does not 
   assert.equal(progressBefore.currentTrainingDay, 5);
 
   const scheduled = await request(app).put(`/api/makeups/${absent.body.makeup._id}/schedule`)
-    .set("Cookie", cookie).set("Origin", origin).send({ makeupDate: "2026-10-05", sessionSlotId: slotB });
+    .set("Cookie", cookie).set("Origin", origin).send({ makeupDate: calendarDateOffset(), sessionSlotId: slotB });
   assert.equal(scheduled.status, 200, JSON.stringify(scheduled.body));
   const completed = await request(app).put(`/api/makeups/${absent.body.makeup._id}/complete`)
     .set("Cookie", cookie).set("Origin", origin).send({});
@@ -869,7 +897,7 @@ test("manual makeup recovery snapshots the original absence, not the student's l
   }
   const cookie = makeCookie(fixture.userA);
   const created = await request(app).post("/api/makeups").set("Cookie", cookie).set("Origin", origin).send({
-    student: String(fixture.studentA._id), originalAttendance: String(records[1]._id), makeupDate: "2026-10-05",
+    student: String(fixture.studentA._id), originalAttendance: String(records[1]._id), makeupDate: calendarDateOffset(),
   });
   assert.equal(created.status, 201, JSON.stringify(created.body));
   assert.equal(created.body.makeup.planDay, 2);
@@ -1270,4 +1298,236 @@ test("finance indexes protect invoice cycles, idempotency, receipt numbers, and 
   assert.ok(paymentIndexes.some((index) => index.name === "uniq_payment_reference" && index.unique));
   assert.ok(receiptIndexes.some((index) => index.key.receiptNumber === 1 && index.unique));
   assert.ok(auditIndexes.some((index) => index.key.branch === 1 && index.key.createdAt === -1));
+});
+
+test("CRM lead pipeline enforces permissions, branch isolation, and auditable status transitions", async () => {
+  const cookie = makeCookie(fixture.userA);
+  const made = await request(app).post("/api/inquiries/leads").set("Cookie", cookie).set("Origin", origin).send({ name: "Prospective Student", phone: "+919876543210", email: "prospect@example.test", age: 16, source: "REFERRAL" });
+  assert.equal(made.status, 201, made.body.message);
+  const lead = made.body.lead;
+  assert.equal(lead.status, "NEW");
+  assert.equal(lead.source, "REFERRAL");
+  assert.equal((await request(app).get("/api/inquiries/pipeline").set("Cookie", makeCookie(fixture.userB))).body.leads.length, 0);
+  const denied = await request(app).get("/api/inquiries/pipeline").set("Cookie", makeCookie(await createUser({ role: "NO_ACCESS", email: "crm-no-access@example.test" })));
+  assert.equal(denied.status, 403);
+  const wrongBranch = await request(app).patch(`/api/inquiries/${lead._id}/lead`).set("Cookie", makeCookie(fixture.userB)).set("Origin", origin).send({ status: "CONTACTED" });
+  assert.equal(wrongBranch.status, 404);
+  const invalid = await request(app).patch(`/api/inquiries/${lead._id}/lead`).set("Cookie", cookie).set("Origin", origin).send({ status: "INTERESTED" });
+  assert.equal(invalid.status, 400);
+  const contacted = await request(app).patch(`/api/inquiries/${lead._id}/lead`).set("Cookie", cookie).set("Origin", origin).send({ status: "CONTACTED" });
+  assert.equal(contacted.status, 200);
+  assert.deepEqual(contacted.body.lead.statusHistory.map((entry) => entry.to), ["NEW", "CONTACTED"]);
+});
+
+test("CRM trial lifecycle rejects duplicate bookings and updates lead history", async () => {
+  const cookie = makeCookie(fixture.userA);
+  const lead = await Inquiry.create({ fullName: "Trial Candidate", email: "trial-candidate@example.test", phone: "+919811223344", age: 14, branch: fixture.branchA._id, status: "CONTACTED", statusHistory: [{ from: "NEW", to: "CONTACTED", changedBy: fixture.userA._id }] });
+  const trialDate = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+  const body = { trialDate, startTime: "10:00", endTime: "11:00" };
+  const first = await request(app).post(`/api/inquiries/${lead._id}/trials`).set("Cookie", cookie).set("Origin", origin).send(body);
+  assert.equal(first.status, 201, first.body.message);
+  assert.equal(first.body.trial.status, "SCHEDULED");
+  const duplicate = await request(app).post(`/api/inquiries/${lead._id}/trials`).set("Cookie", cookie).set("Origin", origin).send(body);
+  assert.equal(duplicate.status, 409);
+  const completed = await request(app).patch(`/api/inquiries/trials/${first.body.trial._id}`).set("Cookie", cookie).set("Origin", origin).send({ status: "COMPLETED" });
+  assert.equal(completed.status, 200);
+  assert.equal(completed.body.trial.attendance, "PRESENT");
+  assert.deepEqual(completed.body.trial.statusHistory.map((entry) => entry.to), ["SCHEDULED", "COMPLETED"]);
+  const updatedLead = await Inquiry.findById(lead._id).lean();
+  assert.equal(updatedLead.status, "TRIAL_COMPLETED");
+  assert.ok(updatedLead.statusHistory.some((item) => item.to === "TRIAL_SCHEDULED"));
+  assert.ok(updatedLead.statusHistory.some((item) => item.to === "TRIAL_COMPLETED"));
+});
+
+test("CRM conversion creates one student, enrollment, and optional invoice and is idempotent", async () => {
+  const lead = await Inquiry.create({ fullName: "Admission Candidate", email: "admission-candidate@example.test", phone: "+919877665544", age: 19, branch: fixture.branchA._id, plan: fixture.plan._id, status: "INTERESTED", statusHistory: [{ from: "TRIAL_COMPLETED", to: "INTERESTED", changedBy: fixture.userA._id }] });
+  const cookie = makeCookie(fixture.userA);
+  const url = `/api/inquiries/${lead._id}/convert`;
+  const input = { age: 19, plan: String(fixture.plan._id), createInvoice: true };
+  const first = await request(app).post(url).set("Cookie", cookie).set("Origin", origin).send(input);
+  assert.equal(first.status, 201, first.body.message);
+  assert.equal(first.body.student.name, "Admission Candidate");
+  assert.equal(first.body.student.planEnrollments.length, 1);
+  assert.equal(first.body.invoice.items[0].kind, "TUITION");
+  assert.equal((await Inquiry.findById(lead._id)).status, "CONVERTED");
+  const replay = await request(app).post(url).set("Cookie", cookie).set("Origin", origin).send(input);
+  assert.equal(replay.status, 200);
+  assert.equal(replay.body.alreadyConverted, true);
+  assert.equal(await Student.countDocuments({ phone: "+919877665544" }), 1);
+  assert.equal(await Invoice.countDocuments({ student: first.body.student._id }), 1);
+  assert.equal(await Trial.countDocuments({ lead: lead._id }), 0);
+  assert.equal(await Notification.countDocuments({ type: "LEAD_CONVERTED", entityId: lead._id }), 1);
+});
+
+test("CRM conversion reuses an existing student and overdue follow-ups notify assigned staff once", async () => {
+  const lead = await Inquiry.create({ fullName: fixture.studentA.name, email: "existing-person@example.test", phone: fixture.studentA.phone, age: 18, branch: fixture.branchA._id, plan: fixture.plan._id, status: "CONTACTED" });
+  const cookie = makeCookie(fixture.userA);
+  const converted = await request(app).post(`/api/inquiries/${lead._id}/convert`).set("Cookie", cookie).set("Origin", origin).send({ plan: String(fixture.plan._id) });
+  assert.equal(converted.status, 201, converted.body.message);
+  assert.equal(String(converted.body.student._id), String(fixture.studentA._id));
+  assert.equal(await Student.countDocuments({ phone: fixture.studentA.phone }), 1);
+  const followUpLead = await Inquiry.create({ fullName: "Follow-up Prospect", email: "followup-prospect@example.test", phone: "+919800112233", branch: fixture.branchA._id, status: "CONTACTED", assignedTo: fixture.userA._id });
+  const dueAt = new Date(Date.now() - 3600000);
+  const followUp = await request(app).post(`/api/inquiries/${followUpLead._id}/follow-ups`).set("Cookie", cookie).set("Origin", origin).send({ note: "Call back", dueAt: dueAt.toISOString() });
+  assert.equal(followUp.status, 201);
+  const { notifyOverdueFollowUps } = require("../../src/controllers/crm.controller");
+  await notifyOverdueFollowUps(); await notifyOverdueFollowUps();
+  assert.equal(await Notification.countDocuments({ recipient: fixture.userA._id, type: "LEAD_FOLLOWUP_OVERDUE", entityId: followUpLead._id }), 1);
+});
+
+test("membership renewal keeps enrollment history, bills through Finance, and notifies once", async () => {
+  const student = await createStudent({ name: "Renewal Student" });
+  const expiredOn = calendarDateOffset(-1);
+  student.planEnrollments = [{ plan: fixture.plan._id, feePlan: fixture.plan._id, branch: fixture.branchA._id, startDate: new Date("2026-01-01T00:00:00.000Z"), endDate: new Date(`${expiredOn}T12:00:00.000Z`), status: "ACTIVE", enrollmentSource: "ADMISSION", createdBy: fixture.userA._id }];
+  await student.save();
+  const cookie = makeCookie(fixture.userA);
+  const response = await request(app).post(`/api/enrollments/students/${student._id}/renewals`).set("Cookie", cookie).set("Origin", origin).send({ plan: String(fixture.plan._id), startDate: calendarDateOffset(0), createInvoice: true });
+  assert.equal(response.status, 201, response.body.message);
+  assert.ok(response.body.invoice, response.body.invoiceError);
+  const saved = await Student.findById(student._id).lean();
+  assert.equal(saved.planEnrollments.length, 2);
+  assert.equal(String(saved.planEnrollments[0].renewedTo), String(saved.planEnrollments[1]._id));
+  assert.equal(saved.planEnrollments[1].enrollmentSource, "RENEWAL");
+  assert.equal(await Invoice.countDocuments({ student: student._id, enrollment: saved.planEnrollments[1]._id }), 1);
+  const noticeCount = await Notification.countDocuments({ type: "MEMBERSHIP_RENEWAL_COMPLETED", entityId: saved.planEnrollments[1]._id });
+  assert.equal(noticeCount, 1);
+  const replay = await request(app).post(`/api/enrollments/students/${student._id}/renewals`).set("Cookie", cookie).set("Origin", origin).send({ plan: String(fixture.plan._id), startDate: calendarDateOffset(0) });
+  assert.equal(replay.status, 409);
+  const history = await request(app).get(`/api/enrollments/students/${student._id}`).set("Cookie", cookie);
+  assert.equal(history.status, 200);
+  assert.equal(history.body.enrollments.length, 2);
+});
+
+test("membership APIs enforce branch isolation and valid enrollment status transitions", async () => {
+  const student = fixture.studentA;
+  student.planEnrollments = [{ plan: fixture.plan._id, branch: fixture.branchA._id, startDate: new Date("2026-01-01T00:00:00.000Z"), endDate: new Date("2026-12-31T12:00:00.000Z"), status: "ACTIVE" }];
+  await student.save();
+  const cookie = makeCookie(fixture.userA);
+  const hidden = await request(app).get(`/api/enrollments/students/${fixture.studentB._id}`).set("Cookie", cookie);
+  assert.ok([403, 404].includes(hidden.status));
+  const transfer = await request(app).post(`/api/enrollments/students/${student._id}`).set("Cookie", cookie).set("Origin", origin).send({ plan: String(fixture.plan._id), branch: String(fixture.branchB._id) });
+  assert.equal(transfer.status, 403);
+  const enrollmentId = student.planEnrollments[0]._id;
+  const paused = await request(app).patch(`/api/enrollments/students/${student._id}/${enrollmentId}/status`).set("Cookie", cookie).set("Origin", origin).send({ status: "PAUSED" });
+  assert.equal(paused.status, 200, paused.body.message);
+  assert.equal(paused.body.enrollment.status, "PAUSED");
+  const invalid = await request(app).patch(`/api/enrollments/students/${student._id}/${enrollmentId}/status`).set("Cookie", cookie).set("Origin", origin).send({ status: "EXPIRED" });
+  assert.equal(invalid.status, 409);
+});
+
+test("membership read and manage permissions are independent at the API boundary", async () => {
+  const viewRole = await Role.create({ key: "MEMBERSHIP_VIEW", name: "Membership viewer", dataScope: "BRANCH", permissions: ["membership.view"] });
+  const viewUser = await createUser({ role: viewRole.key, email: "membership-view@example.test" });
+  const viewCookie = makeCookie(viewUser);
+  const dashboard = await request(app).get("/api/enrollments/dashboard").set("Cookie", viewCookie);
+  assert.equal(dashboard.status, 200);
+  const viewWrite = await request(app).post(`/api/enrollments/students/${fixture.studentA._id}`).set("Cookie", viewCookie).set("Origin", origin).send({ plan: String(fixture.plan._id), startDate: calendarDateOffset(0) });
+  assert.equal(viewWrite.status, 403);
+
+  const manageRole = await Role.create({ key: "MEMBERSHIP_MANAGE", name: "Membership manager", dataScope: "BRANCH", permissions: ["membership.manage"] });
+  const manageUser = await createUser({ role: manageRole.key, email: "membership-manage@example.test" });
+  const manageCookie = makeCookie(manageUser);
+  const manageRead = await request(app).get("/api/enrollments/dashboard").set("Cookie", manageCookie);
+  assert.equal(manageRead.status, 403);
+  const newStudent = await createStudent({ name: "Managed Enrollment" });
+  const manageWrite = await request(app).post(`/api/enrollments/students/${newStudent._id}`).set("Cookie", manageCookie).set("Origin", origin).send({ plan: String(fixture.plan._id), startDate: calendarDateOffset(0) });
+  assert.equal(manageWrite.status, 201, manageWrite.body.message);
+  assert.equal(manageWrite.body.invoice, null);
+
+  const noMembership = await createUser({ role: "NO_ACCESS", email: "membership-none@example.test" });
+  const deniedRead = await request(app).get("/api/enrollments/dashboard").set("Cookie", makeCookie(noMembership));
+  assert.equal(deniedRead.status, 403);
+});
+
+test("branch transfer creates a new enrollment snapshot and preserves the previous branch history", async () => {
+  const student = fixture.studentA;
+  student.planEnrollments = [{ plan: fixture.plan._id, feePlan: fixture.plan._id, branch: fixture.branchA._id, startDate: new Date("2026-01-01T00:00:00.000Z"), endDate: new Date("2026-12-31T12:00:00.000Z"), status: "ACTIVE" }];
+  await student.save();
+  const admin = await createUser({ role: "SUPER_ADMIN", branch: null });
+  const response = await request(app).put(`/api/students/${student._id}`).set("Cookie", makeCookie(admin)).set("Origin", origin).send({ branch: String(fixture.branchB._id) });
+  assert.equal(response.status, 200, response.body.message);
+  const saved = await Student.findById(student._id).lean();
+  assert.equal(saved.planEnrollments.length, 2);
+  assert.equal(saved.planEnrollments[0].status, "COMPLETED");
+  assert.equal(String(saved.planEnrollments[0].branch), String(fixture.branchA._id));
+  assert.equal(String(saved.planEnrollments[1].branch), String(fixture.branchB._id));
+  assert.equal(saved.planEnrollments[1].enrollmentSource, "BRANCH_TRANSFER");
+});
+
+test("expired membership notifications are sent once even when the scheduler runs late", async () => {
+  const student = fixture.studentA;
+  student.planEnrollments = [{ plan: fixture.plan._id, branch: fixture.branchA._id, startDate: new Date("2026-01-01T00:00:00.000Z"), endDate: new Date(`${calendarDateOffset(-2)}T12:00:00.000Z`), status: "ACTIVE" }];
+  await student.save();
+  const { refreshEnrollmentReminders } = require("../../src/services/enrollmentReminder.service");
+  await refreshEnrollmentReminders();
+  await refreshEnrollmentReminders();
+  const saved = await Student.findById(student._id);
+  assert.equal(saved.planEnrollments[0].status, "EXPIRED");
+  assert.equal(await Notification.countDocuments({ type: "MEMBERSHIP_EXPIRED", entityId: saved.planEnrollments[0]._id }), 1);
+});
+
+test("attendance rejects paused or expired enrollment while retaining its curriculum snapshot", async () => {
+  const { slotA } = await configureAttendanceFixture({ studentIds: ["studentA"] });
+  const enrollment = fixture.studentA.planEnrollments[0];
+  enrollment.status = "PAUSED";
+  await fixture.studentA.save();
+  const response = await markRequest(makeCookie(fixture.userA), fixture.studentA, calendarDateOffset(1), "PRESENT", slotA);
+  assert.equal(response.status, 403);
+  assert.match(response.body.message, /no active plan enrollment/i);
+});
+
+test("audit logs are read-only, permission protected, and branch scoped", async () => {
+  const audit = await AuditLog.create({ action: "STUDENT_UPDATED", entityType: "STUDENT", entityId: fixture.studentA._id, branch: fixture.branchA._id, actor: fixture.userA._id, actorName: fixture.userA.name, before: { status: "ACTIVE" }, after: { status: "INACTIVE" } });
+  const branchA = makeCookie(fixture.userA);
+  const list = await request(app).get("/api/audit-logs").set("Cookie", branchA);
+  assert.equal(list.status, 200);
+  assert.equal(list.body.totalItems, 1);
+  const escape = await request(app).get(`/api/audit-logs?branchId=${fixture.branchB._id}`).set("Cookie", branchA);
+  assert.equal(escape.status, 403);
+  const branchB = await createUser({ email: "audit-branch-b@example.test", branch: fixture.branchB._id });
+  const hidden = await request(app).get(`/api/audit-logs/${audit._id}`).set("Cookie", makeCookie(branchB));
+  assert.ok([403, 404].includes(hidden.status));
+  const noAccess = await createUser({ email: "audit-no-access@example.test", role: "NO_ACCESS" });
+  assert.equal((await request(app).get("/api/audit-logs").set("Cookie", makeCookie(noAccess))).status, 403);
+  assert.equal((await request(app).patch(`/api/audit-logs/${audit._id}`).set("Cookie", branchA).set("Origin", origin).send({ after: {} })).status, 404);
+  await assert.rejects(AuditLog.updateOne({ _id: audit._id }, { $set: { after: { status: "ACTIVE" } } }), /immutable/);
+  await assert.rejects(AuditLog.deleteOne({ _id: audit._id }), /immutable/);
+  assert.deepEqual((await AuditLog.findById(audit._id).lean()).after, { status: "INACTIVE" });
+});
+
+test("historical attendance correction requires a reason, separates approval, and preserves its original state", async () => {
+  const attendance = await Attendance.create({ student: fixture.studentA._id, branch: fixture.branchA._id, plan: fixture.plan._id, date: new Date("2026-09-01T10:00:00.000Z"), planDay: 1, curriculumTitle: "Basics", status: "PRESENT", attendanceType: "REGULAR", markedBy: fixture.userA._id });
+  const cookie = makeCookie(fixture.userA);
+  const missingReason = await request(app).post(`/api/attendance/${attendance._id}/corrections`).set("Cookie", cookie).set("Origin", origin).send({ proposedStatus: "ABSENT" });
+  assert.equal(missingReason.status, 400, JSON.stringify(missingReason.body));
+  const created = await request(app).post(`/api/attendance/${attendance._id}/corrections`).set("Cookie", cookie).set("Origin", origin).send({ proposedStatus: "ABSENT", reason: "Incorrect sheet entry" });
+  assert.equal(created.status, 201);
+  const correction = created.body.correction;
+  assert.equal(correction.original.status, "PRESENT");
+  const queue = await request(app).get("/api/attendance/corrections?status=PENDING").set("Cookie", cookie);
+  assert.equal(queue.status, 200);
+  assert.equal(queue.body.totalItems, 1);
+  const selfApproval = await request(app).post(`/api/attendance/corrections/${correction._id}/approve`).set("Cookie", cookie).set("Origin", origin);
+  assert.equal(selfApproval.status, 409);
+  const approver = await createUser({ email: "correction-approver@example.test", branch: fixture.branchA._id });
+  const approved = await request(app).post(`/api/attendance/corrections/${correction._id}/approve`).set("Cookie", makeCookie(approver)).set("Origin", origin);
+  assert.equal(approved.status, 200);
+  assert.equal(approved.body.correction.status, "APPROVED");
+  assert.equal((await Attendance.findById(attendance._id)).status, "ABSENT");
+  const makeup = await Makeup.findOne({ originalAttendance: attendance._id });
+  assert.equal(makeup.status, "SCHEDULED");
+  assert.equal(await AuditLog.countDocuments({ action: "ATTENDANCE_CORRECTION_APPROVED", entityId: attendance._id }), 1);
+  const duplicateDecision = await request(app).post(`/api/attendance/corrections/${correction._id}/approve`).set("Cookie", makeCookie(approver)).set("Origin", origin);
+  assert.equal(duplicateDecision.status, 409);
+
+  const rejectedAttendance = await Attendance.create({ student: fixture.studentB._id, branch: fixture.branchB._id, plan: fixture.plan._id, date: new Date("2026-09-02T10:00:00.000Z"), planDay: 1, curriculumTitle: "Basics", status: "PRESENT", attendanceType: "REGULAR", markedBy: fixture.userB._id });
+  const branchB = await createUser({ email: "correction-branch-b@example.test", branch: fixture.branchB._id });
+  const requested = await request(app).post(`/api/attendance/${rejectedAttendance._id}/corrections`).set("Cookie", makeCookie(branchB)).set("Origin", origin).send({ proposedStatus: "ABSENT", reason: "Incorrect attendance" });
+  assert.equal(requested.status, 201);
+  const rejected = await request(app).post(`/api/attendance/corrections/${requested.body.correction._id}/reject`).set("Cookie", makeCookie(branchB)).set("Origin", origin).send({ reason: "Evidence does not support the change" });
+  assert.equal(rejected.status, 409, "The requester cannot reject their own request");
+  const otherApprover = await createUser({ email: "correction-branch-b-approver@example.test", branch: fixture.branchB._id });
+  const rejection = await request(app).post(`/api/attendance/corrections/${requested.body.correction._id}/reject`).set("Cookie", makeCookie(otherApprover)).set("Origin", origin).send({ reason: "Evidence does not support the change" });
+  assert.equal(rejection.status, 200);
+  assert.equal((await Attendance.findById(rejectedAttendance._id)).status, "PRESENT");
 });

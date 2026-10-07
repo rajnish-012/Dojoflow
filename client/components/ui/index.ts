@@ -17,6 +17,7 @@ export { default as DataFilters } from "./DataFilters";
 export { default as DataSort } from "./DataSort";
 export { default as TablePagination } from "./TablePagination";
 export { default as TableHeading } from "./TableHeading";
+export { default as DataTableSection } from "./DataTableSection";
 export { default as Breadcrumb } from "./Breadcrumb";
 export type { BreadcrumbItem } from "./Breadcrumb";
 export { default as ConfirmationDialog } from "./ConfirmationDialog";

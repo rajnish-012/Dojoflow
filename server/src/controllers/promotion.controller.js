@@ -7,6 +7,9 @@ const CoachStudentAssignment = require("../models/CoachStudentAssignment");
 const { getProgramLearningProgress } = require("../services/programProgress.service");
 const { resolveProgramCurriculum } = require("../services/curriculumResolver.service");
 const { safelyNotify } = require("../services/notification.service");
+const { findEnrollmentForDate } = require("../services/enrollmentLifecycle.service");
+const auditService = require("../services/audit.service");
+const { AUDIT_ACTIONS } = require("../config/auditActions");
 
 /* ======================================================
    HELPERS
@@ -282,7 +285,7 @@ const getEligiblePromotions = async (req, res) => {
       }
 
       const today = new Date();
-      const enrollment = [...(student.planEnrollments || [])].reverse().find((item) => item.status === "ACTIVE" && new Date(item.startDate) <= today && (!item.endDate || new Date(item.endDate) >= today));
+      const enrollment = findEnrollmentForDate(student.planEnrollments, today);
       const entitlements = enrollment?.programs?.length
         ? enrollment.programs
         : (student.plan.programs || []).map((item) => ({ program: item.program?._id || item.program, curriculum: item.curriculum || [] }));
@@ -458,7 +461,7 @@ const promoteStudent = async (req, res) => {
     }
 
     const today = new Date();
-    const enrollment = [...(student.planEnrollments || [])].reverse().find((item) => item.status === "ACTIVE" && new Date(item.startDate) <= today && (!item.endDate || new Date(item.endDate) >= today));
+    const enrollment = findEnrollmentForDate(student.planEnrollments, today);
     const entitlements = enrollment?.programs?.length ? enrollment.programs : (student.plan.programs || []).map((item) => ({ program: item.program?._id || item.program, curriculum: item.curriculum || [] }));
     if (!programId && entitlements.length > 1) return res.status(400).json({ success: false, message: "programId is required when the student's plan includes multiple programs" });
     const entitlement = entitlements.find((item) => String(item.program?._id || item.program) === String(programId || item.program?._id || item.program));
@@ -501,34 +504,27 @@ const promoteStudent = async (req, res) => {
     else student.programBelts.push({ program: selectedProgramId, belt: String(milestone.belt).trim() });
     if (entitlements.length === 1) student.currentBelt = String(milestone.belt).trim();
 
-    await student.save();
-
-    /*
-     * Write immutable promotion history.
-     */
-    const history = await BeltHistory.create({
-      student: student._id,
-
-      branch: student.branch?._id || student.branch,
-
-      plan: student.plan._id,
-
-      sessionTypeId: selectedProgramId,
-
-      fromBelt: previousBelt,
-
-      toBelt: milestone.belt,
-
-      milestoneDay: milestone.day,
-
-      skill: milestone.skill || "",
-
-      description: milestone.description || "",
-
-      promotedAt: new Date(),
-
-      approvedBy: req.user._id,
-    });
+    let history;
+    const session = await mongoose.startSession();
+    try {
+      await session.withTransaction(async () => {
+        await student.save({ session });
+        [history] = await BeltHistory.create([{
+          student: student._id,
+          branch: student.branch?._id || student.branch,
+          plan: student.plan._id,
+          sessionTypeId: selectedProgramId,
+          fromBelt: previousBelt,
+          toBelt: milestone.belt,
+          milestoneDay: milestone.day,
+          skill: milestone.skill || "",
+          description: milestone.description || "",
+          promotedAt: new Date(),
+          approvedBy: req.user._id,
+        }], { session });
+        await auditService.record({ req, session, action: AUDIT_ACTIONS.PROMOTION_CREATED, entityType: "PROMOTION", entityId: history._id, branchId: student.branch?._id || student.branch, before: { belt: previousBelt }, after: { belt: milestone.belt, studentId: student._id, programId: selectedProgramId, milestoneDay: milestone.day } });
+      });
+    } finally { await session.endSession(); }
 
     const populatedHistory = await BeltHistory.findById(history._id)
       .populate("student", "name age phone email currentBelt")

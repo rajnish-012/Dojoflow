@@ -22,11 +22,16 @@ const TYPE_PERMISSION = Object.freeze({
   FINANCE_STUDENT_DUE_REMINDER: "student.finance.view",
   FINANCE_STUDENT_OVERDUE_REMINDER: "student.finance.view",
   INQUIRY_RECEIVED: "inquiry.view",
+  LEAD_FOLLOWUP_OVERDUE: "inquiry.view",
+  LEAD_CONVERTED: "inquiry.view",
+  MEMBERSHIP_EXPIRING: "student.view",
+  MEMBERSHIP_EXPIRED: "student.view",
+  MEMBERSHIP_RENEWAL_COMPLETED: "student.view",
   SYSTEM: null,
 });
 
 const ALLOWED_ACTION_ROOTS = new Set([
-  "/students", "/attendance", "/makeups", "/inquiries", "/promotions", "/notifications", "/fees", "/student-dashboard",
+  "/students", "/memberships", "/attendance", "/makeups", "/inquiries", "/crm", "/promotions", "/notifications", "/fees", "/student-dashboard",
 ]);
 
 function validateActionUrl(actionUrl) {

@@ -16,6 +16,8 @@ export interface TrainingSlot {
   startTime: string;
   endTime: string;
   isActive: boolean;
+  capacity?: number | null;
+  coach?: string | { _id: string; name?: string } | null;
 }
 
 export interface WeeklyScheduleDay {
@@ -64,6 +66,7 @@ export interface BranchScheduleResponse {
   success: boolean;
   branch: BranchRecord;
   schedule: BranchSchedule;
+  coaches?: { _id: string; name: string }[];
 }
 
 export interface BranchCalendarHoliday {

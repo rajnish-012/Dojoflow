@@ -5,6 +5,7 @@ import { fetchWithSession } from "@/lib/sessionFetch";
 import { useEffect, useMemo, useState } from "react";
 import {
   Award,
+  Bell,
   ArrowUpRight,
   BarChart3,
   CalendarDays,
@@ -67,7 +68,10 @@ type Student = {
     curriculum?: CurriculumItem[];
     milestones?: MilestoneItem[];
   } | null;
+  guardians?: Array<{ name: string; relationship: string; phone?: string; email?: string; emergencyContact?: boolean; pickupAuthorized?: boolean }>;
 };
+
+type PortalNotification = { _id: string; title: string; message: string; createdAt: string; read: boolean; severity?: string };
 
 type CurriculumItem = {
   day?: number;
@@ -634,6 +638,17 @@ function ProfileSection({
           value={student?.branch?.name || "Not available"}
         />
       </div>
+      <div className="mt-6 border-t border-(--line) pt-5">
+        <h3 className="mb-3 text-sm font-bold text-(--foreground)">Parents and guardians</h3>
+        {student?.guardians?.length ? <div className="grid gap-3 sm:grid-cols-2">
+          {student.guardians.map((guardian, index) => <div key={`${guardian.name}-${index}`} className="rounded-xl border border-(--line) p-3.5">
+            <p className="font-semibold text-(--foreground)">{guardian.name} <span className="font-normal text-(--ink-muted)">· {guardian.relationship.toLowerCase()}</span></p>
+            {guardian.phone && <p className="mt-1 text-sm text-(--ink-muted)">{guardian.phone}</p>}
+            {guardian.email && <p className="mt-1 break-all text-sm text-(--ink-muted)">{guardian.email}</p>}
+            <p className="mt-2 text-xs text-(--ink-muted)">{guardian.emergencyContact ? "Emergency contact" : ""}{guardian.emergencyContact && guardian.pickupAuthorized ? " · " : ""}{guardian.pickupAuthorized ? "Pickup authorized" : ""}</p>
+          </div>)}
+        </div> : <p className="text-sm text-(--ink-muted)">No guardian details are on file.</p>}
+      </div>
     </Card>
   );
 }
@@ -854,6 +869,7 @@ export default function StudentDashboard() {
   const [performance, setPerformance] = useState<PerformanceRecord[]>(
     [],
   );
+  const [notifications, setNotifications] = useState<PortalNotification[]>([]);
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -873,6 +889,7 @@ export default function StudentDashboard() {
         studentResponse,
         attendanceResponse,
         performanceResponse,
+        notificationResponse,
       ] = await Promise.all([
         fetchJson<{ student?: Student }>(
           `${API_URL}/students/me`,
@@ -883,11 +900,13 @@ export default function StudentDashboard() {
         fetchJson<{ performance?: PerformanceRecord[] }>(
           `${API_URL}/performance/me`,
         ),
+        fetchJson<{ notifications?: PortalNotification[] }>(`${API_URL}/notifications?limit=5`),
       ]);
 
       setStudent(studentResponse.student || null);
       setAttendance(attendanceResponse.attendance || []);
       setPerformance(performanceResponse.performance || []);
+      setNotifications(notificationResponse.notifications || []);
       setError("");
     } catch (dashboardError) {
       console.error("Student dashboard error:", dashboardError);
@@ -933,6 +952,8 @@ export default function StudentDashboard() {
     ).length;
 
     const totalCount = attendance.length;
+    const pendingMakeups = attendance.filter((record) => record.makeupRequired && !record.makeupCompleted).length;
+    const completedMakeups = attendance.filter((record) => record.makeupRequired && record.makeupCompleted).length;
 
     const percentage =
       totalCount > 0
@@ -944,6 +965,8 @@ export default function StudentDashboard() {
       absentCount,
       totalCount,
       percentage,
+      pendingMakeups,
+      completedMakeups,
     };
   }, [attendance]);
 
@@ -1090,7 +1113,7 @@ export default function StudentDashboard() {
           <SummaryCard
             title="Training Sessions"
             value={attendanceStats.totalCount}
-            subtitle={`${attendanceStats.absentCount} absent`}
+            subtitle={`${attendanceStats.absentCount} absent · ${attendanceStats.pendingMakeups} makeups pending`}
             icon={<Clock3 size={20} />}
           />
 
@@ -1175,6 +1198,11 @@ export default function StudentDashboard() {
           <ProfileSection student={student} />
           <PlanSection student={student} />
         </div>
+
+        <Card className="mt-6" padding="md">
+          <div className="mb-4 flex items-center gap-3"><Bell size={19} className="text-(--accent)" /><div><h2 className="text-lg font-extrabold text-(--foreground)">Notifications</h2><p className="text-sm text-(--ink-muted)">Updates sent to your student account</p></div></div>
+          {notifications.length ? <div className="divide-y divide-(--line)">{notifications.map((item) => <div key={item._id} className="py-3"><div className="flex items-center justify-between gap-3"><p className="font-semibold text-(--foreground)">{item.title}</p><span className="text-xs text-(--ink-muted)">{formatDate(item.createdAt)}</span></div><p className="mt-1 text-sm text-(--ink-muted)">{item.message}</p></div>)}</div> : <p className="text-sm text-(--ink-muted)">No notifications yet.</p>}
+        </Card>
 
         <div className="mt-5 flex items-center justify-between border-t border-(--line) pt-4">
           <p className="text-xs font-medium text-(--ink-faint)">

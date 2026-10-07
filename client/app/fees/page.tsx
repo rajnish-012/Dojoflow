@@ -1,17 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { InvoiceTable, PaymentTable } from "@/components/finance/FinanceTables";
 import {
   Banknote,
   CalendarDays,
   CircleDollarSign,
   Clock3,
   Download,
-  FileText,
   Plus,
   RefreshCw,
-  RotateCcw,
-  Search,
   Settings2,
   ShieldAlert,
   WalletCards,
@@ -20,7 +18,6 @@ import {
   Badge,
   Button,
   Card,
-  EmptyState,
   LoadingSpinner,
   Modal,
   PageHeader,
@@ -105,22 +102,6 @@ function chartLine(values: number[]) {
   }, `M ${points[0].x} ${points[0].y}`);
 }
 
-function StatTile({
-  label,
-  value,
-  icon,
-  note,
-}: {
-  label: string;
-  value: string;
-  icon: React.ReactNode;
-  note?: string;
-}) {
-  return (
-    <SummaryCard title={label} value={value} icon={icon} subtitle={note} />
-  );
-}
-
 export default function FeesPage() {
   const canManage = useCan(PERMISSIONS.FINANCE_MANAGE);
   const canCollect = useCan(PERMISSIONS.FINANCE_COLLECT);
@@ -139,6 +120,11 @@ export default function FeesPage() {
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [invoiceStatusFilter, setInvoiceStatusFilter] = useState("");
+  const [paymentStatusFilter, setPaymentStatusFilter] = useState("");
+  const [branchFilter, setBranchFilter] = useState("");
+  const [invoiceSort, setInvoiceSort] = useState("date-desc");
+  const [paymentSort, setPaymentSort] = useState("date-desc");
   const [createOpen, setCreateOpen] = useState(false);
   const [selectedStudent, setSelectedStudent] = useState("");
   const [selectedEnrollment, setSelectedEnrollment] = useState("");
@@ -220,11 +206,12 @@ export default function FeesPage() {
       invoices.filter((invoice) => {
         const name =
           typeof invoice.student === "object" ? invoice.student.name : "";
-        return `${invoice.invoiceNumber} ${name} ${invoice.status}`
-          .toLowerCase()
-          .includes(search.toLowerCase());
-      }),
-    [invoices, search],
+        const branch = typeof invoice.branch === "object" ? invoice.branch._id : invoice.branch;
+        return (!invoiceStatusFilter || invoice.status === invoiceStatusFilter) &&
+          (!branchFilter || branch === branchFilter) &&
+          `${invoice.invoiceNumber} ${name} ${invoice.status}`.toLowerCase().includes(search.toLowerCase());
+      }).sort((a, b) => invoiceSort === "amount-desc" ? b.total - a.total : invoiceSort === "amount-asc" ? a.total - b.total : (new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime()) * (invoiceSort === "date-asc" ? 1 : -1)),
+    [invoices, search, invoiceStatusFilter, branchFilter, invoiceSort],
   );
   const filteredPayments = useMemo(
     () =>
@@ -235,11 +222,12 @@ export default function FeesPage() {
           typeof payment.invoice === "object"
             ? payment.invoice.invoiceNumber || ""
             : payment.invoice;
-        return `${student} ${invoice} ${payment.kind} ${payment.method} ${payment.referenceId || ""}`
-          .toLowerCase()
-          .includes(search.toLowerCase());
-      }),
-    [payments, search],
+        const branch = typeof payment.branch === "object" ? payment.branch._id : payment.branch;
+        return (!paymentStatusFilter || payment.kind === paymentStatusFilter) &&
+          (!branchFilter || branch === branchFilter) &&
+          `${student} ${invoice} ${payment.kind} ${payment.method} ${payment.referenceId || ""}`.toLowerCase().includes(search.toLowerCase());
+      }).sort((a, b) => paymentSort === "amount-desc" ? b.amount - a.amount : paymentSort === "amount-asc" ? a.amount - b.amount : (new Date(a.paymentDate).getTime() - new Date(b.paymentDate).getTime()) * (paymentSort === "date-asc" ? 1 : -1)),
+    [payments, search, paymentStatusFilter, branchFilter, paymentSort],
   );
   const chosenStudent = candidates.find(
     (student) => student._id === selectedStudent,
@@ -589,9 +577,9 @@ export default function FeesPage() {
         }
       />
 
-      <div className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <StatTile
-          label="Today's collection"
+      <div className="mb-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <SummaryCard
+          title="Today's collection"
           value={
             dashboard
               ? formatMoney(
@@ -602,8 +590,8 @@ export default function FeesPage() {
           }
           icon={<CircleDollarSign size={20} />}
         />
-        <StatTile
-          label="This month"
+        <SummaryCard
+          title="This month"
           value={
             dashboard
               ? formatMoney(
@@ -614,69 +602,48 @@ export default function FeesPage() {
           }
           icon={<Banknote size={20} />}
         />
-        <StatTile
-          label="Outstanding"
+        <SummaryCard
+          title="Outstanding"
           value={
             dashboard
               ? formatMoney(dashboard.metrics.pending, dashboard.currency)
               : "—"
           }
           icon={<WalletCards size={20} />}
-          note={
+          subtitle={
             dashboard
               ? `${dashboard.metrics.partialCount} partially paid`
               : undefined
           }
         />
-        <StatTile
-          label="Overdue"
+        <SummaryCard
+          title="Overdue"
           value={
             dashboard
               ? formatMoney(dashboard.metrics.overdue, dashboard.currency)
               : "—"
           }
           icon={<ShieldAlert size={20} />}
-          note={
+          subtitle={
             dashboard ? `${dashboard.metrics.overdueCount} invoices` : undefined
           }
         />
       </div>
 
-      <div className="mb-5 grid gap-3 sm:grid-cols-2">
-        <Card padding="md" className="flex items-center justify-between gap-4">
-          <div>
-            <p className="text-xs font-semibold text-(--ink-muted)">
-              Expected in the next 30 days
-            </p>
-            <p className="mt-1 text-xl font-bold">
-              {dashboard
-                ? formatMoney(
-                    dashboard.metrics.expectedCollection,
-                    dashboard.currency,
-                  )
-                : "—"}
-            </p>
-          </div>
-          <CalendarDays className="text-(--accent)" />
-        </Card>
-        <Card padding="md" className="flex items-center justify-between gap-4">
-          <div>
-            <p className="text-xs font-semibold text-(--ink-muted)">
-              Partially paid balance
-            </p>
-            <p className="mt-1 text-xl font-bold">
-              {dashboard
-                ? formatMoney(
-                    dashboard.metrics.partiallyPaid,
-                    dashboard.currency,
-                  )
-                : "—"}
-            </p>
-          </div>
-          <Clock3 className="text-(--accent)" />
-        </Card>
+      <div className="mb-5 grid gap-4 sm:grid-cols-2">
+        <SummaryCard
+          title="Expected in the next 30 days"
+          value={dashboard ? formatMoney(dashboard.metrics.expectedCollection, dashboard.currency) : "—"}
+          icon={<CalendarDays size={20} />}
+          subtitle="Scheduled fees due soon"
+        />
+        <SummaryCard
+          title="Partially paid balance"
+          value={dashboard ? formatMoney(dashboard.metrics.partiallyPaid, dashboard.currency) : "—"}
+          icon={<Clock3 size={20} />}
+          subtitle={dashboard ? `${dashboard.metrics.partialCount} partially paid invoices` : undefined}
+        />
       </div>
-
       <div className="mb-5 flex flex-wrap items-center gap-2 border-b border-(--line) pb-3">
         {(
           [
@@ -715,289 +682,9 @@ export default function FeesPage() {
           <LoadingSpinner />
         </Card>
       ) : tab === "invoices" ? (
-        <Card padding="none" className="overflow-hidden">
-          <div className="flex flex-col gap-3 border-b border-(--line) p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
-            <div>
-              <h2 className="font-bold">Invoices</h2>
-              <p className="mt-1 text-xs text-(--ink-muted)">
-                Outstanding balances, due dates, and payment receipts.
-              </p>
-            </div>
-            <label className="relative w-full sm:max-w-xs">
-              <Search
-                size={16}
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-(--ink-faint)"
-              />
-              <input
-                className="h-10 w-full rounded-xl border border-(--line) bg-(--input) pl-9 pr-3 text-sm"
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="Search invoices or students"
-              />
-            </label>
-          </div>
-          {filteredInvoices.length === 0 ? (
-            <EmptyState
-              title="No invoices found"
-              description="Create an invoice from an active student enrollment to start tracking fees."
-              icon={<FileText size={22} />}
-            />
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[850px] text-left text-sm">
-                <thead className="bg-(--surface-muted) text-xs uppercase tracking-wide text-(--ink-muted)">
-                  <tr>
-                    <th className="px-5 py-3">Invoice</th>
-                    <th className="px-5 py-3">Student</th>
-                    <th className="px-5 py-3">Due date</th>
-                    <th className="px-5 py-3">Total / Balance</th>
-                    <th className="px-5 py-3">Status</th>
-                    <th className="px-5 py-3 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredInvoices.map((invoice) => (
-                    <tr key={invoice._id} className="border-t border-(--line)">
-                      <td className="px-5 py-4">
-                        <p className="font-semibold">{invoice.invoiceNumber}</p>
-                        <p className="mt-1 text-xs text-(--ink-muted)">
-                          {invoice.items
-                            .map((item) => item.description)
-                            .join(", ")}
-                        </p>
-                      </td>
-                      <td className="px-5 py-4">
-                        {typeof invoice.student === "object"
-                          ? invoice.student.name
-                          : "Student"}
-                      </td>
-                      <td className="px-5 py-4">
-                        {formatDate(invoice.dueDate)}
-                      </td>
-                      <td className="px-5 py-4">
-                        <p>{formatMoney(invoice.total, invoice.currency)}</p>
-                        <p className="mt-1 text-xs text-(--ink-muted)">
-                          {formatMoney(invoice.balance, invoice.currency)} due
-                        </p>
-                      </td>
-                      <td className="px-5 py-4">
-                        <Badge
-                          variant={
-                            invoice.status === "PAID"
-                              ? "success"
-                              : invoice.status === "OVERDUE"
-                                ? "danger"
-                                : "default"
-                          }
-                        >
-                          {invoice.status.replaceAll("_", " ")}
-                        </Badge>
-                      </td>
-                      <td className="px-5 py-4">
-                        <div className="flex justify-end gap-2">
-                          {invoice.status === "DRAFT" && canManage && (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => void handleIssue(invoice)}
-                            >
-                              Issue
-                            </Button>
-                          )}
-                          {canManage &&
-                            ["DRAFT", "ISSUED"].includes(invoice.status) &&
-                            invoice.paidAmount === 0 && (
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => void handleCancel(invoice)}
-                              >
-                                Cancel
-                              </Button>
-                            )}
-                          {canCollect &&
-                            ["ISSUED", "PARTIALLY_PAID", "OVERDUE"].includes(
-                              invoice.status,
-                            ) && (
-                              <Button
-                                size="sm"
-                                onClick={() => {
-                                  setPayInvoice(invoice);
-                                  setPayAmount(String(invoice.balance));
-                                  setPaymentKey(`pay-${crypto.randomUUID()}`);
-                                }}
-                              >
-                                Record payment
-                              </Button>
-                            )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </Card>
+        <InvoiceTable invoices={filteredInvoices} search={search} onSearch={setSearch} canManage={canManage} canCollect={canCollect} filters={{ status: invoiceStatusFilter, onStatus: setInvoiceStatusFilter, branch: branchFilter, onBranch: setBranchFilter, sort: invoiceSort, onSort: setInvoiceSort, branches, statuses: [{ value: "DRAFT", label: "Draft" }, { value: "ISSUED", label: "Issued" }, { value: "PARTIALLY_PAID", label: "Partially paid" }, { value: "PAID", label: "Paid" }, { value: "OVERDUE", label: "Overdue" }, { value: "CANCELLED", label: "Cancelled" }, { value: "REFUNDED", label: "Refunded" }] }} onIssue={(invoice) => void handleIssue(invoice)} onCancel={(invoice) => void handleCancel(invoice)} onPay={(invoice) => { setPayInvoice(invoice); setPayAmount(String(invoice.balance)); setPaymentKey(`pay-${crypto.randomUUID()}`); }} />
       ) : tab === "payments" ? (
-        <Card padding="none" className="overflow-hidden">
-          <div className="flex flex-col gap-3 border-b border-(--line) p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
-            <div>
-              <h2 className="font-bold">Payment ledger</h2>
-              <p className="mt-1 text-xs text-(--ink-muted)">
-                Every payment, refund, and correction is kept as a separate
-                record.
-              </p>
-            </div>
-            <label className="relative w-full sm:max-w-xs">
-              <Search
-                size={16}
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-(--ink-faint)"
-              />
-              <input
-                className="h-10 w-full rounded-xl border border-(--line) bg-(--input) pl-9 pr-3 text-sm"
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="Search ledger"
-              />
-            </label>
-          </div>
-          {filteredPayments.length ? (
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[950px] text-left text-sm">
-                <thead className="bg-(--surface-muted) text-xs uppercase tracking-wide text-(--ink-muted)">
-                  <tr>
-                    <th className="px-5 py-3">Date</th>
-                    <th className="px-5 py-3">Student / Invoice</th>
-                    <th className="px-5 py-3">Movement</th>
-                    <th className="px-5 py-3">Method / Reference</th>
-                    <th className="px-5 py-3">Received by</th>
-                    <th className="px-5 py-3 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredPayments.map((payment) => {
-                    const isOriginal = payment.kind === "PAYMENT";
-                    const invoiceName =
-                      typeof payment.invoice === "object"
-                        ? payment.invoice.invoiceNumber
-                        : payment.invoice;
-                    const studentName =
-                      typeof payment.student === "object"
-                        ? payment.student.name
-                        : "Student";
-                    return (
-                      <tr
-                        key={payment._id}
-                        className="border-t border-(--line)"
-                      >
-                        <td className="whitespace-nowrap px-5 py-4">
-                          {formatDate(payment.paymentDate)}
-                        </td>
-                        <td className="px-5 py-4">
-                          <p className="font-semibold">{studentName}</p>
-                          <p className="mt-1 text-xs text-(--ink-muted)">
-                            {invoiceName}
-                          </p>
-                        </td>
-                        <td className="px-5 py-4">
-                          <p className="font-semibold">
-                            {payment.kind.replaceAll("_", " ")}
-                          </p>
-                          <p
-                            className={`mt-1 text-xs font-semibold ${payment.direction === "CREDIT" ? "text-(--success)" : "text-(--danger)"}`}
-                          >
-                            {payment.direction === "CREDIT" ? "+" : "−"}
-                            {formatMoney(payment.amount, dashboard?.currency)}
-                          </p>
-                        </td>
-                        <td className="px-5 py-4">
-                          <p>{payment.method.replaceAll("_", " ")}</p>
-                          <p className="mt-1 text-xs text-(--ink-muted)">
-                            {payment.referenceId || payment.reason || "—"}
-                          </p>
-                        </td>
-                        <td className="px-5 py-4">
-                          {typeof payment.receivedBy === "object"
-                            ? payment.receivedBy.name
-                            : "Staff"}
-                        </td>
-                        <td className="px-5 py-4">
-                          <div className="flex justify-end gap-2">
-                            {payment.receipt && (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() =>
-                                  window.open(
-                                    `/fees/receipts/${payment.receipt?._id}`,
-                                    "_blank",
-                                    "noopener,noreferrer",
-                                  )
-                                }
-                              >
-                                Receipt
-                              </Button>
-                            )}
-                            {isOriginal &&
-                              canRefund &&
-                              payment.remainingRefundable > 0 && (
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => {
-                                    setAdjustmentKind("REFUND");
-                                    setAdjustmentPayment(payment);
-                                    setAdjustmentAmount(
-                                      String(payment.remainingRefundable),
-                                    );
-                                    setAdjustmentReason("");
-                                    setAdjustmentKey(
-                                      `refund-${crypto.randomUUID()}`,
-                                    );
-                                  }}
-                                >
-                                  Refund
-                                </Button>
-                              )}
-                            {isOriginal &&
-                              canManage &&
-                              !payment.corrected &&
-                              payment.remainingRefundable ===
-                                payment.amount && (
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => {
-                                    setAdjustmentKind("CORRECTION");
-                                    setAdjustmentPayment(payment);
-                                    setAdjustmentAmount(String(payment.amount));
-                                    setAdjustmentReason("");
-                                    setAdjustmentKey(
-                                      `correction-${crypto.randomUUID()}`,
-                                    );
-                                  }}
-                                >
-                                  <RotateCcw size={14} className="mr-1" />
-                                  Correct
-                                </Button>
-                              )}
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <EmptyState
-              title="No payments found"
-              description="Collected amounts and later adjustments will appear here."
-              icon={<Banknote size={22} />}
-            />
-          )}
-        </Card>
+        <PaymentTable payments={filteredPayments} currency={dashboard?.currency} search={search} onSearch={setSearch} canRefund={canRefund} canManage={canManage} filters={{ status: paymentStatusFilter, onStatus: setPaymentStatusFilter, branch: branchFilter, onBranch: setBranchFilter, sort: paymentSort, onSort: setPaymentSort, branches, statuses: [{ value: "PAYMENT", label: "Payment" }, { value: "REFUND", label: "Refund" }, { value: "CORRECTION", label: "Correction" }] }} onRefund={(payment) => { setAdjustmentKind("REFUND"); setAdjustmentPayment(payment); setAdjustmentAmount(String(payment.remainingRefundable)); setAdjustmentReason(""); setAdjustmentKey(`refund-${crypto.randomUUID()}`); }} onCorrect={(payment) => { setAdjustmentKind("CORRECTION"); setAdjustmentPayment(payment); setAdjustmentAmount(String(payment.amount)); setAdjustmentReason(""); setAdjustmentKey(`correction-${crypto.randomUUID()}`); }} />
       ) : tab === "plans" ? (
         <div className="grid gap-4 xl:grid-cols-2">
           {plans.map((plan) => {

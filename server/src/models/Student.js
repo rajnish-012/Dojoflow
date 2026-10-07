@@ -6,11 +6,26 @@ const planEnrollmentProgramSchema = new mongoose.Schema({
   curriculum: [{ day: Number, title: String, description: String, skill: String }],
 }, { _id: false });
 
+const enrollmentStatusHistorySchema = new mongoose.Schema({
+  from: { type: String, default: null },
+  to: { type: String, required: true },
+  changedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+  changedAt: { type: Date, default: Date.now },
+  note: { type: String, trim: true, maxlength: 300, default: "" },
+}, { _id: false });
+
 const planEnrollmentSchema = new mongoose.Schema({
   plan: { type: mongoose.Schema.Types.ObjectId, ref: "Plan", required: true },
+  feePlan: { type: mongoose.Schema.Types.ObjectId, ref: "Plan", default: null },
+  branch: { type: mongoose.Schema.Types.ObjectId, ref: "Branch", default: null },
+  program: { type: mongoose.Schema.Types.ObjectId, ref: "TrainingSessionType", default: null },
   startDate: { type: Date, required: true },
   endDate: { type: Date, default: null },
-  status: { type: String, enum: ["ACTIVE", "ENDED"], default: "ACTIVE", required: true },
+  status: { type: String, enum: ["ACTIVE", "PAUSED", "COMPLETED", "EXPIRED", "CANCELLED", "ENDED"], default: "ACTIVE", required: true },
+  enrollmentSource: { type: String, trim: true, maxlength: 60, default: "STAFF" },
+  createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+  renewedTo: { type: mongoose.Schema.Types.ObjectId, default: null },
+  statusHistory: { type: [enrollmentStatusHistorySchema], default: [] },
   classesPerWeek: { type: Number, default: null },
   startingBelt: { type: String, default: "White" },
   programs: { type: [planEnrollmentProgramSchema], default: [] },
@@ -33,6 +48,15 @@ const programBeltSchema = new mongoose.Schema({
   program: { type: mongoose.Schema.Types.ObjectId, ref: "TrainingSessionType", required: true },
   belt: { type: String, trim: true, required: true },
 }, { _id: false });
+
+const guardianSchema = new mongoose.Schema({
+  name: { type: String, trim: true, maxlength: 100, required: true },
+  relationship: { type: String, enum: ["FATHER", "MOTHER", "GUARDIAN"], required: true },
+  phone: { type: String, trim: true, maxlength: 20, default: "" },
+  email: { type: String, lowercase: true, trim: true, maxlength: 150, default: "" },
+  emergencyContact: { type: Boolean, default: false },
+  pickupAuthorized: { type: Boolean, default: false },
+}, { _id: true });
 
 const studentSchema = new mongoose.Schema(
   {
@@ -78,6 +102,7 @@ const studentSchema = new mongoose.Schema(
       maxlength: 150,
       default: null,
     },
+    guardians: { type: [guardianSchema], default: [] },
 
     /*
      * Academy branch.
@@ -178,6 +203,10 @@ studentSchema.index({
   branch: 1,
   status: 1,
 });
+
+studentSchema.index({ branch: 1, registrationDate: -1 });
+studentSchema.index({ branch: 1, "planEnrollments.endDate": 1 });
+studentSchema.index({ branch: 1, "planEnrollments.enrollmentSource": 1, "planEnrollments.startDate": 1 });
 
 /*
  * Fast branch + plan filtering.

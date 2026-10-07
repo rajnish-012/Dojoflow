@@ -11,9 +11,10 @@
     "migrate:attendance-date-index": "node scripts/migrateAttendanceDateIndex.js",
     "migrate:notification-indexes": "node scripts/migrateNotificationIndexes.js",
     "migrate:finance-indexes": "node scripts/migrateFinanceIndexes.js",
+    "migrate:crm-indexes": "node scripts/migrateCrmIndexes.js",
     "backup:database": "node scripts/backupMongoDatabase.js",
     "test": "npm run test:unit && npm run test:integration",
-    "test:unit": "node --experimental-test-isolation=none --test tests/unit/securityConfig.test.js",
+    "test:unit": "node --experimental-test-isolation=none --test tests/unit/securityConfig.test.js tests/unit/auditService.test.js",
     "test:integration": "node --experimental-test-isolation=none --test tests/integration/api.integration.test.js",
     "test:coverage": "node --experimental-test-isolation=none --test --experimental-test-coverage tests/unit/securityConfig.test.js && node --experimental-test-isolation=none --test --experimental-test-coverage tests/integration/api.integration.test.js"
   },

@@ -16,6 +16,9 @@ const {
   validateAttendanceDate,
 } = require("../services/branchSchedule.service");
 const { isBranchScoped } = require("../utils/access");
+const { findEnrollmentForDate } = require("../services/enrollmentLifecycle.service");
+const auditService = require("../services/audit.service");
+const { AUDIT_ACTIONS } = require("../config/auditActions");
 
 /* =========================================================
 DATE HELPERS
@@ -1005,8 +1008,12 @@ const getDailyAttendanceSheet = async (req, res) => {
               closingTime: null,
             };
 
-        const datedEnrollment = (student.planEnrollments || []).find((item) => item.status === "ACTIVE" && new Date(item.startDate) <= end && (!item.endDate || new Date(item.endDate) > start));
-        const planEntitlements = datedEnrollment?.programs?.length ? datedEnrollment.programs : (student.plan?.programs || []);
+        const datedEnrollment = findEnrollmentForDate(student.planEnrollments, start, end);
+        const planEntitlements = datedEnrollment?.programs?.length
+          ? datedEnrollment.programs
+          : datedEnrollment || !(student.planEnrollments || []).length
+            ? (student.plan?.programs || [])
+            : [];
         const branchProgramSlots = (branchSchedule.slots || []).filter((slot) => slot.isActive !== false && slot.sessionTypeId && slot._id);
         const scheduledSlots = branchProgramSlots.filter((slot) => planEntitlements.some((item) => String(item.program?._id || item.program) === String(slot.sessionTypeId)));
         const sessionSlots = await Promise.all((branchSchedule.slots || []).map(async (slot) => {
@@ -1098,6 +1105,33 @@ const getDailyAttendanceSheet = async (req, res) => {
         };
       }),
     );
+
+    const capacityStudentQuery = { ...studentQuery, status: "ACTIVE" };
+    delete capacityStudentQuery.$or;
+    const capacityStudents = await Student.find(capacityStudentQuery).select("branch plan planEnrollments").populate("plan", "programs").lean();
+    const currentEnrollmentByBranchProgram = new Map();
+    for (const rosterStudent of capacityStudents) {
+      const datedEnrollment = findEnrollmentForDate(rosterStudent.planEnrollments, start, end);
+      const programs = datedEnrollment?.programs?.length
+        ? datedEnrollment.programs
+        : datedEnrollment || !(rosterStudent.planEnrollments || []).length
+          ? (rosterStudent.plan?.programs || [])
+          : [];
+      for (const entitlement of programs) {
+        const programId = String(entitlement.program?._id || entitlement.program || "");
+        if (!programId) continue;
+        const key = `${String(rosterStudent.branch)}:${programId}`;
+        currentEnrollmentByBranchProgram.set(key, (currentEnrollmentByBranchProgram.get(key) || 0) + 1);
+      }
+    }
+    for (const row of rows) {
+      row.branchSchedule.slots = (row.branchSchedule.slots || []).map((slot) => {
+        const key = `${String(row.student.branch?._id || row.student.branch)}:${String(slot.sessionTypeId || "")}`;
+        const currentEnrollment = currentEnrollmentByBranchProgram.get(key) || 0;
+        const capacity = Number.isInteger(Number(slot.capacity)) && slot.capacity != null ? Number(slot.capacity) : null;
+        return { ...slot, currentEnrollment: slot.entitled ? currentEnrollment : 0, availableSeats: capacity == null ? null : Math.max(0, capacity - (slot.entitled ? currentEnrollment : 0)) };
+      });
+    }
 
     /*
      * Optional status filter is applied after
@@ -1333,11 +1367,7 @@ const markAttendance = async (req, res) => {
    PLAN
 ===================================================== */
 
-    const datedEnrollment = (studentRecord.planEnrollments || []).find((item) => {
-      const starts = new Date(item.startDate);
-      const ends = item.endDate ? new Date(item.endDate) : null;
-      return starts <= requestedDate && (!ends || requestedDate < ends);
-    });
+    const datedEnrollment = findEnrollmentForDate(studentRecord.planEnrollments, requestedDate);
     const plan = await Plan.findById(datedEnrollment?.plan || studentRecord.plan);
 
     if (!plan) {
@@ -1358,6 +1388,26 @@ const markAttendance = async (req, res) => {
       if (activeSlots.length > 1) return res.status(409).json({ success: false, message: "More than one session is scheduled for this date. Select the session before marking attendance.", sessions: activeSlots.map(({ _id, sessionName, sessionTypeId, startTime, endTime }) => ({ _id, sessionName, sessionTypeId, startTime, endTime })) });
     }
     if (!selectedSlot) return res.status(409).json({ success: false, message: "No active program session is scheduled for this branch and date." });
+    if (req.user.role === "COACH") {
+      const CoachAvailability = require("../models/CoachAvailability");
+      const availability = await CoachAvailability.findOne({ coach: req.user._id, branch: studentRecord.branch }).lean();
+      if (availability) {
+        const weekday = requestedDate.getDay();
+        const slotStart = Number(String(selectedSlot.startTime).slice(0, 2)) * 60 + Number(String(selectedSlot.startTime).slice(3, 5));
+        const slotEnd = Number(String(selectedSlot.endTime).slice(0, 2)) * 60 + Number(String(selectedSlot.endTime).slice(3, 5));
+        const worksAtTime = !availability.workingHours.length || availability.workingHours.some((hours) => hours.dayOfWeek === weekday && hours.startTime <= selectedSlot.startTime && hours.endTime >= selectedSlot.endTime);
+        const unavailable = (availability.unavailableSlots || []).some((item) => {
+          const dateMatches = item.date && formatDate(startOfDay(item.date)) === formatDate(requestedDate);
+          const dayMatches = item.dayOfWeek === weekday;
+          if (!dateMatches && !dayMatches) return false;
+          const unavailableStart = Number(String(item.startTime).slice(0, 2)) * 60 + Number(String(item.startTime).slice(3, 5));
+          const unavailableEnd = Number(String(item.endTime).slice(0, 2)) * 60 + Number(String(item.endTime).slice(3, 5));
+          return slotStart < unavailableEnd && slotEnd > unavailableStart;
+        });
+        const onLeave = (availability.leave || []).some((item) => requestedDate >= startOfDay(item.startDate) && requestedDate <= startOfDay(item.endDate));
+        if (!worksAtTime || unavailable || onLeave) return res.status(409).json({ success: false, code: "COACH_UNAVAILABLE", message: "This class conflicts with your working hours, unavailable time, or approved leave." });
+      }
+    }
     const effectivePrograms = datedEnrollment?.programs?.length ? datedEnrollment.programs : (plan.programs || []);
     const planProgram = effectivePrograms.find((item) => String(item.program?._id || item.program) === String(selectedSlot.sessionTypeId));
     if (!planProgram) return res.status(403).json({ success: false, message: "The student's plan does not include this program. Update the plan entitlement before marking attendance." });
@@ -1402,6 +1452,14 @@ const markAttendance = async (req, res) => {
         message: "Attendance has already been marked for this student on this date.",
         attendance: existingAttendance,
       });
+    }
+
+    if (status === "PRESENT" && Number.isInteger(Number(selectedSlot.capacity)) && Number(selectedSlot.capacity) > 0) {
+      const canOverrideCapacity = req.user.role === "SUPER_ADMIN" || (req.user.permissions || []).includes("branch_schedule.capacity.override");
+      if (!canOverrideCapacity) {
+        const occupiedSeats = await Attendance.countDocuments({ branch: studentRecord.branch, date: { $gte: start, $lte: end }, sessionSlotId: selectedSlot._id, status: "PRESENT", attendanceType: { $ne: "MAKEUP" } });
+        if (occupiedSeats >= Number(selectedSlot.capacity)) return res.status(409).json({ success: false, code: "SESSION_CAPACITY_REACHED", message: `This session has reached its capacity of ${selectedSlot.capacity}.`, capacity: Number(selectedSlot.capacity), occupiedSeats });
+      }
     }
 
     /* =====================================================
@@ -1501,6 +1559,14 @@ const markAttendance = async (req, res) => {
       }
     }
 
+    try {
+      await auditService.record({ req, action: AUDIT_ACTIONS.ATTENDANCE_MARKED, entityType: "ATTENDANCE", entityId: attendance._id, branchId: studentRecord.branch, after: { studentId: studentRecord._id, status, attendanceType: "REGULAR", date: attendanceDate, makeupRequired: shouldCreateMakeup } });
+    } catch (auditError) {
+      if (makeup) await Makeup.deleteOne({ _id: makeup._id });
+      await Attendance.deleteOne({ _id: attendance._id });
+      throw auditError;
+    }
+
     if (status === "ABSENT") {
       await safelyNotify({
         type: "ATTENDANCE_ABSENT",
@@ -1598,14 +1664,18 @@ const undoAttendance = async (req, res) => {
     if (!attendance) {
       return res.status(404).json({ success: false, message: "Attendance record was not found." });
     }
-    if (attendance.attendanceType !== "REGULAR") {
-      return res.status(409).json({ success: false, code: "MAKEUP_ATTENDANCE_CANNOT_BE_UNDONE", message: "Makeup attendance is part of the recovery history and cannot be undone here." });
-    }
-
     const branchError = checkBranchAccess(req, attendance.branch);
     if (branchError) return res.status(branchError.status).json({ success: false, message: branchError.message });
     const coachError = await checkCoachStudentAccess(req, attendance.student);
     if (coachError) return res.status(coachError.status).json({ success: false, message: coachError.message });
+
+    if (attendance.attendanceType !== "REGULAR") {
+      return res.status(409).json({ success: false, code: "MAKEUP_ATTENDANCE_CANNOT_BE_UNDONE", message: "Makeup attendance is part of the recovery history and cannot be undone here." });
+    }
+
+    if (startOfDay(attendance.date).getTime() < startOfDay(new Date()).getTime()) {
+      return res.status(409).json({ success: false, code: "HISTORICAL_ATTENDANCE_REQUIRES_CORRECTION", message: "Historical attendance cannot be deleted. Submit a correction request for approval." });
+    }
 
     const Performance = require("../models/Performance");
     if (await Performance.exists({ attendance: attendance._id })) {
@@ -1617,12 +1687,16 @@ const undoAttendance = async (req, res) => {
       return res.status(409).json({ success: false, code: "ATTENDANCE_HAS_COMPLETED_MAKEUP", message: "This absence has a completed makeup recovery and cannot be undone." });
     }
 
-    // Delete the dependent scheduled/cancelled absence recovery before its source.
-    if (makeup) await Makeup.deleteOne({ _id: makeup._id });
-    const deleted = await Attendance.deleteOne({ _id: attendance._id, attendanceType: "REGULAR" });
-    if (!deleted.deletedCount) {
-      return res.status(409).json({ success: false, code: "ATTENDANCE_CHANGED", message: "Attendance changed while undoing. Refresh the sheet and try again." });
-    }
+    const session = await mongoose.startSession();
+    try {
+      await session.withTransaction(async () => {
+        // Delete the dependent scheduled/cancelled absence recovery before its source.
+        if (makeup) await Makeup.deleteOne({ _id: makeup._id }, { session });
+        const deleted = await Attendance.deleteOne({ _id: attendance._id, attendanceType: "REGULAR" }, { session });
+        if (!deleted.deletedCount) throw new Error("Attendance changed while undoing.");
+        await auditService.record({ req, session, action: AUDIT_ACTIONS.ATTENDANCE_UNDONE, entityType: "ATTENDANCE", entityId: attendance._id, branchId: attendance.branch, before: { status: attendance.status, date: attendance.date, makeupRequired: attendance.makeupRequired }, after: { deleted: true } });
+      });
+    } finally { await session.endSession(); }
 
     return res.json({ success: true, message: "Attendance was undone.", attendanceId: id });
   } catch (error) {

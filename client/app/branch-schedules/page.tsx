@@ -30,7 +30,10 @@ import {
   type BranchScheduleListItem,
 } from "@/lib/branchScheduleApi";
 import { PERMISSIONS, useCan } from "@/lib/permissions";
-import { getTrainingSessionTypes, type TrainingSessionTypeRecord } from "@/lib/trainingSessionTypeApi";
+import {
+  getTrainingSessionTypes,
+  type TrainingSessionTypeRecord,
+} from "@/lib/trainingSessionTypeApi";
 
 /* =========================================================
    CONSTANTS
@@ -243,9 +246,15 @@ export default function BranchSchedulesPage() {
   const router = useRouter();
 
   const canViewSchedule = useCan(PERMISSIONS.BRANCH_SCHEDULE_VIEW);
-  const [trainingTypes, setTrainingTypes] = useState<TrainingSessionTypeRecord[]>([]);
+  const [trainingTypes, setTrainingTypes] = useState<
+    TrainingSessionTypeRecord[]
+  >([]);
 
-  useEffect(() => { getTrainingSessionTypes().then(setTrainingTypes).catch(() => setTrainingTypes([])); }, []);
+  useEffect(() => {
+    getTrainingSessionTypes()
+      .then(setTrainingTypes)
+      .catch(() => setTrainingTypes([]));
+  }, []);
   const canManageSchedule = useCan(PERMISSIONS.BRANCH_SCHEDULE_MANAGE);
 
   const today = useMemo(() => {
@@ -527,7 +536,7 @@ export default function BranchSchedulesPage() {
         <PageHeader
           eyebrow="Branch Management"
           title="Training Availability"
-          description="View actual training availability for every date in a month, including holidays, closed days and scheduled training sessions."
+          description="View complete monthly training availability, holidays, and schedules."
           actions={
             <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
               <Button
@@ -1093,8 +1102,19 @@ function SelectedDatePanel({
                         {slot.sessionName || "Training Session"}
                       </p>
 
-                      <Badge variant={slot.sessionTypeId || slot.sessionType ? "accent" : "neutral"} className="mt-2">
-                        {trainingTypes.find((type) => type._id === slot.sessionTypeId)?.name || slot.sessionType?.replaceAll("_", " ") || "General (legacy)"}
+                      <Badge
+                        variant={
+                          slot.sessionTypeId || slot.sessionType
+                            ? "accent"
+                            : "neutral"
+                        }
+                        className="mt-2"
+                      >
+                        {trainingTypes.find(
+                          (type) => type._id === slot.sessionTypeId,
+                        )?.name ||
+                          slot.sessionType?.replaceAll("_", " ") ||
+                          "General (legacy)"}
                       </Badge>
 
                       <p className="mt-2 flex items-center gap-2 text-sm font-medium text-(--ink-muted)">

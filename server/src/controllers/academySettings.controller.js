@@ -1,5 +1,7 @@
 const AcademySettings = require("../models/AcademySettings");
 const { normalizePhone } = require("../utils/phone");
+const auditService = require("../services/audit.service");
+const { AUDIT_ACTIONS } = require("../config/auditActions");
 
 /*
 |--------------------------------------------------------------------------
@@ -114,6 +116,7 @@ const getPublicAcademySettings = async (req, res) => {
 
 async function updateAcademySettings(req, res) {
   try {
+    const existing = await AcademySettings.findOne({}).sort({ updatedAt: -1 }).lean();
     const body = req.body || {};
 
     const academyName = cleanString(body.academyName);
@@ -171,6 +174,11 @@ async function updateAcademySettings(req, res) {
         setDefaultsOnInsert: true,
       },
     );
+
+    const fields = ["academyName", "tagline", "logoUrl", "faviconUrl", "primaryColor", "secondaryColor", "timezone", "currency"];
+    const before = Object.fromEntries(fields.map((field) => [field, existing?.[field] ?? null]));
+    const after = Object.fromEntries(fields.map((field) => [field, updates[field]]));
+    if (JSON.stringify(before) !== JSON.stringify(after)) await auditService.record({ req, action: AUDIT_ACTIONS.SETTINGS_UPDATED, entityType: "SETTINGS", entityId: settings._id, before, after });
 
     return res.status(200).json({
       success: true,

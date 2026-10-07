@@ -27,6 +27,30 @@ const preferredWeeklySessionSchema = new mongoose.Schema(
 
 const inquirySchema = new mongoose.Schema(
   {
+    source: { type: String, trim: true, maxlength: 80, default: "WEBSITE" },
+    notes: { type: String, trim: true, maxlength: 2000, default: "" },
+    assignedTo: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+    nextFollowUpAt: { type: Date, default: null, index: true },
+    followUps: [{
+      note: { type: String, required: true, trim: true, maxlength: 2000 },
+      dueAt: { type: Date, default: null },
+      assignedTo: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+      createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+      createdAt: { type: Date, default: Date.now },
+    }],
+    statusHistory: [{
+      from: { type: String, default: null },
+      to: { type: String, required: true },
+      changedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+      changedAt: { type: Date, default: Date.now },
+      note: { type: String, trim: true, maxlength: 500, default: "" },
+    }],
+    convertedStudent: { type: mongoose.Schema.Types.ObjectId, ref: "Student", default: null },
+    convertedEnrollment: { type: mongoose.Schema.Types.ObjectId, default: null },
+    convertedInvoice: { type: mongoose.Schema.Types.ObjectId, ref: "Invoice", default: null },
+    convertedAt: { type: Date, default: null, index: true },
+    conversionLock: { type: String, default: null, select: false },
+    conversionLockAt: { type: Date, default: null, select: false },
     fullName: {
       type: String,
       required: true,
@@ -108,7 +132,7 @@ const inquirySchema = new mongoose.Schema(
 
     status: {
       type: String,
-      enum: ["NEW", "CONTACTED", "ENROLLED", "CLOSED"],
+      enum: ["NEW", "CONTACTED", "TRIAL_SCHEDULED", "TRIAL_COMPLETED", "INTERESTED", "NOT_INTERESTED", "CONVERTED", "LOST", "ENROLLED", "CLOSED"],
       default: "NEW",
     },
   },
@@ -118,5 +142,9 @@ const inquirySchema = new mongoose.Schema(
 );
 
 inquirySchema.index({ email: 1, phone: 1, createdAt: -1 });
+inquirySchema.index({ branch: 1, status: 1, createdAt: -1 });
+inquirySchema.index({ branch: 1, createdAt: -1 });
+inquirySchema.index({ assignedTo: 1, createdAt: -1 });
+inquirySchema.index({ branch: 1, nextFollowUpAt: 1, assignedTo: 1 });
 
 module.exports = mongoose.model("Inquiry", inquirySchema);

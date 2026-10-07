@@ -15,7 +15,7 @@ Trash2,
 import {
 Badge,
 Button,
-Card,
+DataTableSection,
 EmptyState,
 ErrorState,
 IconButton,
@@ -24,6 +24,8 @@ LoadingSpinner,
 Modal,
 PageHeader,
 Select,
+TableHeading,
+TablePagination,
 Textarea,
 } from "@/components/ui";
 
@@ -96,6 +98,9 @@ ALL: "All branches",
 "student.update": "Update students",
 "student.delete": "Delete students",
 
+"membership.view": "View memberships",
+"membership.manage": "Manage memberships",
+
 "coach_assignment.view": "View coach assignments",
 "coach_assignment.manage": "Manage coach assignments",
 
@@ -156,6 +161,7 @@ ALL: "All branches",
 const PERMISSION_MODULE_KEYS: Record<string, string> = {
   "dashboard.view": "dashboard",
   "student.view": "students", "student.create": "students", "student.update": "students", "student.delete": "students",
+  "membership.view": "memberships", "membership.manage": "memberships",
   "coach_assignment.view": "coach-assignments", "coach_assignment.manage": "coach-assignments",
   "plan.view": "plans", "plan.manage": "plans",
   "curriculum.view": "curriculum", "curriculum.manage": "curriculum",
@@ -192,6 +198,11 @@ permissions: [
 "student.update",
 "student.delete",
 ],
+},
+{
+key: "memberships",
+label: "Memberships",
+permissions: ["membership.view", "membership.manage"],
 },
 {
 key: "coach-assignments",
@@ -591,6 +602,8 @@ const canViewRoles = useCan(PERMISSIONS.ROLE_VIEW);
 const canManageRoles = useCan(PERMISSIONS.ROLE_MANAGE);
 const [roles, setRoles] =
 useState<RoleRecord[]>([]);
+const [currentPage, setCurrentPage] = useState(1);
+const [pageSize, setPageSize] = useState(25);
 const [modules, setModules] = useState<ManagedModule[]>([]);
 
 const [permissionCatalog, setPermissionCatalog] =
@@ -627,6 +640,9 @@ const [expandedGroups, setExpandedGroups] =
 useState<Record<string, boolean>>(
 {},
 );
+const totalRolePages = Math.max(1, Math.ceil(roles.length / pageSize));
+const rolePage = Math.min(currentPage, totalRolePages);
+const visibleRoles = roles.slice((rolePage - 1) * pageSize, rolePage * pageSize);
 
 /* -------------------------------------------------------
 PERMISSION GROUPS
@@ -1151,25 +1167,8 @@ Add Role
         description="Add a role to get started."
       />
     ) : (
-      <Card padding="none">
-        <div className="flex flex-col gap-4 border-b border-(--line) px-5 py-5 sm:px-6 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <div className="flex items-center gap-2">
-              <h2 className="text-lg font-extrabold tracking-tight text-(--foreground)">
-                All Roles
-              </h2>
-
-              <Badge variant="neutral">
-                {roles.length}
-              </Badge>
-            </div>
-
-            <p className="mt-1 text-sm text-(--ink-muted)">
-              Built-in roles and database-backed custom roles.
-            </p>
-          </div>
-
-          <div className="flex flex-wrap gap-2">
+      <DataTableSection title="All Roles" description="Built-in roles and database-backed custom roles." icon={<ShieldCheck size={18} />} toolbar={<div className="flex flex-wrap gap-2">
+            <Badge variant="neutral">{roles.length} roles</Badge>
             <div className="rounded-xl border border-(--line) bg-(--surface) px-3.5 py-2 text-xs font-semibold text-(--ink-muted)">
               {
                 roles.filter(
@@ -1186,45 +1185,30 @@ Add Role
               }{" "}
               permissions
             </div>
-          </div>
-        </div>
+          </div>}>
 
         <div className="overflow-x-auto">
           <table className="w-full min-w-[980px]">
             <thead className="border-b border-(--line) bg-(--surface)">
               <tr>
-                <th className="px-6 py-4 text-left text-[11px] font-bold uppercase tracking-[0.12em] text-(--ink-faint)">
-                  Role
-                </th>
+                <TableHeading>Role</TableHeading>
 
-                <th className="px-6 py-4 text-left text-[11px] font-bold uppercase tracking-[0.12em] text-(--ink-faint)">
-                  Description
-                </th>
+                <TableHeading>Description</TableHeading>
 
-                <th className="px-6 py-4 text-left text-[11px] font-bold uppercase tracking-[0.12em] text-(--ink-faint)">
-                  Data access
-                </th>
+                <TableHeading>Data access</TableHeading>
 
-                <th className="px-6 py-4 text-left text-[11px] font-bold uppercase tracking-[0.12em] text-(--ink-faint)">
-                  Permissions
-                </th>
+                <TableHeading>Permissions</TableHeading>
 
-                <th className="px-6 py-4 text-left text-[11px] font-bold uppercase tracking-[0.12em] text-(--ink-faint)">
-                  Users
-                </th>
+                <TableHeading>Users</TableHeading>
 
-                <th className="px-6 py-4 text-left text-[11px] font-bold uppercase tracking-[0.12em] text-(--ink-faint)">
-                  Type
-                </th>
+                <TableHeading>Type</TableHeading>
 
-                <th className="px-6 py-4 text-right text-[11px] font-bold uppercase tracking-[0.12em] text-(--ink-faint)">
-                  Actions
-                </th>
+                <TableHeading align="right">Actions</TableHeading>
               </tr>
             </thead>
 
             <tbody className="divide-y divide-(--line)">
-              {roles.map(
+              {visibleRoles.map(
                 (role) => (
                   <tr
                     key={
@@ -1397,7 +1381,18 @@ Add Role
             </tbody>
           </table>
         </div>
-      </Card>
+        <TablePagination
+          currentPage={rolePage}
+          totalPages={totalRolePages}
+          totalItems={roles.length}
+          visibleItems={visibleRoles.length}
+          pageSize={pageSize}
+          entityLabel="roles"
+          onPrevious={() => setCurrentPage((value) => Math.max(1, value - 1))}
+          onNext={() => setCurrentPage((value) => Math.min(totalRolePages, value + 1))}
+          onPageSizeChange={(value) => { setPageSize(value); setCurrentPage(1); }}
+        />
+      </DataTableSection>
     )}
   </div>
 

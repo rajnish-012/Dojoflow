@@ -3,6 +3,8 @@ const mongoose = require("mongoose");
 const CoachStudentAssignment = require("../models/CoachStudentAssignment");
 const User = require("../models/User");
 const Student = require("../models/Student");
+const CoachAvailability = require("../models/CoachAvailability");
+const BranchSchedule = require("../models/BranchSchedule");
 const { isBranchScoped } = require("../utils/access");
 
 const checkBranchAccess = (req, branchId) => {
@@ -26,6 +28,62 @@ const checkBranchAccess = (req, branchId) => {
 
   return null;
 };
+
+const canManageCoachAvailability = (req, coachId) => req.user.role === "SUPER_ADMIN" ||
+  (req.user.role === "COACH" && String(req.user._id) === String(coachId)) ||
+  (Array.isArray(req.user.permissions) && req.user.permissions.includes("coach_assignment.manage"));
+
+function validClockRange(item) {
+  const pattern = /^([01]\d|2[0-3]):([0-5]\d)$/;
+  return pattern.test(String(item?.startTime || "")) && pattern.test(String(item?.endTime || "")) && item.startTime < item.endTime;
+}
+
+async function getCoachAvailability(req, res) {
+  try {
+    const coachId = req.params.coachId;
+    if (!mongoose.isValidObjectId(coachId)) return res.status(400).json({ success: false, message: "Invalid coach ID." });
+    if (req.user.role === "COACH" && String(req.user._id) !== String(coachId)) return res.status(403).json({ success: false, message: "You can only view your own availability." });
+    if (!canManageCoachAvailability(req, coachId) && !(req.user.permissions || []).some((permission) => ["coach_assignment.view", "report.view"].includes(permission))) return res.status(403).json({ success: false, message: "You do not have permission to view coach availability." });
+    const coach = await User.findOne({ _id: coachId, role: "COACH" }).select("_id name branch").lean();
+    if (!coach) return res.status(404).json({ success: false, message: "Coach not found." });
+    const accessError = checkBranchAccess(req, coach.branch);
+    if (accessError) return res.status(accessError.status).json({ success: false, message: accessError.message });
+    const availability = await CoachAvailability.findOne({ coach: coach._id }).lean();
+    const branchSchedules = await BranchSchedule.find({ branch: coach.branch, "weeklySchedule.slots.coach": coach._id }).select("weeklySchedule").lean();
+    const schedule = branchSchedules.flatMap((item) => (item.weeklySchedule || []).flatMap((day) => (day.slots || []).filter((slot) => String(slot.coach || "") === String(coach._id)).map((slot) => ({ dayOfWeek: day.dayOfWeek, sessionName: slot.sessionName, startTime: slot.startTime, endTime: slot.endTime, sessionTypeId: slot.sessionTypeId }))));
+    const assignments = await CoachStudentAssignment.find({ coach: coach._id, branch: coach.branch, status: "ACTIVE" }).populate({ path: "student", select: "name currentBelt status plan", populate: { path: "plan", select: "name" } }).lean();
+    return res.json({ success: true, coach, schedule, assignments, availability: availability || { coach: coach._id, branch: coach.branch, workingHours: [], leave: [], unavailableSlots: [] } });
+  } catch (error) {
+    console.error("Get coach availability failed:", error);
+    return res.status(500).json({ success: false, message: "Failed to load coach availability." });
+  }
+}
+
+async function updateCoachAvailability(req, res) {
+  try {
+    const coachId = req.params.coachId;
+    if (!mongoose.isValidObjectId(coachId)) return res.status(400).json({ success: false, message: "Invalid coach ID." });
+    if (!canManageCoachAvailability(req, coachId)) return res.status(403).json({ success: false, message: "You do not have permission to update coach availability." });
+    const coach = await User.findOne({ _id: coachId, role: "COACH" }).select("_id branch").lean();
+    if (!coach) return res.status(404).json({ success: false, message: "Coach not found." });
+    const accessError = checkBranchAccess(req, coach.branch);
+    if (accessError) return res.status(accessError.status).json({ success: false, message: accessError.message });
+    const { workingHours = [], leave = [], unavailableSlots = [] } = req.body || {};
+    if (![workingHours, leave, unavailableSlots].every(Array.isArray)) return res.status(400).json({ success: false, message: "Availability sections must be arrays." });
+    if (workingHours.some((item) => !Number.isInteger(Number(item.dayOfWeek)) || Number(item.dayOfWeek) < 0 || Number(item.dayOfWeek) > 6 || !validClockRange(item))) return res.status(400).json({ success: false, message: "Working hours need a valid weekday and start/end times." });
+    if (unavailableSlots.some((item) => (item.dayOfWeek == null && !item.date) || (item.dayOfWeek != null && (!Number.isInteger(Number(item.dayOfWeek)) || Number(item.dayOfWeek) < 0 || Number(item.dayOfWeek) > 6)) || !validClockRange(item))) return res.status(400).json({ success: false, message: "Unavailable slots need a weekday or date and valid start/end times." });
+    const normalizedLeave = leave.map((item) => ({ ...item, startDate: new Date(item.startDate), endDate: new Date(item.endDate) }));
+    if (normalizedLeave.some((item) => Number.isNaN(item.startDate.getTime()) || Number.isNaN(item.endDate.getTime()) || item.startDate > item.endDate)) return res.status(400).json({ success: false, message: "Leave dates must have a valid start and end date." });
+    const hasOverlap = (items, dayKey) => items.some((item, index) => items.slice(index + 1).some((other) => item[dayKey] === other[dayKey] && item.startTime < other.endTime && item.endTime > other.startTime));
+    if (hasOverlap(workingHours, "dayOfWeek")) return res.status(409).json({ success: false, message: "Working hours overlap for the same weekday." });
+    if (hasOverlap(unavailableSlots.filter((item) => item.dayOfWeek != null), "dayOfWeek")) return res.status(409).json({ success: false, message: "Unavailable time slots overlap for the same weekday." });
+    const availability = await CoachAvailability.findOneAndUpdate({ coach: coach._id }, { $set: { branch: coach.branch, workingHours, leave: normalizedLeave, unavailableSlots, updatedBy: req.user._id } }, { upsert: true, new: true, runValidators: true, setDefaultsOnInsert: true });
+    return res.json({ success: true, availability });
+  } catch (error) {
+    console.error("Update coach availability failed:", error);
+    return res.status(500).json({ success: false, message: "Failed to update coach availability." });
+  }
+}
 
 /* =========================================================
    GET COACHES
@@ -444,4 +502,6 @@ module.exports = {
   createAssignment,
   deleteAssignment,
   getMyAssignedStudents,
+  getCoachAvailability,
+  updateCoachAvailability,
 };

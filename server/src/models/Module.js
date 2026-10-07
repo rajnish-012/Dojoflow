@@ -65,19 +65,10 @@ const moduleSchema = new mongoose.Schema(
       default: null,
     },
 
-    // Optional sidebar group. Null keeps the legacy key-based grouping.
+    // Optional sidebar section label. Null keeps legacy key-based grouping.
     group: {
       type: String,
-      enum: [
-        null,
-        "ungrouped",
-        "academy",
-        "operations",
-        "content",
-        "reports",
-        "administration",
-        "settings",
-      ],
+      trim: true,
       default: null,
     },
 

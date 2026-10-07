@@ -5,6 +5,7 @@ import {
   CalendarOff,
   Check,
   Clock3,
+  FileClock,
   RotateCcw,
   X,
 } from "lucide-react";
@@ -103,6 +104,9 @@ export type DailyAttendanceRow = {
       entitled?: boolean;
       curriculumAvailable?: boolean;
       curriculumComplete?: boolean;
+      capacity?: number | null;
+      currentEnrollment?: number;
+      availableSeats?: number | null;
     }[];
 
     openingTime: string | null;
@@ -118,6 +122,8 @@ type AttendanceRowProps = {
 
   onMark: (row: DailyAttendanceRow, status: "PRESENT" | "ABSENT") => void;
   onUndo: (row: DailyAttendanceRow) => void;
+  canRequestCorrection?: boolean;
+  onRequestCorrection?: (row: DailyAttendanceRow) => void;
 };
 
 function getInitials(name: string) {
@@ -164,6 +170,8 @@ export default function AttendanceRow({
   saving,
   onMark,
   onUndo,
+  canRequestCorrection = false,
+  onRequestCorrection,
 }: AttendanceRowProps) {
   const marked = Boolean(row.attendance);
 
@@ -547,7 +555,7 @@ export default function AttendanceRow({
           {!isHoliday &&
             marked &&
             canManage &&
-            row.attendance?.attendanceType !== "MAKEUP" && (
+            row.attendance?.attendanceType !== "MAKEUP" && !canRequestCorrection && (
               <Button
                 type="button"
                 size="sm"
@@ -558,6 +566,8 @@ export default function AttendanceRow({
                 <RotateCcw size={15} /> Undo
               </Button>
             )}
+
+          {!isHoliday && marked && canRequestCorrection && row.attendance?.attendanceType !== "MAKEUP" && <Button type="button" size="sm" variant="outline" disabled={saving || !row.attendance?._id} onClick={() => onRequestCorrection?.(row)}><FileClock size={15}/> Request correction</Button>}
 
           {!isHoliday && !marked && !isBranchClosed && (
             <>

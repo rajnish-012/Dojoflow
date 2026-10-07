@@ -10,6 +10,8 @@ const CoachStudentAssignment = require("../models/CoachStudentAssignment");
 const { validatePassword, sessionInvalidationTime } = require("../utils/passwordPolicy");
 const { normalizePhone } = require("../utils/phone");
 const { safelyNotify } = require("../services/notification.service");
+const auditService = require("../services/audit.service");
+const { AUDIT_ACTIONS } = require("../config/auditActions");
 
 /* =========================================================
    CONSTANTS
@@ -33,6 +35,20 @@ function normalizeString(value) {
   }
 
   return value.trim();
+}
+
+function normalizeGuardians(value) {
+  if (!Array.isArray(value) || value.length > 8) throw new Error("Add no more than 8 guardians.");
+  return value.filter((item) => item && String(item.name || "").trim()).map((item) => {
+    const relationship = String(item.relationship || "GUARDIAN").toUpperCase();
+    if (!["FATHER", "MOTHER", "GUARDIAN"].includes(relationship)) throw new Error("Choose a valid guardian relationship.");
+    const phone = item.phone ? normalizePhone(item.phone) : "";
+    if (item.phone && !phone) throw new Error("Enter a valid guardian phone number with its country code.");
+    const email = String(item.email || "").trim().toLowerCase();
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("Enter a valid guardian email address.");
+    return { name: String(item.name).trim(), relationship, phone: phone || "", email,
+      emergencyContact: Boolean(item.emergencyContact), pickupAuthorized: Boolean(item.pickupAuthorized) };
+  });
 }
 
 function enrollmentEndDate(plan, startDate) {
@@ -475,6 +491,7 @@ const createStudent = async (req, res) => {
       branch,
       plan,
       joinDate,
+      guardians,
     } = req.body;
 
     const normalizedName = normalizeString(name);
@@ -483,6 +500,12 @@ const createStudent = async (req, res) => {
     const normalizedPhone = normalizePhone(rawPhone);
 
     const normalizedLoginEmail = normalizeEmail(loginEmail);
+    let normalizedGuardians = [];
+    try {
+      if (guardians !== undefined) normalizedGuardians = normalizeGuardians(guardians);
+    } catch (validationError) {
+      return res.status(400).json({ success: false, message: validationError.message });
+    }
 
     const normalizedStudentEmail = normalizeEmail(email);
 
@@ -672,7 +695,6 @@ const createStudent = async (req, res) => {
         message: "Selected training plan is inactive",
       });
     }
-
     if (selectedPlan.feeBranch && String(selectedPlan.feeBranch) !== String(selectedBranch._id)) {
       return res.status(400).json({ success: false, message: "Selected fee structure is not available to this branch" });
     }
@@ -773,7 +795,8 @@ const createStudent = async (req, res) => {
       email: normalizedStudentEmail || undefined,
       branch: selectedBranch._id,
       plan: selectedPlan._id,
-      planEnrollments: [{ plan: selectedPlan._id, startDate: parsedJoinDate, endDate: enrollmentEndDate(selectedPlan, parsedJoinDate), status: "ACTIVE", ...enrollmentSnapshot(selectedPlan, selectedBranch._id) }],
+      guardians: normalizedGuardians,
+      planEnrollments: [{ plan: selectedPlan._id, feePlan: selectedPlan._id, branch: selectedBranch._id, program: selectedPlan.programs?.[0]?.program?._id || selectedPlan.programs?.[0]?.program || null, startDate: parsedJoinDate, endDate: enrollmentEndDate(selectedPlan, parsedJoinDate), status: "ACTIVE", enrollmentSource: "ADMISSION", createdBy: req.user._id, ...enrollmentSnapshot(selectedPlan, selectedBranch._id) }],
       joinDate: parsedJoinDate,
       status: "ACTIVE",
       currentBelt:
@@ -787,6 +810,8 @@ const createStudent = async (req, res) => {
       .populate("branch", "name address")
       .populate("plan", "name price duration startingBelt isActive programs")
       .populate("plan.programs.program", "name slug");
+
+    await auditService.record({ req, action: AUDIT_ACTIONS.STUDENT_CREATED, entityType: "STUDENT", entityId: createdStudent._id, branchId: selectedBranch._id, after: { status: createdStudent.status, branchId: selectedBranch._id, planId: selectedPlan._id, joinDate: createdStudent.joinDate, guardianCount: normalizedGuardians.length } });
 
     await safelyNotify({
       type: "STUDENT_CREATED",
@@ -868,6 +893,7 @@ const updateStudent = async (req, res) => {
       status,
       password,
       joinDate,
+      guardians,
     } = req.body;
 
     if (!isValidObjectId(id)) {
@@ -885,6 +911,15 @@ const updateStudent = async (req, res) => {
         message: "Student not found",
       });
     }
+    const auditBefore = { status: student.status, branchId: student.branch, planId: student.plan, currentBelt: student.currentBelt, joinDate: student.joinDate, guardianCount: student.guardians?.length || 0 };
+    if (guardians !== undefined) {
+      try {
+        student.guardians = normalizeGuardians(guardians);
+      } catch (validationError) {
+        return res.status(400).json({ success: false, message: validationError.message });
+      }
+    }
+    const originalBranchId = String(student.branch);
 
     /*
      * Branch and coach access.
@@ -1057,7 +1092,8 @@ const updateStudent = async (req, res) => {
      *
      * Custom roles with student.update can change the plan.
      */
-    if (plan !== undefined) {
+    const branchChanged = Boolean(targetBranch && String(targetBranch._id) !== originalBranchId);
+    if (plan !== undefined || branchChanged) {
       if (isCoach(req)) {
         return res.status(403).json({
           success: false,
@@ -1065,14 +1101,15 @@ const updateStudent = async (req, res) => {
         });
       }
 
-      if (!isValidObjectId(plan)) {
+      const requestedPlan = plan ?? student.plan;
+      if (!isValidObjectId(requestedPlan)) {
         return res.status(400).json({
           success: false,
           message: "Invalid plan ID",
         });
       }
 
-      const selectedPlan = await Plan.findById(plan);
+      const selectedPlan = await Plan.findById(requestedPlan);
 
       if (!selectedPlan) {
         return res.status(404).json({
@@ -1096,15 +1133,15 @@ const updateStudent = async (req, res) => {
         return res.status(400).json({ success: false, message: "Selected fee structure is inactive for this branch" });
       }
 
-      if (String(student.plan) !== String(selectedPlan._id)) {
+      if (String(student.plan) !== String(selectedPlan._id) || branchChanged) {
         const enrollmentStart = new Date();
         enrollmentStart.setHours(0, 0, 0, 0);
         const currentEnrollment = [...(student.planEnrollments || [])].reverse().find((item) => item.status === "ACTIVE");
         if (currentEnrollment) {
-          currentEnrollment.status = "ENDED";
+          currentEnrollment.status = "COMPLETED";
           currentEnrollment.endDate = enrollmentStart;
         }
-        student.planEnrollments.push({ plan: selectedPlan._id, startDate: enrollmentStart, endDate: enrollmentEndDate(selectedPlan, enrollmentStart), status: "ACTIVE", ...enrollmentSnapshot(selectedPlan, enrollmentBranch) });
+        student.planEnrollments.push({ plan: selectedPlan._id, feePlan: selectedPlan._id, branch: enrollmentBranch, program: selectedPlan.programs?.[0]?.program?._id || selectedPlan.programs?.[0]?.program || null, startDate: enrollmentStart, endDate: enrollmentEndDate(selectedPlan, enrollmentStart), status: "ACTIVE", enrollmentSource: branchChanged ? "BRANCH_TRANSFER" : "PLAN_CHANGE", createdBy: req.user._id, ...enrollmentSnapshot(selectedPlan, enrollmentBranch) });
         student.plan = selectedPlan._id;
       }
     }
@@ -1276,6 +1313,15 @@ const updateStudent = async (req, res) => {
       .populate("plan", "name price duration startingBelt isActive programs")
       .populate("plan.programs.program", "name slug");
 
+    const auditAfter = { status: student.status, branchId: student.branch, planId: student.plan, currentBelt: student.currentBelt, joinDate: student.joinDate, guardianCount: student.guardians?.length || 0, changedFields: Object.keys(req.body || {}).filter((field) => ["name", "age", "gender", "email", "phone", "address", "guardians", "status", "branch", "plan", "currentBelt", "joinDate", "programBelts"].includes(field)) };
+    if (JSON.stringify(auditBefore) !== JSON.stringify(auditAfter)) {
+      await auditService.record({ req, action: AUDIT_ACTIONS.STUDENT_UPDATED, entityType: "STUDENT", entityId: student._id, branchId: student.branch || auditBefore.branchId, before: auditBefore, after: auditAfter });
+    }
+    if (passwordChanged && linkedUser) {
+      await auditService.record({ req, action: AUDIT_ACTIONS.PASSWORD_CHANGED, entityType: "USER", entityId: linkedUser._id, branchId: linkedUser.branch, metadata: { changedByAdministrator: true, sessionsInvalidated: true } });
+      await auditService.record({ req, action: AUDIT_ACTIONS.SESSION_INVALIDATED, entityType: "USER", entityId: linkedUser._id, branchId: linkedUser.branch, metadata: { reason: "PASSWORD_CHANGED" } });
+    }
+
     if (originalStatus !== "COMPLETED" && student.status === "COMPLETED") {
       await safelyNotify({
         type: "STUDENT_COMPLETED",
@@ -1358,6 +1404,7 @@ const deleteStudent = async (req, res) => {
         message: accessError.message,
       });
     }
+    const previousStatus = student.status;
 
     /*
      * Deactivate linked login account.
@@ -1392,6 +1439,8 @@ const deleteStudent = async (req, res) => {
         },
       },
     );
+
+    await auditService.record({ req, action: AUDIT_ACTIONS.STUDENT_DEACTIVATED, entityType: "STUDENT", entityId: student._id, branchId: student.branch, before: { status: previousStatus, branchId: student.branch }, after: { status: student.status, branchId: student.branch } });
 
     return res.status(200).json({
       success: true,

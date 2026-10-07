@@ -7,38 +7,16 @@ const BeltHistory = require("../models/BeltHistory");
 const Branch = require("../models/Branch");
 const User = require("../models/User");
 const Makeup = require("../models/Makeup");
+const CoachStudentAssignment = require("../models/CoachStudentAssignment");
+const BranchSchedule = require("../models/BranchSchedule");
+const TrainingSessionType = require("../models/TrainingSessionType");
+const { REPORT_TIME_ZONE, regularAttendanceStages } = require("../services/attendanceAnalytics.service");
 
-const REPORT_TIME_ZONE = "Asia/Kolkata";
 
 function indiaYearBoundary(year) {
   // Attendance stores academy-local calendar dates as Date values. Translate
   // India midnight to UTC so Jan 1 and month boundaries are included correctly.
   return new Date(Date.UTC(year, 0, 1) - (5 * 60 + 30) * 60 * 1000);
-}
-
-function regularAttendanceStages(match) {
-  return [
-    {
-      $match: {
-        ...match,
-        attendanceType: { $ne: "MAKEUP" },
-        status: { $in: ["PRESENT", "ABSENT"] },
-      },
-    },
-    { $sort: { date: 1, createdAt: 1, _id: 1 } },
-    {
-      $group: {
-        _id: {
-          student: "$student",
-          calendarDate: {
-            $dateToString: { format: "%Y-%m-%d", date: "$date", timezone: REPORT_TIME_ZONE },
-          },
-        },
-        attendance: { $first: "$$ROOT" },
-      },
-    },
-    { $replaceRoot: { newRoot: "$attendance" } },
-  ];
 }
 
 let Inquiry = null;
@@ -1604,7 +1582,7 @@ async function getCoachReports(req, res) {
 
     const coachIds = coaches.map((coach) => coach._id);
 
-    const [attendance, performance] = await Promise.all([
+    const [attendance, performance, assignments, promotionRows] = await Promise.all([
       Attendance.aggregate([
         ...regularAttendanceStages({ markedBy: { $in: coachIds }, date: { $gte: from, $lt: to } }),
         {
@@ -1653,6 +1631,8 @@ async function getCoachReports(req, res) {
           },
         },
       ]),
+      CoachStudentAssignment.find({ coach: { $in: coachIds }, status: "ACTIVE", ...(isBranchScopedUser(req) ? { branch: getUserBranchId(req) || null } : req.query.branch ? { branch: toObjectId(req.query.branch) } : {}) }).select("coach student branch").lean(),
+      BeltHistory.aggregate([{ $match: { approvedBy: { $in: coachIds }, promotedAt: { $gte: from, $lt: to } } }, { $group: { _id: "$approvedBy", count: { $sum: 1 } } }]),
     ]);
 
     const attendanceMap = new Map();
@@ -1687,6 +1667,25 @@ async function getCoachReports(req, res) {
       performanceMap.set(String(item._id), item);
     });
 
+    const assignedStudentIds = [...new Set(assignments.map((item) => String(item.student)))];
+    const assignedStudents = assignedStudentIds.length ? await Student.find({ _id: { $in: assignedStudentIds } }).select("_id status plan").populate("plan", "programs").lean() : [];
+    const assignedStudentMap = new Map(assignedStudents.map((item) => [String(item._id), item]));
+    const assignmentMap = new Map();
+    assignments.forEach((item) => {
+      const id = String(item.coach);
+      if (!assignmentMap.has(id)) assignmentMap.set(id, { ids: new Set(), active: 0, completed: 0, programs: new Set() });
+      const target = assignmentMap.get(id);
+      target.ids.add(String(item.student));
+      const studentRecord = assignedStudentMap.get(String(item.student));
+      if (studentRecord?.status === "ACTIVE") target.active += 1;
+      if (studentRecord?.status === "COMPLETED") target.completed += 1;
+      (studentRecord?.plan?.programs || []).forEach((entry) => { if (entry.program) target.programs.add(String(entry.program)); });
+    });
+    const assignedProgramIds = [...new Set([...assignmentMap.values()].flatMap((item) => [...item.programs]))];
+    const programNames = assignedProgramIds.length ? await TrainingSessionType.find({ _id: { $in: assignedProgramIds } }).select("_id name").lean() : [];
+    const programNameMap = new Map(programNames.map((item) => [String(item._id), item.name]));
+    const promotionsByCoach = new Map(promotionRows.map((item) => [String(item._id), item.count]));
+
     const data = coaches.map((coach) => {
       const id = String(coach._id);
 
@@ -1701,6 +1700,7 @@ async function getCoachReports(req, res) {
         evaluations: 0,
         students: [],
       };
+      const assignmentStats = assignmentMap.get(id) || { ids: new Set(), active: 0, completed: 0, programs: new Set() };
 
       return {
         _id: coach._id,
@@ -1734,6 +1734,11 @@ async function getCoachReports(req, res) {
         },
 
         studentsEvaluated: performanceStats.students?.length || 0,
+        studentsAssigned: assignmentStats.ids.size,
+        activeStudents: assignmentStats.active,
+        completedStudents: assignmentStats.completed,
+        promotions: promotionsByCoach.get(id) || 0,
+        programs: [...assignmentStats.programs].map((programId) => ({ _id: programId, name: programNameMap.get(programId) || "Program" })),
       };
     });
 
@@ -1749,6 +1754,90 @@ async function getCoachReports(req, res) {
       success: false,
       message: "Failed to load coach reports.",
     });
+  }
+}
+
+async function getAttendanceAnalytics(req, res) {
+  try {
+    if (!validateRequestedBranch(req, res)) return;
+    const { branch, program, coach, student, from: fromValue, to: toValue } = req.query;
+    for (const [label, value] of [["branch", branch], ["program", program], ["coach", coach], ["student", student]]) {
+      if (value && !isValidObjectId(value)) return res.status(400).json({ success: false, message: `Invalid ${label} filter.` });
+    }
+    const to = toValue ? new Date(`${toValue}T23:59:59.999+05:30`) : new Date();
+    const from = fromValue ? new Date(`${fromValue}T00:00:00+05:30`) : new Date(to.getTime() - 90 * 24 * 60 * 60 * 1000);
+    if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || from > to) return res.status(400).json({ success: false, message: "Enter a valid attendance date range." });
+    const studentMatch = buildStudentMatch(req);
+    if (branch && !isBranchScopedUser(req)) studentMatch.branch = toObjectId(branch);
+    if (student) studentMatch._id = toObjectId(student);
+    const optionStudentMatch = { ...buildStudentMatch(req) };
+    if (branch && !isBranchScopedUser(req)) optionStudentMatch.branch = toObjectId(branch);
+
+    let assignedStudentIds = null;
+    const requestedCoach = req.user.role === "COACH" ? String(req.user._id) : coach;
+    if (req.user.role === "COACH" && coach && String(coach) !== String(req.user._id)) return res.status(403).json({ success: false, message: "Coaches can only view their own students." });
+    if (requestedCoach) {
+      const assignmentBranch = isBranchScopedUser(req) ? getUserBranchId(req) : branch;
+      const assignments = await CoachStudentAssignment.find({ coach: toObjectId(requestedCoach), status: "ACTIVE", ...(assignmentBranch && isValidObjectId(assignmentBranch) ? { branch: toObjectId(assignmentBranch) } : isBranchScopedUser(req) ? { branch: null } : {}) }).select("student").lean();
+      assignedStudentIds = assignments.map((item) => item.student);
+      studentMatch._id = { ...(studentMatch._id ? { $eq: studentMatch._id } : {}), $in: assignedStudentIds };
+      optionStudentMatch._id = { $in: assignedStudentIds };
+    }
+    const scopedStudents = await Student.find(studentMatch).select("_id name branch plan status").populate("branch", "_id name").populate("plan", "_id name").lean();
+    const scopedIds = scopedStudents.map((item) => item._id);
+    const recordMatch = { student: { $in: scopedIds }, date: { $gte: from, $lte: to }, ...(program ? { sessionTypeId: toObjectId(program) } : {}) };
+    const [attendanceRows, makeupRows] = await Promise.all([
+      scopedIds.length ? Attendance.aggregate([
+        ...regularAttendanceStages(recordMatch),
+        { $sort: { student: 1, date: -1, createdAt: -1, _id: -1 } },
+        { $group: { _id: "$student", total: { $sum: 1 }, present: { $sum: { $cond: [{ $eq: ["$status", "PRESENT"] }, 1, 0] } }, absent: { $sum: { $cond: [{ $eq: ["$status", "ABSENT"] }, 1, 0] } }, lastAttendedDate: { $max: { $cond: [{ $eq: ["$status", "PRESENT"] }, "$date", null] } }, recentStatuses: { $push: "$status" } } },
+      ]) : [],
+      scopedIds.length ? Makeup.aggregate([{ $match: { student: { $in: scopedIds }, originalDate: { $gte: from, $lte: to }, ...(program ? { sessionTypeId: toObjectId(program) } : {}) } }, { $group: { _id: { student: "$student", status: "$status" }, count: { $sum: 1 } } }]) : [],
+    ]);
+    const attendanceByStudent = new Map(attendanceRows.map((item) => [String(item._id), item]));
+    const makeupsByStudent = new Map();
+    makeupRows.forEach((item) => {
+      const id = String(item._id.student);
+      if (!makeupsByStudent.has(id)) makeupsByStudent.set(id, { pending: 0, completed: 0 });
+      const target = makeupsByStudent.get(id);
+      if (item._id.status === "SCHEDULED") target.pending += item.count;
+      if (item._id.status === "COMPLETED") target.completed += item.count;
+    });
+    const rows = scopedStudents.map((record) => {
+      const item = attendanceByStudent.get(String(record._id));
+      let consecutiveAbsences = 0;
+      for (const status of item?.recentStatuses || []) { if (status !== "ABSENT") break; consecutiveAbsences += 1; }
+      const total = item?.total || 0;
+      const attendanceRate = total ? safePercentage(item.present, total) : null;
+      const absenceRate = total ? safePercentage(item.absent, total) : null;
+      const makeup = makeupsByStudent.get(String(record._id)) || { pending: 0, completed: 0 };
+      const atRisk = total >= 3 && (attendanceRate < 75 || consecutiveAbsences >= 3);
+      const riskLevel = !atRisk ? "LOW" : attendanceRate < 50 || consecutiveAbsences >= 4 ? "HIGH" : "MEDIUM";
+      return { _id: record._id, name: record.name, branch: record.branch, plan: record.plan, status: record.status, total, present: item?.present || 0, absent: item?.absent || 0, attendanceRate, absenceRate, lastAttendedDate: item?.lastAttendedDate || null, consecutiveAbsences, pendingMakeups: makeup.pending, completedMakeups: makeup.completed, riskLevel };
+    }).sort((a, b) => (a.attendanceRate ?? 101) - (b.attendanceRate ?? 101) || b.consecutiveAbsences - a.consecutiveAbsences || a.name.localeCompare(b.name));
+    const total = rows.reduce((sum, item) => sum + item.total, 0);
+    const present = rows.reduce((sum, item) => sum + item.present, 0);
+    const absent = rows.reduce((sum, item) => sum + item.absent, 0);
+    const branchFilter = isBranchScopedUser(req) ? { _id: getUserBranchId(req) || null } : {};
+    const selectedBranchFilter = isBranchScopedUser(req) ? branchFilter : branch ? { _id: toObjectId(branch) } : branchFilter;
+    const scheduleBranchQuery = selectedBranchFilter._id ? { branch: selectedBranchFilter._id } : isBranchScopedUser(req) ? { branch: null } : {};
+    const [branchOptions, coachOptions, scheduledTypes] = await Promise.all([
+      Branch.find(branchFilter).select("_id name").sort({ name: 1 }).lean(),
+      User.find({ role: "COACH", ...(isBranchScopedUser(req) ? { branch: getUserBranchId(req) || null } : branch ? { branch: toObjectId(branch) } : {}), ...(req.user.role === "COACH" ? { _id: req.user._id } : {}) }).select("_id name").sort({ name: 1 }).lean(),
+      BranchSchedule.find(scheduleBranchQuery).select("weeklySchedule.slots.sessionTypeId").lean(),
+    ]);
+    const scheduledProgramIds = scheduledTypes.flatMap((schedule) =>
+      (schedule.weeklySchedule || []).flatMap((day) =>
+        (day.slots || []).map((slot) => String(slot.sessionTypeId || "")),
+      ),
+    ).filter((id) => mongoose.Types.ObjectId.isValid(id));
+    const programIds = [...new Set(scheduledProgramIds)];
+    const programOptions = programIds.length ? await TrainingSessionType.find({ _id: { $in: programIds } }).select("_id name").sort({ name: 1 }).lean() : [];
+    const optionStudents = await Student.find(optionStudentMatch).select("_id name").sort({ name: 1 }).limit(500).lean();
+    return res.json({ success: true, filters: { branch: branch || null, program: program || null, coach: requestedCoach || null, student: student || null, from, to }, options: { branches: branchOptions, coaches: coachOptions, programs: programOptions, students: optionStudents }, summary: { attendanceRate: safePercentage(present, total), absenceRate: safePercentage(absent, total), total, present, absent, pendingMakeups: rows.reduce((sum, item) => sum + item.pendingMakeups, 0), completedMakeups: rows.reduce((sum, item) => sum + item.completedMakeups, 0), atRiskStudents: rows.filter((item) => item.riskLevel !== "LOW").length }, students: rows, atRiskStudents: rows.filter((item) => item.riskLevel !== "LOW") });
+  } catch (error) {
+    console.error("Attendance analytics failed:", error);
+    return res.status(500).json({ success: false, message: "Failed to load attendance analytics." });
   }
 }
 
@@ -2098,6 +2187,7 @@ module.exports = {
   getSkillCompletionByBelt,
   getBranchReports,
   getCoachReports,
+  getAttendanceAnalytics,
   getBeltReports,
   getReportBranches,
   getAdmissionReports,

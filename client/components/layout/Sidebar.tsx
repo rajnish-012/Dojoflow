@@ -20,6 +20,7 @@ import { hasPermission } from "@/lib/permissions";
 
 import { getNavigationIcon } from "@/lib/navigation-icons";
 import {
+  getNavigationSectionLabel,
   getNavigationGroupId,
   NAVIGATION_GROUPS,
 } from "@/lib/navigation-groups";
@@ -262,10 +263,31 @@ export default function Sidebar({
         { id: config.id, label: config.label, icon: config.icon, children },
       ];
     });
+    const customGroupIds = [
+      ...new Set(
+        visibleNavItems
+          .map((item) => getNavigationGroupId(item))
+          .filter((id): id is string => Boolean(id?.startsWith("custom:"))),
+      ),
+    ];
+    const customGroups = customGroupIds.flatMap((id) => {
+      const children = visibleNavItems.filter(
+        (item) => getNavigationGroupId(item) === id,
+      );
+      if (!children.length) return [];
+      return [{
+        id,
+        label: getNavigationSectionLabel(children[0]),
+        icon: Building2,
+        children,
+      }];
+    });
     const ungrouped = visibleNavItems.filter(
       (item) => !dashboardItems.includes(item) && !groupedKeys.has(item.key),
     );
-    return [...dashboardItems, ...groups, ...ungrouped];
+    customGroups.forEach((group) => group.children.forEach((item) => groupedKeys.add(item.key)));
+    const looseItems = ungrouped.filter((item) => !groupedKeys.has(item.key));
+    return [...dashboardItems, ...groups, ...customGroups, ...looseItems];
   }, [visibleNavItems]);
 
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(

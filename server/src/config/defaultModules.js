@@ -63,6 +63,16 @@ const DEFAULT_MODULES = [
 
     allowedRoles: ["SUPER_ADMIN", "BRANCH_ADMIN"],
   },
+  {
+    key: "memberships",
+    label: "Memberships",
+    href: "/memberships",
+    icon: "BadgeCheck",
+    order: 22,
+    requiredPermission: "membership.view",
+    allowedRoles: ALL_STAFF,
+    isSystem: true,
+  },
 
   /*
    * Assignment permissions are intentionally separate from student updates.
@@ -163,9 +173,9 @@ const DEFAULT_MODULES = [
 
   {
     key: "inquiries",
-    label: "Inquiries",
-    href: "/inquiries",
-    icon: "FileText",
+    label: "Leads & Trials",
+    href: "/crm",
+    icon: "Users",
     order: 80,
 
     requiredPermission: "inquiry.view",
@@ -214,6 +224,15 @@ const DEFAULT_MODULES = [
     order: 96,
     requiredPermission: "training_session_type.view",
     allowedRoles: ["SUPER_ADMIN", "BRANCH_ADMIN"],
+  },
+  {
+    key: "memberships",
+    label: "Memberships",
+    href: "/memberships",
+    icon: "BadgeCheck",
+    order: 22,
+    requiredPermission: "membership.view",
+    allowedRoles: ALL_STAFF,
   },
 
   {
@@ -316,6 +335,18 @@ const DEFAULT_MODULES = [
   },
 
   {
+    key: "audit-logs",
+    label: "Audit Log",
+    href: "/audit-logs",
+    icon: "ClipboardList",
+    order: 106,
+    sidebarSection: "Administration",
+    requiredPermission: "audit.view",
+    allowedRoles: ["SUPER_ADMIN", "BRANCH_ADMIN"],
+    isSystem: true,
+  },
+
+  {
     key: "modules",
     label: "Modules",
     href: "/modules",
@@ -363,7 +394,9 @@ const DEFAULT_MODULES = [
 const REQUIRED_MODULE_KEYS = [
   "modules",
   "roles",
+  "audit-logs",
   "coach-assignments",
+  "memberships",
   "holidays",
   "branch-schedules",
   "training-session-types",
@@ -483,7 +516,22 @@ const ensureDefaultModules = async () => {
           { $set: { isSystem: true, isActive: true } },
         );
       }
+
+      if (module.key === "memberships") {
+        await Module.updateOne(
+          { key: "memberships", requiredPermission: "student.view" },
+          { $set: { requiredPermission: "membership.view" } },
+        );
+        await Module.updateOne(
+          { key: "memberships" },
+          { $addToSet: { allowedRoles: "COACH" } },
+        );
+      }
     }
+
+    // Move the existing inquiries entry into the CRM while preserving its
+    // configured permission. The legacy route redirects to /crm.
+    await Module.updateOne({ key: "inquiries" }, { $set: { href: "/crm", label: "Leads & Trials", icon: "Users" } });
 
     console.log("Default ForceStrike modules verified");
   } catch (error) {

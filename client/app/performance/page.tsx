@@ -16,7 +16,7 @@ import {
 import {
   Badge,
   Button,
-  Card,
+  DataTableSection,
   DataFilters,
   DataSort,
   EmptyState,
@@ -392,49 +392,7 @@ export default function PerformancePage() {
           icon={<Users size={19} />}
         />
       </div>
-      <Card padding="none" className="mt-6 overflow-hidden">
-        <div
-          className="
-            flex flex-col justify-between gap-5
-            border-b border-(--line)
-            px-5 py-5
-            sm:px-6
-            lg:flex-row lg:items-center
-          "
-        >
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <div
-                className="
-                  flex h-9 w-9 items-center justify-center
-                  rounded-xl bg-(--accent-soft)
-                  text-(--accent)
-                "
-              >
-                <Users size={18} />
-              </div>
-
-              <div>
-                <h2
-                  className="
-                    text-xl font-extrabold tracking-tight
-                    text-(--foreground)
-                  "
-                >
-                  Performance History
-                </h2>
-
-                <p
-                  className="
-                    mt-0.5 text-xs text-(--ink-muted)
-                    sm:text-sm
-                  "
-                >
-                  View and manage student performance evaluations.
-                </p>
-              </div>
-            </div>
-          </div>
+      <DataTableSection className="mt-6" title="Performance History" description="View and manage student performance evaluations." icon={<Users size={18} />} toolbar={
           <div className="flex w-full flex-col gap-2 lg:w-auto lg:flex-row">
             <div className="relative w-full lg:w-80">
               <Search
@@ -544,7 +502,7 @@ export default function PerformancePage() {
               ]}
             />
           </div>
-        </div>
+      }>
         {loading ? (
           <LoadingSpinner fullPage text="Loading performance data..." />
         ) : !filtered.length ? (
@@ -625,7 +583,7 @@ export default function PerformancePage() {
             />
           </>
         )}
-      </Card>
+      </DataTableSection>
       <Modal
         open={open}
         onClose={() => !saving && setOpen(false)}

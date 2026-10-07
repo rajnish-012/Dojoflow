@@ -18,6 +18,11 @@ const NOTIFICATION_TYPES = Object.freeze([
   "FINANCE_STUDENT_DUE_REMINDER",
   "FINANCE_STUDENT_OVERDUE_REMINDER",
   "INQUIRY_RECEIVED",
+  "LEAD_FOLLOWUP_OVERDUE",
+  "LEAD_CONVERTED",
+  "MEMBERSHIP_EXPIRING",
+  "MEMBERSHIP_EXPIRED",
+  "MEMBERSHIP_RENEWAL_COMPLETED",
   "SYSTEM",
 ]);
 
@@ -57,8 +62,10 @@ const notificationSchema = new mongoose.Schema(
         "MAKEUP",
         "PROMOTION",
         "INQUIRY",
+        "LEAD",
         "SYSTEM",
         "FINANCE",
+        "MEMBERSHIP",
       ],
       default: "SYSTEM",
     },

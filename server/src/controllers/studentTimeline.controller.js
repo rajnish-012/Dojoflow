@@ -5,9 +5,13 @@ const Attendance = require("../models/Attendance");
 const Makeup = require("../models/Makeup");
 const CoachStudentAssignment = require("../models/CoachStudentAssignment");
 const { isBranchScoped } = require("../utils/access");
+const { findEnrollmentForDate } = require("../services/enrollmentLifecycle.service");
 const { getProgramLearningProgress } = require("../services/programProgress.service");
 const { resolveProgramCurriculum } = require("../services/curriculumResolver.service");
 const { withAttendanceSessionDetails } = require("../utils/attendanceSession");
+const Invoice = require("../models/Invoice");
+const Payment = require("../models/Payment");
+const BeltHistory = require("../models/BeltHistory");
 
 /* ============================================================
    DATE HELPERS
@@ -287,7 +291,7 @@ const getStudentTimeline = async (req, res) => {
 
     const plan = student.plan;
     const today = startOfDay(new Date());
-    const enrollment = (student.planEnrollments || []).find((item) => item.status === "ACTIVE" && new Date(item.startDate) <= today && (!item.endDate || today < new Date(item.endDate)));
+    const enrollment = findEnrollmentForDate(student.planEnrollments, today);
     const programs = enrollment?.programs?.length ? enrollment.programs : (plan.programs || []);
     const requestedProgramId = req.query.programId;
     const selectedEntitlement = requestedProgramId
@@ -681,6 +685,27 @@ const getStudentTimeline = async (req, res) => {
     const currentTrainingDay = learning.currentTrainingDay;
     const currentBelt = student.programBelts?.find((item) => String(item.program) === String(selectedProgramId))?.belt || (programs.length === 1 ? student.currentBelt : enrollment?.startingBelt) || plan.startingBelt || "White";
 
+    // Read the student's activity from its source records; no duplicate event log is stored.
+    const canViewFinance = req.user.role === "SUPER_ADMIN" || (req.user.permissions || []).includes("finance.view");
+    const [activityAttendance, activityMakeups, beltHistory, invoices, payments] = await Promise.all([
+      Attendance.find({ student: student._id }).select("_id date status sessionName attendanceType createdAt").sort({ date: -1 }).limit(200).lean(),
+      Makeup.find({ student: student._id }).select("_id status originalDate makeupDate createdAt").sort({ createdAt: -1 }).limit(100).lean(),
+      BeltHistory.find({ student: student._id }).select("_id fromBelt toBelt promotedAt createdAt").sort({ promotedAt: -1 }).limit(100).lean(),
+      canViewFinance ? Invoice.find({ student: student._id }).select("_id invoiceNumber status total createdAt issuedAt").sort({ createdAt: -1 }).limit(100).lean() : [],
+      canViewFinance ? Payment.find({ student: student._id }).select("_id amount kind paymentDate createdAt").sort({ paymentDate: -1 }).limit(100).lean() : [],
+    ]);
+    const activity = [{ type: "REGISTRATION", title: "Student registered", date: student.registrationDate || student.createdAt, details: student.name }];
+    (student.planEnrollments || []).forEach((item) => {
+      activity.push({ type: item.enrollmentSource === "RENEWAL" ? "RENEWAL" : "ENROLLMENT", title: item.enrollmentSource === "RENEWAL" ? "Enrollment renewed" : "Enrollment started", date: item.startDate || item.createdAt, details: item.plan?.name || item.enrollmentSource || "Plan" });
+      (item.statusHistory || []).forEach((change) => activity.push({ type: "STATUS_CHANGE", title: `Enrollment ${String(change.to).toLowerCase()}`, date: change.changedAt, details: change.note || [change.from, change.to].filter(Boolean).join(" → ") }));
+    });
+    activityAttendance.forEach((item) => activity.push({ type: item.status === "ABSENT" ? "ABSENCE" : "ATTENDANCE", title: item.status === "ABSENT" ? "Class absence" : "Class attended", date: item.date || item.createdAt, details: item.sessionName || "Training session" }));
+    activityMakeups.forEach((item) => activity.push({ type: "MAKEUP", title: `Makeup ${String(item.status).toLowerCase()}`, date: item.makeupDate || item.createdAt || item.originalDate, details: item.status }));
+    beltHistory.forEach((item) => activity.push({ type: "PROMOTION", title: `Promoted to ${item.toBelt}`, date: item.promotedAt || item.createdAt, details: item.fromBelt ? `${item.fromBelt} → ${item.toBelt}` : item.toBelt }));
+    invoices.forEach((item) => activity.push({ type: "INVOICE", title: `Invoice ${item.invoiceNumber}`, date: item.issuedAt || item.createdAt, details: `${item.status} · ${item.total}` }));
+    payments.forEach((item) => activity.push({ type: "PAYMENT", title: item.kind === "REFUND" ? "Payment refunded" : "Payment received", date: item.paymentDate || item.createdAt, details: String(item.amount) }));
+    const activityTimeline = activity.filter((item) => item.date && !Number.isNaN(new Date(item.date).getTime())).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()).slice(0, 250);
+
     /* --------------------------------------------------------
        Current milestone
     -------------------------------------------------------- */
@@ -846,6 +871,7 @@ const getStudentTimeline = async (req, res) => {
       },
 
       timeline,
+      activity: activityTimeline,
     });
   } catch (error) {
     console.error(

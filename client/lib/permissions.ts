@@ -10,6 +10,9 @@ export const PERMISSIONS = {
   STUDENT_UPDATE: "student.update",
   STUDENT_DELETE: "student.delete",
 
+  MEMBERSHIP_VIEW: "membership.view",
+  MEMBERSHIP_MANAGE: "membership.manage",
+
   COACH_ASSIGNMENT_VIEW: "coach_assignment.view",
   COACH_ASSIGNMENT_MANAGE: "coach_assignment.manage",
 
@@ -21,6 +24,8 @@ export const PERMISSIONS = {
 
   ATTENDANCE_VIEW: "attendance.view",
   ATTENDANCE_MANAGE: "attendance.manage",
+  ATTENDANCE_CORRECT: "attendance.correct",
+  ATTENDANCE_CORRECT_APPROVE: "attendance.correct.approve",
 
   HOLIDAY_VIEW: "holiday.view",
   HOLIDAY_MANAGE: "holiday.manage",
@@ -66,6 +71,7 @@ export const PERMISSIONS = {
 
   ROLE_VIEW: "role.view",
   ROLE_MANAGE: "role.manage",
+  AUDIT_VIEW: "audit.view",
 
   MODULE_VIEW: "module.view",
   MODULE_MANAGE: "module.manage",
@@ -93,6 +99,7 @@ export type PermissionKey = Permission | (string & {});
 export const NAVIGATION_PERMISSIONS: Record<string, PermissionKey | null> = {
   dashboard: PERMISSIONS.DASHBOARD_VIEW,
   students: PERMISSIONS.STUDENT_VIEW,
+  memberships: PERMISSIONS.MEMBERSHIP_VIEW,
   plans: PERMISSIONS.PLAN_VIEW,
   curriculum: PERMISSIONS.CURRICULUM_VIEW,
   attendance: PERMISSIONS.ATTENDANCE_VIEW,
@@ -119,6 +126,7 @@ export const NAVIGATION_PERMISSIONS: Record<string, PermissionKey | null> = {
   "website-homepage": PERMISSIONS.WEBSITE_VIEW,
   modules: PERMISSIONS.MODULE_VIEW,
   roles: PERMISSIONS.ROLE_VIEW,
+  "audit-logs": PERMISSIONS.AUDIT_VIEW,
   "student-dashboard": null,
 };
 

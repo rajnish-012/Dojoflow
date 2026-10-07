@@ -31,6 +31,7 @@ import {
   LoadingSpinner,
   PageHeader,
   Select,
+  TablePagination,
   TableHeading,
   Textarea,
 } from "@/components/ui";
@@ -200,6 +201,8 @@ export default function HolidaysPage() {
 
   const [search, setSearch] =
     useState("");
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
 
   const [showForm, setShowForm] =
     useState(false);
@@ -473,6 +476,10 @@ export default function HolidaysPage() {
       holidays,
       search,
     ]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredHolidays.length / pageSize));
+  const page = Math.min(currentPage, totalPages);
+  const visibleHolidays = filteredHolidays.slice((page - 1) * pageSize, page * pageSize);
 
   /* ==========================================
      OPEN CREATE
@@ -866,11 +873,10 @@ export default function HolidaysPage() {
                 value={search}
                 onChange={(
                   event,
-                ) =>
-                  setSearch(
-                    event.target
-                      .value,
-                  )
+                ) => {
+                  setSearch(event.target.value);
+                  setCurrentPage(1);
+                }
                 }
                 placeholder="Search holidays..."
                 className="pl-10"
@@ -1250,7 +1256,7 @@ export default function HolidaysPage() {
                   </thead>
 
                   <tbody className="divide-y divide-(--line)">
-                    {filteredHolidays.map(
+                    {visibleHolidays.map(
                       (
                         holiday,
                       ) => (
@@ -1360,7 +1366,7 @@ export default function HolidaysPage() {
               {/* MOBILE */}
 
               <div className="space-y-3 p-4 md:hidden">
-                {filteredHolidays.map(
+                {visibleHolidays.map(
                   (
                     holiday,
                   ) => (
@@ -1485,6 +1491,17 @@ export default function HolidaysPage() {
               </div>
             </>
           )}
+          <TablePagination
+            currentPage={page}
+            totalPages={totalPages}
+            totalItems={filteredHolidays.length}
+            visibleItems={visibleHolidays.length}
+            pageSize={pageSize}
+            entityLabel="holidays"
+            onPrevious={() => setCurrentPage((value) => Math.max(1, value - 1))}
+            onNext={() => setCurrentPage((value) => Math.min(totalPages, value + 1))}
+            onPageSizeChange={(value) => { setPageSize(value); setCurrentPage(1); }}
+          />
         </Card>
       </div>
     </main>

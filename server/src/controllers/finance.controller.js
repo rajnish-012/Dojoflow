@@ -2,6 +2,7 @@ const mongoose = require("mongoose");
 const AcademySettings = require("../models/AcademySettings");
 const Branch = require("../models/Branch");
 const FinanceAudit = require("../models/FinanceAudit");
+const auditService = require("../services/audit.service");
 const FinanceSequence = require("../models/FinanceSequence");
 const Invoice = require("../models/Invoice");
 const Payment = require("../models/Payment");
@@ -82,7 +83,12 @@ function asAmount(value) {
   return Number.isFinite(number) && number >= 0 ? round(number) : null;
 }
 
-async function audit(session, values) { await FinanceAudit.create([values], { session }); }
+async function audit(req, session, values) {
+  const { action, branch, student, invoice, payment, reason, before, after } = values;
+  const entityType = payment ? "PAYMENT" : invoice ? "INVOICE" : student ? "STUDENT" : "FEE_PLAN";
+  const entityId = payment || invoice || student || null;
+  await auditService.record({ req, session, action, entityType, entityId, branchId: branch, before, after, metadata: reason ? { reason } : {}, legacy: { student: student || null, invoice: invoice || null, payment: payment || null, reason: reason || "" } });
+}
 
 async function getInvoiceAccess(req, invoiceId, session) {
   if (!isId(invoiceId)) return { error: { status: 400, message: "Invalid invoice ID" } };
@@ -164,7 +170,7 @@ const updateBranchFeePlan = async (req, res) => {
       if (index >= 0) overrides[index] = override; else overrides.push(override);
       plan.branchFeeOverrides = overrides;
       await plan.save({ session });
-      await FinanceAudit.create([{ action: "FEE_PLAN_UPDATED", actor: req.user._id, branch: branchId, reason: String(values.reason || "Branch fee terms updated").slice(0, 500), before, after: override }], { session });
+      await audit(req, session, { action: "FEE_PLAN_UPDATED", branch: branchId, reason: String(values.reason || "Branch fee terms updated").slice(0, 500), before, after: override });
       return { plan, branchFee: override };
     });
     res.json({ success: true, ...result });
@@ -201,7 +207,7 @@ const updateFeePlan = async (req, res) => {
       if (record.effectiveFrom && record.effectiveUntil && record.effectiveUntil < record.effectiveFrom) { const error = new Error("Effective end date must follow the start date"); error.status = 400; throw error; }
       await record.save({ session });
       const branch = record.feeBranch || getBranchId(req.user);
-      await FinanceAudit.create([{ action: "FEE_PLAN_UPDATED", actor: req.user._id, branch, reason: String(req.body.reason || "Fee terms updated").slice(0, 500), before, after: { feeName: record.feeName, billingFrequency: record.billingFrequency, price: record.price, registrationFee: record.registrationFee, taxRate: record.taxRate, feeActive: record.feeActive, feeBranch: record.feeBranch, effectiveFrom: record.effectiveFrom, effectiveUntil: record.effectiveUntil, discountRules: record.discountRules } }], { session });
+      await audit(req, session, { action: "FEE_PLAN_UPDATED", branch, reason: String(req.body.reason || "Fee terms updated").slice(0, 500), before, after: { feeName: record.feeName, billingFrequency: record.billingFrequency, price: record.price, registrationFee: record.registrationFee, taxRate: record.taxRate, feeActive: record.feeActive, feeBranch: record.feeBranch, effectiveFrom: record.effectiveFrom, effectiveUntil: record.effectiveUntil, discountRules: record.discountRules } });
       return record;
     });
     res.json({ success: true, plan });
@@ -268,7 +274,7 @@ const createInvoice = async (req, res) => {
         periodEnd: enrollment.endDate && period.periodEnd > enrollment.endDate ? enrollment.endDate : period.periodEnd,
         cycleKey: period.cycleKey, status: invoiceStatus, notes: String(notes).slice(0, 1000), createdBy: req.user._id, issuedAt: status !== "DRAFT" ? new Date() : null,
       }], { session });
-      await audit(session, { action: "INVOICE_CREATED", actor: req.user._id, branch: student.branch, student: student._id, invoice: created._id, after: { invoiceNumber, total, status: invoiceStatus, discount, tax } });
+      await audit(req, session, { action: "INVOICE_CREATED", branch: student.branch, student: student._id, invoice: created._id, after: { invoiceNumber, total, status: invoiceStatus, discount, tax } });
       return created;
     });
     res.status(201).json({ success: true, invoice });
@@ -307,7 +313,7 @@ const cancelInvoice = async (req, res) => {
       if (!["DRAFT", "ISSUED"].includes(record.status) || record.paidAmount > 0) { const error = new Error("Only unpaid draft or issued invoices can be cancelled"); error.status = 409; throw error; }
       const before = { status: record.status, total: record.total };
       record.status = "CANCELLED"; await record.save({ session });
-      await audit(session, { action: "INVOICE_CANCELLED", actor: req.user._id, branch: record.branch, student: record.student, invoice: record._id, reason, before, after: { status: "CANCELLED" } });
+      await audit(req, session, { action: "INVOICE_CANCELLED", branch: record.branch, student: record.student, invoice: record._id, reason, before, after: { status: "CANCELLED" } });
       return record;
     });
     res.json({ success: true, invoice });
@@ -322,7 +328,7 @@ const issueInvoice = async (req, res) => {
       const record = access.invoice;
       if (record.status !== "DRAFT") { const error = new Error("Only draft invoices can be issued"); error.status = 409; throw error; }
       record.status = isPastDue(record.dueDate) ? "OVERDUE" : "ISSUED"; record.issuedAt = new Date(); await record.save({ session });
-      await audit(session, { action: "INVOICE_CREATED", actor: req.user._id, branch: record.branch, student: record.student, invoice: record._id, reason: "Draft invoice issued", before: { status: "DRAFT" }, after: { status: "ISSUED" } });
+      await audit(req, session, { action: "INVOICE_CREATED", branch: record.branch, student: record.student, invoice: record._id, reason: "Draft invoice issued", before: { status: "DRAFT" }, after: { status: "ISSUED" } });
       return record;
     });
     res.json({ success: true, invoice });
@@ -360,7 +366,7 @@ const addPayment = async (req, res) => {
       invoice.paidAmount = paidAmount; invoice.balance = balance; invoice.status = balance === 0 ? "PAID" : (isPastDue(invoice.dueDate) ? "OVERDUE" : "PARTIALLY_PAID");
       await invoice.save({ session });
       const receipt = await writeReceipt(payment, invoice, session);
-      await audit(session, { action: "PAYMENT_CREATED", actor: req.user._id, branch: invoice.branch, student: invoice.student, invoice: invoice._id, payment: payment._id, after: { amount, method, status: invoice.status, balance } });
+      await audit(req, session, { action: "PAYMENT_CREATED", branch: invoice.branch, student: invoice.student, invoice: invoice._id, payment: payment._id, after: { amount, method, status: invoice.status, balance } });
       return { payment, receipt, invoice };
     });
   } catch (error) {
@@ -411,7 +417,7 @@ const refundPayment = async (req, res) => {
       const [refund] = await Payment.create([{ invoice: invoice._id, student: payment.student, branch: payment.branch, amount, direction: "DEBIT", kind: "REFUND", paymentDate: refundDate, method: payment.method, referenceId: "", receivedBy: req.user._id, notes: String(req.body?.notes || "").slice(0, 1000), idempotencyKey, relatedPayment: payment._id, reason }], { session });
       invoice.paidAmount = round(Math.max(0, invoice.paidAmount - amount)); invoice.balance = round(invoice.total - invoice.paidAmount); invoice.status = invoice.paidAmount === 0 ? "REFUNDED" : currentStatus(invoice.total, invoice.paidAmount, invoice.dueDate, invoice.status); await invoice.save({ session });
       const receipt = await writeReceipt(refund, invoice, session);
-      await audit(session, { action: "PAYMENT_REFUNDED", actor: req.user._id, branch: payment.branch, student: payment.student, invoice: invoice._id, payment: refund._id, reason, before: { paidAmount: round(invoice.paidAmount + amount) }, after: { paidAmount: invoice.paidAmount, balance: invoice.balance, refundAmount: amount } });
+      await audit(req, session, { action: "PAYMENT_REFUNDED", branch: payment.branch, student: payment.student, invoice: invoice._id, payment: refund._id, reason, before: { paidAmount: round(invoice.paidAmount + amount) }, after: { paidAmount: invoice.paidAmount, balance: invoice.balance, refundAmount: amount } });
       return { refund, invoice, receipt };
     });
     res.status(201).json({ success: true, ...result });
@@ -462,7 +468,7 @@ const correctPayment = async (req, res) => {
       invoice.paidAmount = round(invoice.paidAmount - original.amount + correctedAmount); invoice.balance = round(invoice.total - invoice.paidAmount); invoice.status = invoice.paidAmount === 0 ? "REFUNDED" : currentStatus(invoice.total, invoice.paidAmount, invoice.dueDate, invoice.status); await invoice.save({ session });
       const receipts = [];
       for (const movement of corrections) receipts.push(await writeReceipt(movement, invoice, session));
-      await audit(session, { action: "PAYMENT_CORRECTED", actor: req.user._id, branch: original.branch, student: original.student, invoice: invoice._id, payment: original._id, reason, before: { amount: original.amount }, after: { correctedAmount, invoicePaidAmount: invoice.paidAmount, balance: invoice.balance, correctionIds: corrections.map((item) => item._id) } });
+      await audit(req, session, { action: "PAYMENT_CORRECTED", branch: original.branch, student: original.student, invoice: invoice._id, payment: original._id, reason, before: { amount: original.amount }, after: { correctedAmount, invoicePaidAmount: invoice.paidAmount, balance: invoice.balance, correctionIds: corrections.map((item) => item._id) } });
       return { corrections, receipts, invoice };
     });
     res.status(201).json({ success: true, ...result });

@@ -83,10 +83,14 @@ export function getNavigationGroupId(item: {
   key: string;
   href: string;
   group?: string | null;
-}) {
-  if (item.group === "ungrouped") return undefined;
-  if (item.group && NAVIGATION_GROUPS.some((group) => group.id === item.group)) {
-    return item.group as NavigationGroupId;
+}): string | undefined {
+  const explicitGroup = item.group?.trim();
+  if (explicitGroup) {
+    if (explicitGroup.toLowerCase() === "ungrouped") return undefined;
+    const knownGroup = NAVIGATION_GROUPS.find(
+      (group) => group.id === explicitGroup.toLowerCase() || group.label.toLowerCase() === explicitGroup.toLowerCase(),
+    );
+    return knownGroup?.id || `custom:${explicitGroup.toLocaleLowerCase()}`;
   }
 
   const key = item.key.toLowerCase();
@@ -99,4 +103,20 @@ export function getNavigationGroupId(item: {
         href.startsWith(`/website/${candidate}`),
     ),
   )?.id;
+}
+
+export function getNavigationSectionLabel(item: {
+  key: string;
+  href: string;
+  group?: string | null;
+}) {
+  const explicitGroup = item.group?.trim();
+  if (explicitGroup) {
+    if (explicitGroup.toLowerCase() === "ungrouped") return "Other links";
+    return NAVIGATION_GROUPS.find(
+      (group) => group.id === explicitGroup.toLowerCase() || group.label.toLowerCase() === explicitGroup.toLowerCase(),
+    )?.label || explicitGroup;
+  }
+  const groupId = getNavigationGroupId({ ...item, group: null });
+  return NAVIGATION_GROUPS.find((group) => group.id === groupId)?.label || "Other links";
 }
