@@ -18,54 +18,77 @@ async function financeRequest<T>(
   return data as T;
 }
 
-export type FeePlan = {
+export type FeeTermPlanOption = {
   _id: string;
   name: string;
-  feeName?: string;
-  price: number;
-  duration: number;
-  durationUnit: "MONTHS" | "DAYS";
-  billingFrequency?: "ONE_TIME" | "MONTHLY" | "QUARTERLY" | "YEARLY";
-  registrationFee?: number;
-  taxRate?: number;
-  feeBranch?: { _id: string; name: string } | null;
-  feeActive?: boolean;
-  effectiveFee?: {
-    feeName?: string;
-    amount: number;
-    billingFrequency: "ONE_TIME" | "MONTHLY" | "QUARTERLY" | "YEARLY";
-    registrationFee?: number;
-    taxRate?: number;
-    active?: boolean;
-    effectiveFrom?: string | null;
-    effectiveUntil?: string | null;
-    discountRules?: FeePlan["discountRules"];
-  };
-  branchFeeOverrides?: {
-    branch: { _id: string; name: string } | string;
-    feeName: string;
-    amount: number;
-    billingFrequency: "ONE_TIME" | "MONTHLY" | "QUARTERLY" | "YEARLY";
-    registrationFee: number;
-    taxRate: number;
-    active?: boolean;
-    effectiveFrom?: string | null;
-    effectiveUntil?: string | null;
-    discountRules?: FeePlan["discountRules"];
-  }[];
-  effectiveFrom?: string | null;
-  effectiveUntil?: string | null;
-  discountRules?: {
-    _id?: string;
-    name: string;
-    type: "FIXED" | "PERCENT";
-    amount: number;
-    active?: boolean;
-    effectiveFrom?: string | null;
-    effectiveUntil?: string | null;
-  }[];
   programs?: { program?: { name?: string } | string }[];
 };
+
+export type FeeDiscountRule = {
+  _id?: string;
+  name: string;
+  type: "FIXED" | "PERCENT";
+  amount: number;
+  active?: boolean;
+  effectiveFrom?: string | null;
+  effectiveUntil?: string | null;
+};
+
+export type FeeTerm = {
+  _id: string;
+  plan: { _id: string; name: string } | string;
+  branch: { _id: string; name: string } | string | null;
+  currency?: string;
+  billingFrequency: "ONE_TIME" | "MONTHLY" | "QUARTERLY" | "YEARLY";
+  amount: number;
+  registrationFee: number;
+  taxRate: number;
+  discountRules: FeeDiscountRule[];
+  effectiveFrom: string;
+  effectiveUntil: string | null;
+  status: "DRAFT" | "ACTIVE" | "RETIRED";
+  version: number;
+  supersedes: string | null;
+};
+export type AvailableFeeTermState = { configuredCount: number; inactiveCount: number; notYetEffectiveCount: number; expiredCount: number; applicableCount: number };
+
+export const getPlanFeeTerms = (planId: string) =>
+  financeRequest<{ feeTerms: FeeTerm[] }>(`/plans/${planId}/fee-terms`);
+export const getFeeTerms = (filters: { branchId?: string; billingFrequency?: string; status?: string } = {}) => {
+  const query = new URLSearchParams(Object.entries(filters).filter(([, value]) => Boolean(value)) as [string, string][]);
+  return financeRequest<{ feeTerms: FeeTerm[] }>(`/fee-terms${query.size ? `?${query.toString()}` : ""}`);
+};
+export const getAvailableEnrollmentFeeTerms = (
+  planId: string,
+  branchId: string,
+  asOf: string,
+) => financeRequest<{ feeTerms: FeeTerm[]; availability: AvailableFeeTermState }>(
+  `/fee-terms/available?planId=${encodeURIComponent(planId)}&branchId=${encodeURIComponent(branchId)}&asOf=${encodeURIComponent(asOf)}`,
+);
+export const createPlanFeeTerm = (
+  planId: string,
+  values: Partial<FeeTerm> & { branch?: string | null; reason?: string },
+) =>
+  financeRequest<{ feeTerm: FeeTerm }>(`/plans/${planId}/fee-terms`, {
+    method: "POST",
+    body: JSON.stringify(values),
+  });
+export const updatePlanFeeTerm = (
+  id: string,
+  values: Partial<FeeTerm> & { reason?: string },
+) =>
+  financeRequest<{ feeTerm: FeeTerm }>(`/fee-terms/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(values),
+  });
+export const supersedePlanFeeTerm = (
+  id: string,
+  values: Partial<FeeTerm> & { reason?: string },
+) =>
+  financeRequest<{ feeTerm: FeeTerm; previous: FeeTerm }>(
+    `/fee-terms/${id}/supersede`,
+    { method: "POST", body: JSON.stringify(values) },
+  );
 
 export type Invoice = {
   _id: string;
@@ -75,6 +98,7 @@ export type Invoice = {
     | string;
   enrollment: string;
   plan?: { _id: string; name: string } | string;
+  feeTerm?: string | null;
   branch: { _id: string; name: string } | string;
   items: {
     description: string;
@@ -124,6 +148,13 @@ export type FinanceDashboard = {
 };
 
 export type FinanceProfile = {
+  summaryByCurrency?: {
+    currency: string;
+    totalBilled: number;
+    totalPaid: number;
+    outstanding: number;
+    overdue: number;
+  }[];
   summary: {
     totalBilled: number;
     totalPaid: number;
@@ -147,6 +178,7 @@ export type FinanceProfile = {
     receiptNumber: string;
     invoiceNumber: string;
     amount: number;
+    currency?: string;
     method: string;
     date: string;
   }[];
@@ -195,23 +227,10 @@ export type FinancePayment = {
 
 export const getFinanceDashboard = () =>
   financeRequest<{ success: true } & FinanceDashboard>("/dashboard");
-export const getFinancePlans = () =>
-  financeRequest<{ plans: FeePlan[] }>("/plans");
+export const getFeeTermPlanOptions = () =>
+  financeRequest<{ plans: FeeTermPlanOption[] }>("/plan-options");
 export const getFinanceBranches = () =>
   financeRequest<{ branches: { _id: string; name: string }[] }>("/branches");
-export const updateFeePlan = (id: string, values: Record<string, unknown>) =>
-  financeRequest<{ plan: FeePlan }>(`/plans/${id}`, {
-    method: "PUT",
-    body: JSON.stringify(values),
-  });
-export const updateBranchFeePlan = (
-  id: string,
-  values: Record<string, unknown>,
-) =>
-  financeRequest<{ plan: FeePlan; branchFee: NonNullable<FeePlan["effectiveFee"]> }>(
-    `/plans/${id}/branch-fees`,
-    { method: "PUT", body: JSON.stringify(values) },
-  );
 export const getInvoiceCandidates = () =>
   financeRequest<{
     students: {
@@ -223,7 +242,7 @@ export const getInvoiceCandidates = () =>
         status: string;
         plan: { _id: string; name?: string } | string;
         endDate?: string | null;
-        billingSnapshot?: { discountRules?: NonNullable<FeePlan["discountRules"]> };
+        billingSnapshot?: { discountRules?: FeeDiscountRule[] };
       }[];
     }[];
   }>("/invoice-candidates");
@@ -231,13 +250,24 @@ export const getInvoices = () =>
   financeRequest<{ invoices: Invoice[]; total: number }>("/invoices");
 export const getFinancePayments = () =>
   financeRequest<{ payments: FinancePayment[] }>("/payments");
-export const getFinanceReport = () =>
-  financeRequest<{
+export type FinanceReportFilters = {
+  branchId?: string;
+  planId?: string;
+  invoiceStatus?: string;
+  paymentKind?: string;
+  from?: string;
+  to?: string;
+};
+export const getFinanceReport = (filters: FinanceReportFilters = {}) => {
+  const query = new URLSearchParams(Object.entries(filters).filter(([, value]) => Boolean(value)) as [string, string][]);
+  return financeRequest<{
     invoices: (Invoice & { createdAt: string })[];
     payments: FinancePayment[];
+    receipts: Receipt[];
     audits: { action: string; reason?: string; before?: unknown; after?: unknown; createdAt: string }[];
-    truncated: { invoices: boolean; payments: boolean; audits: boolean };
-  }>("/reports");
+    truncated: { invoices: boolean; payments: boolean; receipts: boolean; audits: boolean };
+  }>(`/reports${query.size ? `?${query.toString()}` : ""}`);
+};
 export const createInvoice = (values: {
   studentId: string;
   enrollmentId: string;

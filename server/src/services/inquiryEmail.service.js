@@ -145,4 +145,27 @@ const sendPasswordResetEmail = async (to, resetUrl) => {
   });
 };
 
-module.exports = { sendInquiryNotification, sendEmailSystemTest, sendPasswordResetEmail };
+const sendAccountActivationEmail = async ({ to, name, role, activationUrl }) => {
+  const settings = await loadSettings();
+  if (!settings) throw new Error("Account activation email is not configured.");
+  const transporter = createTransporter(settings);
+  const academy = await AcademySettings.findOne({}).select("academyName").lean();
+  const academyName = academy?.academyName || settings.fromName || "the academy";
+  const accountType = String(role || "account").toLowerCase() === "student" ? "student" : "staff";
+  await transporter.sendMail({
+    from: { name: settings.fromName || academyName, address: settings.fromEmail },
+    to,
+    subject: `Set up your ${academyName} account`,
+    text: [
+      `Hi ${name},`,
+      "",
+      `Your ${accountType} account for ${academyName} is ready. Set your own password using this single-use link:`,
+      "",
+      activationUrl,
+      "",
+      "This link expires in 30 minutes. If you were not expecting this account, please contact the academy.",
+    ].join("\n"),
+  });
+};
+
+module.exports = { sendInquiryNotification, sendEmailSystemTest, sendPasswordResetEmail, sendAccountActivationEmail };

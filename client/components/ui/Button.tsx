@@ -129,6 +129,11 @@ export default function Button({
         transition-all
         duration-200
         active:scale-[0.98]
+        focus-visible:outline-none
+        focus-visible:ring-2
+        focus-visible:ring-(--accent)
+        focus-visible:ring-offset-2
+        focus-visible:ring-offset-(--surface)
         disabled:cursor-not-allowed
         disabled:opacity-50
         ${variants[variant]}

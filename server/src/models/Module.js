@@ -41,6 +41,13 @@ const moduleSchema = new mongoose.Schema(
       default: 0,
     },
 
+    // Shared ordering for every module in the same sidebar section.
+    // Child links keep using `order`; this only orders whole sections.
+    sectionOrder: {
+      type: Number,
+      default: null,
+    },
+
     /*
      * =========================================================
      * DATABASE-BACKED PERMISSION

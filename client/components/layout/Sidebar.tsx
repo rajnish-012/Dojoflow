@@ -114,6 +114,21 @@ export default function Sidebar({
 }: SidebarProps) {
   const pathname = usePathname();
 
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        onClose?.();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen, onClose]);
+
   const user = useCurrentUser();
 
   const { settings: academySettings } = useAcademyBrand();
@@ -253,14 +268,18 @@ export default function Sidebar({
       ["dashboard", "student-dashboard"].includes(item.key),
     );
     const groupedKeys = new Set<string>();
-    const groups = NAVIGATION_GROUPS.flatMap((config) => {
+    const sectionOrder = (items: NavigationModule[], fallback: number) => {
+      const saved = items.find((item) => Number.isFinite(item.sectionOrder))?.sectionOrder;
+      return Number.isFinite(saved) ? Number(saved) : fallback;
+    };
+    const groups = NAVIGATION_GROUPS.flatMap((config, index) => {
       const children = visibleNavItems.filter(
       (item) => getNavigationGroupId(item) === config.id,
       );
       if (!children.length) return [];
       children.forEach((item) => groupedKeys.add(item.key));
       return [
-        { id: config.id, label: config.label, icon: config.icon, children },
+        { id: config.id, label: config.label, icon: config.icon, children, sectionOrder: sectionOrder(children, (index + 1) * 10) },
       ];
     });
     const customGroupIds = [
@@ -280,6 +299,7 @@ export default function Sidebar({
         label: getNavigationSectionLabel(children[0]),
         icon: Building2,
         children,
+        sectionOrder: sectionOrder(children, 1000 + customGroupIds.indexOf(id)),
       }];
     });
     const ungrouped = visibleNavItems.filter(
@@ -287,7 +307,13 @@ export default function Sidebar({
     );
     customGroups.forEach((group) => group.children.forEach((item) => groupedKeys.add(item.key)));
     const looseItems = ungrouped.filter((item) => !groupedKeys.has(item.key));
-    return [...dashboardItems, ...groups, ...customGroups, ...looseItems];
+    const sections: { order: number; entries: NavigationEntry[] }[] = [
+      ...(dashboardItems.length ? [{ order: sectionOrder(dashboardItems, 0), entries: dashboardItems }] : []),
+      ...groups.map((group) => ({ order: group.sectionOrder, entries: [group] })),
+      ...customGroups.map((group) => ({ order: group.sectionOrder, entries: [group] })),
+      ...(looseItems.length ? [{ order: sectionOrder(looseItems, 10000), entries: looseItems }] : []),
+    ];
+    return sections.sort((a, b) => a.order - b.order).flatMap((section) => section.entries);
   }, [visibleNavItems]);
 
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(
@@ -343,6 +369,7 @@ export default function Sidebar({
     forceExpanded = false,
   ) => {
     const Icon = getNavigationIcon(item.icon);
+    const itemLabel = item.key === "branch-schedules" ? "Training Availability" : item.label;
     const active = isActive(item.href);
     const compact = collapsed && !forceExpanded;
     return (
@@ -350,7 +377,7 @@ export default function Sidebar({
         key={item.href}
         href={item.href}
         onClick={handleNavigation}
-        title={compact ? item.label : undefined}
+        title={compact ? itemLabel : undefined}
         aria-current={active ? "page" : undefined}
         className={[
           "group relative flex min-h-11 items-center rounded-xl py-2 text-[13px] font-semibold transition-colors duration-200",
@@ -380,7 +407,7 @@ export default function Sidebar({
               : "shrink-0 text-(--sidebar-muted) group-hover:text-(--gold)"
           }
         />
-        {!compact && <span className="truncate">{item.label}</span>}
+        {!compact && <span className="truncate">{itemLabel}</span>}
         {!compact && active && (
           <span
             aria-hidden="true"
@@ -413,7 +440,7 @@ export default function Sidebar({
             cursor-default
             bg-black/40
             backdrop-blur-[2px]
-            md:hidden
+            lg:hidden
           "
         />
       )}
@@ -425,13 +452,13 @@ export default function Sidebar({
       <aside
         aria-label="Main navigation"
         className={[
-          "fixed left-0 top-0 z-50 flex h-screen flex-col",
+          "df-sidebar-viewport fixed left-0 top-0 z-50 flex flex-col",
           "border-r border-(--line)",
           "bg-(--sidebar-bg)",
           "text-(--sidebar-text)",
           "shadow-none",
           "transition-[width,transform] duration-300 ease-out",
-          isOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0",
+          isOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0",
         ].join(" ")}
         style={{
           width: collapsed ? SIDEBAR_WIDTH.collapsed : SIDEBAR_WIDTH.expanded,
@@ -529,7 +556,7 @@ export default function Sidebar({
               hover:bg-(--sidebar-hover)
               hover:text-(--sidebar-text)
               active:scale-95
-              md:hidden
+              lg:hidden
             "
           >
             <X size={18} strokeWidth={2} />
@@ -936,7 +963,7 @@ export default function Sidebar({
                 "focus-visible:outline-none",
                 "focus-visible:ring-2",
                 "focus-visible:ring-(--gold)",
-                "md:flex",
+                "lg:flex",
                 collapsed ? "justify-center px-3" : "gap-3 px-3.5",
               ].join(" ")}
             >

@@ -6,12 +6,28 @@ const Student = require("../models/Student");
 const User = require("../models/User");
 const Plan = require("../models/Plan");
 const Branch = require("../models/Branch");
+const Batch = require("../models/Batch");
+const Curriculum = require("../models/Curriculum");
+const BranchSchedule = require("../models/BranchSchedule");
+const BranchDateSchedule = require("../models/BranchDateSchedule");
+const Holiday = require("../models/Holiday");
+const Session = require("../models/Session");
 const CoachStudentAssignment = require("../models/CoachStudentAssignment");
 const { validatePassword, sessionInvalidationTime } = require("../utils/passwordPolicy");
 const { normalizePhone } = require("../utils/phone");
 const { safelyNotify } = require("../services/notification.service");
+const { sendAccountActivation, createBootstrapPassword } = require("../services/accountActivation.service");
 const auditService = require("../services/audit.service");
 const { AUDIT_ACTIONS } = require("../config/auditActions");
+const { selectEnrollmentFeeTerm } = require("../services/enrollmentFeeTerm.service");
+const { sendInvoiceIssuedEmail } = require("../services/financeEmail.service");
+const { createEnrollmentInvoice } = require("../services/enrollmentInvoice.service");
+const { reserveBatchSeat } = require("../services/batchEnrollment.service");
+const { resolveEnrollmentFirstAttendedClassDate } = require("../services/enrollmentAttendance.service");
+const { getPublishedCurriculumByProgram } = require("../services/curriculumVersion.service");
+const { generateSessionOccurrences } = require("../services/session.service");
+const { buildAdmissionTimeline } = require("../services/admissionPreview.service");
+const { countLearningSteps, summarizePlanCurriculumCapacity, capacityError } = require("../services/curriculumCapacity.service");
 
 /* =========================================================
    CONSTANTS
@@ -27,6 +43,10 @@ const MAX_AGE = 120;
 
 function isValidObjectId(value) {
   return mongoose.Types.ObjectId.isValid(value);
+}
+
+function id(value) {
+  return String(value?._id || value || "");
 }
 
 function normalizeString(value) {
@@ -58,40 +78,87 @@ function enrollmentEndDate(plan, startDate) {
   return end;
 }
 
-function enrollmentSnapshot(plan, branchId) {
-  const feeOverride = (plan.branchFeeOverrides || []).find((item) => String(item.branch) === String(branchId));
-  const billingTerms = feeOverride || plan;
+async function enrollmentSnapshot(plan, curriculumVersionByProgram = null) {
+  const programIds = (plan.programs || []).map((item) => item.program?._id || item.program).filter(Boolean);
+  const curriculumVersions = curriculumVersionByProgram || await getPublishedCurriculumByProgram(plan._id, programIds);
   return {
     classesPerWeek: Number(plan.classesPerWeek || 0),
     startingBelt: plan.startingBelt || "White",
-    billingSnapshot: {
-      feeName: billingTerms.feeName || plan.name,
-      active: billingTerms.active !== false && plan.feeActive !== false,
-      amount: Number(billingTerms.amount ?? plan.price ?? 0),
-      billingFrequency: billingTerms.billingFrequency || plan.billingFrequency || "ONE_TIME",
-      registrationFee: Number(billingTerms.registrationFee ?? plan.registrationFee ?? 0),
-      taxRate: Number(billingTerms.taxRate ?? plan.taxRate ?? 0),
-      discountRules: (billingTerms.discountRules || plan.discountRules || []).map((rule) => ({
-        _id: rule._id, name: rule.name, type: rule.type, amount: Number(rule.amount || 0), active: rule.active !== false,
-        effectiveFrom: rule.effectiveFrom || null, effectiveUntil: rule.effectiveUntil || null,
-      })),
-      effectiveFrom: billingTerms.effectiveFrom || plan.effectiveFrom || null,
-      effectiveUntil: billingTerms.effectiveUntil || plan.effectiveUntil || null,
-    },
     programs: (plan.programs || []).map((item) => ({
       program: item.program?._id || item.program,
       weeklyLimit: item.weeklyLimit ?? null,
-      curriculum: ((Array.isArray(item.curriculum) && item.curriculum.length ? item.curriculum : plan.curriculum || [])).map((lesson) => ({
+      curriculumVersion: curriculumVersions.get(String(item.program?._id || item.program)) || null,
+      curriculum: curriculumVersions.get(String(item.program?._id || item.program)) ? [] : ((Array.isArray(item.curriculum) && item.curriculum.length ? item.curriculum : plan.curriculum || [])).map((lesson) => ({
         day: lesson.day, title: lesson.title, description: lesson.description || "", skill: lesson.skill || "",
       })),
     })),
   };
 }
 
-function feeIsActiveForBranch(plan, branchId) {
-  if (plan.feeActive === false) return false;
-  const override = (plan.branchFeeOverrides || []).find((item) => String(item.branch) === String(branchId));
-  return !override || override.active !== false;
+async function getAdmissionPreview(req, res) {
+  try {
+    if (req.user?.role !== "SUPER_ADMIN" && !req.user?.permissions?.includes("membership.manage")) return res.status(403).json({ success: false, message: "Membership management permission is required to preview an enrollment." });
+    const { branchId, planId, batchId = "", joinDate } = req.query;
+    if (![branchId, planId].every(isValidObjectId) || !isValidDateOnly(joinDate)) return res.status(400).json({ success: false, message: "Choose a valid Branch, Plan, and join date." });
+    if (parseDateOnly(joinDate).getTime() > startOfToday().getTime()) return res.status(400).json({ success: false, message: "Join date cannot be in the future." });
+    if (isBranchScoped(req.user) && !hasSameId(req.user.branch, branchId)) return res.status(403).json({ success: false, message: "You can only preview admissions for your Branch." });
+    const [branch, plan] = await Promise.all([
+      Branch.findOne({ _id: branchId, isActive: { $ne: false } }).select("_id isActive"),
+      Plan.findOne({ _id: planId, isActive: { $ne: false } }).populate("programs.program", "name isActive").lean(),
+    ]);
+    if (!branch || !plan) return res.status(404).json({ success: false, message: "The selected Branch or Plan is unavailable." });
+    const configuredPrograms = (plan.programs || []).filter((item) => item.program && item.program.isActive !== false);
+    if (!configuredPrograms.length) return res.json({ success: true, curricula: [], moduleCount: 0, requiredLearningSteps: 0, startingBelt: plan.startingBelt || "White", eligibilityError: "This Training Plan has no active Programs. Add Programs to the Plan before admitting a student.", timelineMessage: "Plan Program configuration is required.", steps: [] });
+    if (configuredPrograms.length !== (plan.programs || []).length) return res.json({ success: true, curricula: [], moduleCount: 0, requiredLearningSteps: 0, startingBelt: plan.startingBelt || "White", eligibilityError: "One or more Programs configured for this Training Plan are inactive or unavailable. Correct the Plan configuration before admission.", timelineMessage: "Plan Program configuration is incomplete.", steps: [] });
+    const publishedByProgram = new Map();
+    for (const program of configuredPrograms) {
+      const curriculum = await Curriculum.findOne({ plan: planId, program: program.program._id, status: "PUBLISHED" }).sort({ version: -1, publishedAt: -1 }).lean();
+      if (!curriculum) return res.json({ success: true, curricula: [], moduleCount: 0, requiredLearningSteps: 0, startingBelt: plan.startingBelt || "White", eligibilityError: `Publish a Curriculum for ${program.program.name} before admitting the student.`, timelineMessage: "A required Program Curriculum is missing.", steps: [] });
+      if (!countLearningSteps(curriculum.modules || [])) return res.json({ success: true, curricula: [], moduleCount: 0, requiredLearningSteps: 0, startingBelt: plan.startingBelt || "White", eligibilityError: `The published Curriculum for ${program.program.name} has no learning steps. Add learning steps before admission.`, timelineMessage: "A required Program Curriculum is empty.", steps: [] });
+      publishedByProgram.set(id(program.program), curriculum);
+    }
+    const curricula = configuredPrograms.map((item) => {
+      const curriculum = publishedByProgram.get(id(item.program));
+      return { programId: id(item.program), programName: item.program.name || "Program", curriculumId: curriculum._id, version: curriculum.version, name: curriculum.name, modules: curriculum.modules || [] };
+    });
+    const moduleCount = curricula.reduce((total, item) => total + item.modules.length, 0);
+    const requiredLearningSteps = curricula.reduce((total, item) => total + countLearningSteps(item.modules), 0);
+    if (!requiredLearningSteps) return res.json({ success: true, curricula, moduleCount, requiredLearningSteps, startingBelt: plan.startingBelt || "White", eligibilityError: "The published Curricula have no learning steps. Add learning steps before admission.", timelineMessage: "No required learning steps are configured.", steps: [] });
+    const planCapacity = await summarizePlanCurriculumCapacity(plan, { publishedOnly: true });
+    const planCapacityIssue = capacityError({ requiredSteps: planCapacity.combinedSteps, maximumSessions: planCapacity.maximumSessions });
+    if (planCapacityIssue) return res.json({ success: true, curricula, moduleCount, requiredLearningSteps, startingBelt: plan.startingBelt || "White", eligibilityError: planCapacityIssue, timelineMessage: "The published Curricula exceed this Plan's theoretical session capacity.", steps: [] });
+    const batchFilter = { plan: planId, branch: branchId, status: "ACTIVE" };
+    if (batchId) {
+      if (!isValidObjectId(batchId)) return res.status(400).json({ success: false, message: "Choose a valid Batch." });
+      batchFilter._id = batchId;
+    }
+    const batches = await Batch.find(batchFilter).select("_id name status capacity startDate calculatedEndDate capacityIssue effectiveFrom effectiveUntil").lean();
+    if (!batches.length) return res.json({ success: true, curricula, moduleCount, requiredLearningSteps, startingBelt: plan.startingBelt || "White", eligibilityError: "Choose an active Batch under this Branch and Plan.", timelineMessage: "No active eligible Batch is available.", steps: [] });
+    if (!batchId) return res.json({ success: true, curricula, moduleCount, requiredLearningSteps, startingBelt: plan.startingBelt || "White", eligibilityError: "Select an active Batch to calculate its eligible training dates.", timelineMessage: "Choose a Batch to preview its actual schedule.", steps: [] });
+    const batch = batches[0];
+    const base = { curricula, moduleCount, requiredLearningSteps, startingBelt: plan.startingBelt || "White" };
+    if (batch.capacityIssue) return res.json({ success: true, ...base, eligibilityError: batch.capacityIssue, timelineMessage: "Resolve the Batch capacity issue before admission.", steps: [] });
+    const today = startOfToday();
+    const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+    if (!batch.startDate || !batch.calculatedEndDate || joinDate > batch.calculatedEndDate || (batch.effectiveUntil && joinDate > batch.effectiveUntil)) return res.json({ success: true, ...base, eligibilityError: "This Batch cannot accept a student on the selected joining date. Check its completion and end date.", timelineMessage: "The selected joining date is outside the Batch enrollment period.", steps: [] });
+    const occurrenceStart = batch.startDate > todayKey ? batch.startDate : todayKey;
+    if (occurrenceStart > batch.calculatedEndDate) return res.json({ success: true, ...base, eligibilityError: "This Batch has no upcoming training period. Choose an active Batch with future scheduled Sessions.", timelineMessage: "No upcoming Batch training dates are available.", steps: [] });
+    const [schedule, overrides, holidays, existingSessions, roster] = await Promise.all([
+      BranchSchedule.findOne({ branch: branchId }).lean(),
+      BranchDateSchedule.find({ branch: branchId, date: { $gte: occurrenceStart, $lte: batch.calculatedEndDate } }).lean(),
+      Holiday.find({ isActive: true, date: { $gte: new Date(`${occurrenceStart}T00:00:00.000Z`), $lte: new Date(`${batch.calculatedEndDate}T23:59:59.999Z`) }, $or: [{ branch: null }, { branch: branchId }] }).lean(),
+      Session.find({ branch: branchId, date: { $gte: occurrenceStart, $lte: batch.calculatedEndDate } }).lean(),
+      Student.find({ "planEnrollments.batch": batch._id }).select("planEnrollments").lean(),
+    ]);
+    const occupied = roster.reduce((total, student) => total + (student.planEnrollments || []).filter((enrollment) => id(enrollment.batch) === id(batch._id) && enrollment.status === "ACTIVE" && (!enrollment.endDate || new Date(enrollment.endDate) >= today)).length, 0);
+    if (occupied >= batch.capacity) return res.json({ success: true, ...base, eligibilityError: `This Batch is full (${occupied}/${batch.capacity}). Choose another available Batch.`, timelineMessage: "No seat is available in the selected Batch.", steps: [] });
+    const generated = generateSessionOccurrences({ branches: [branch], schedules: schedule ? [schedule] : [], overrides, holidays, batches: [{ ...batch, branch: branch._id, plan }], start: occurrenceStart, end: batch.calculatedEndDate }).filter((item) => id(item.batch._id) === id(batch._id));
+    const result = buildAdmissionTimeline({ curricula, occurrences: generated, existingSessions, batchId: batch._id });
+    return res.json({ success: true, ...base, ...result });
+  } catch (error) {
+    console.error("Admission Curriculum preview failed", { name: error?.name || "Error", message: error?.message || "Unknown error" });
+    return res.status(500).json({ success: false, message: "Unable to calculate the admission preview. Refresh the selected Plan and Batch." });
+  }
 }
 
 function normalizeEmail(value) {
@@ -245,6 +312,8 @@ const getStudents = async (req, res) => {
       search,
       branch,
       plan,
+      program: requestedProgramId,
+      batch: batchId,
       status,
       belt,
       joinFrom,
@@ -351,7 +420,7 @@ const getStudents = async (req, res) => {
 
     const studentQuery = Student.find(filter)
       .populate("branch", "name address")
-      .populate("plan", "name price duration startingBelt isActive programs")
+      .populate("plan", "name duration startingBelt isActive programs")
       .populate("plan.programs.program", "name slug")
       .sort({ [sortField]: sortDirection, _id: -1 });
 
@@ -418,9 +487,14 @@ const getStudentById = async (req, res) => {
       });
     }
 
+    const studentResponse = student.toObject();
+    for (const enrollment of studentResponse.planEnrollments || []) {
+      enrollment.firstAttendedClassDate = await resolveEnrollmentFirstAttendedClassDate({ studentId: student._id, enrollment });
+    }
+
     return res.status(200).json({
       success: true,
-      student,
+      student: studentResponse,
     });
   } catch (error) {
     console.error("Get student error:", error);
@@ -479,20 +553,33 @@ const getMyStudentProfile = async (req, res) => {
 const createStudent = async (req, res) => {
   let createdUser = null;
   let createdStudent = null;
+  let createdInvoice = null;
+  let auditRecorded = false;
 
   try {
+    if (req.user?.role !== "SUPER_ADMIN" && !req.user?.permissions?.includes("membership.manage")) {
+      return res.status(403).json({ success: false, message: "Membership management permission is required to create an enrollment." });
+    }
     const {
       name,
       age,
       phone,
       email,
       loginEmail,
-      loginPassword,
       branch,
       plan,
+      feeTerm: feeTermId,
+      batch: batchId,
       joinDate,
       guardians,
+      createInvoice = false,
+      invoiceDueDate,
     } = req.body;
+
+    if (typeof createInvoice !== "boolean") return res.status(400).json({ success: false, message: "Invoice creation preference is invalid." });
+    if (createInvoice && req.user?.role !== "SUPER_ADMIN" && !req.user?.permissions?.includes("finance.manage")) {
+      return res.status(403).json({ success: false, message: "Finance management permission is required to issue an admission invoice." });
+    }
 
     const normalizedName = normalizeString(name);
 
@@ -537,13 +624,6 @@ const createStudent = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: "Login email is required.",
-      });
-    }
-
-    if (typeof loginPassword !== "string" || !loginPassword) {
-      return res.status(400).json({
-        success: false,
-        message: "Login password is required.",
       });
     }
 
@@ -620,14 +700,6 @@ const createStudent = async (req, res) => {
     /*
      * Password validation.
      */
-    const passwordError = validatePassword(loginPassword);
-    if (passwordError) {
-      return res.status(400).json({
-        success: false,
-        message: passwordError,
-      });
-    }
-
     /*
      * ObjectId validation.
      */
@@ -680,7 +752,7 @@ const createStudent = async (req, res) => {
     /*
      * Validate plan.
      */
-    const selectedPlan = await Plan.findById(plan);
+    const selectedPlan = await Plan.findById(plan).populate("programs.program", "name isActive");
 
     if (!selectedPlan) {
       return res.status(404).json({
@@ -695,12 +767,26 @@ const createStudent = async (req, res) => {
         message: "Selected training plan is inactive",
       });
     }
-    if (selectedPlan.feeBranch && String(selectedPlan.feeBranch) !== String(selectedBranch._id)) {
-      return res.status(400).json({ success: false, message: "Selected fee structure is not available to this branch" });
+
+    const planPrograms = selectedPlan.programs || [];
+    if (!planPrograms.length) return res.status(409).json({ success: false, message: "This Training Plan has no Programs. Add Programs to the Plan before admitting a student." });
+    if (planPrograms.some((item) => !item.program || item.program.isActive === false)) return res.status(409).json({ success: false, message: "One or more Programs configured for this Training Plan are inactive or unavailable. Correct the Plan configuration before admission." });
+    const programCurricula = [];
+    for (const item of planPrograms) {
+      const programId = id(item.program);
+      const curriculum = await Curriculum.findOne({ plan: selectedPlan._id, program: programId, status: "PUBLISHED" }).sort({ version: -1, publishedAt: -1 }).select("_id program version name modules").lean();
+      if (!curriculum) return res.status(409).json({ success: false, message: `Publish a Curriculum for ${item.program.name || "a Program in this Plan"} before admitting this student.` });
+      programCurricula.push({ program: programId, curriculum });
     }
-    if (!feeIsActiveForBranch(selectedPlan, selectedBranch._id)) {
-      return res.status(400).json({ success: false, message: "Selected fee structure is inactive for this branch" });
+    const requiredLearningSteps = programCurricula.reduce((total, item) => total + countLearningSteps(item.curriculum.modules || []), 0);
+    const emptyCurriculum = programCurricula.find((item) => !countLearningSteps(item.curriculum.modules || []));
+    if (emptyCurriculum) {
+      const program = planPrograms.find((entry) => id(entry.program) === emptyCurriculum.program)?.program;
+      return res.status(409).json({ success: false, message: `The published Curriculum for ${program?.name || "a Program in this Plan"} has no learning steps. Add learning steps before admission.` });
     }
+    const planCapacity = await summarizePlanCurriculumCapacity(selectedPlan, { publishedOnly: true });
+    const planCapacityIssue = capacityError({ requiredSteps: planCapacity.combinedSteps, maximumSessions: planCapacity.maximumSessions });
+    if (planCapacityIssue) return res.status(409).json({ success: false, message: planCapacityIssue });
 
     /*
      * Join date.
@@ -723,6 +809,28 @@ const createStudent = async (req, res) => {
           message: "Join date cannot be in the future",
         });
       }
+    }
+
+    const selectedTerms = await selectEnrollmentFeeTerm({ feeTermId, plan: selectedPlan, branch: selectedBranch, startDate: parsedJoinDate });
+    const activeBatches = await Batch.find({ plan: selectedPlan._id, branch: selectedBranch._id, status: "ACTIVE" }).select("_id").lean();
+    if (activeBatches.length && !isValidObjectId(batchId)) return res.status(400).json({ success: false, message: "Choose an available Batch for this Plan and Branch." });
+    let selectedBatch = null;
+    if (batchId) {
+      if (!isValidObjectId(batchId)) return res.status(400).json({ success: false, message: "Invalid Batch selection." });
+      selectedBatch = await Batch.findOne({ _id: batchId, plan: selectedPlan._id, branch: selectedBranch._id, status: "ACTIVE" }).select("_id startDate calculatedEndDate effectiveFrom effectiveUntil");
+      if (!selectedBatch) return res.status(400).json({ success: false, message: "Choose an active Batch under the selected Plan and Branch." });
+      const startKey = joinDate || new Intl.DateTimeFormat("en-CA").format(parsedJoinDate);
+      if (!selectedBatch.startDate || !selectedBatch.calculatedEndDate || startKey > selectedBatch.calculatedEndDate) return res.status(400).json({ success: false, message: "The enrollment start date cannot be after the selected Batch completion date." });
+      if ((selectedBatch.effectiveFrom && selectedBatch.effectiveFrom > startKey) || (selectedBatch.effectiveUntil && selectedBatch.effectiveUntil < startKey)) return res.status(400).json({ success: false, message: "The selected Batch is not effective on the enrollment start date." });
+    }
+    let parsedInvoiceDueDate = null;
+    if (createInvoice) {
+      parsedInvoiceDueDate = new Date(invoiceDueDate);
+      if (!invoiceDueDate || Number.isNaN(parsedInvoiceDueDate.getTime()) || parsedInvoiceDueDate < parsedJoinDate) {
+        return res.status(400).json({ success: false, message: "Choose a valid invoice due date on or after the enrollment start date." });
+      }
+      const billableSubtotal = Number(selectedTerms.billingSnapshot.amount || 0) + Number(selectedTerms.billingSnapshot.registrationFee || 0);
+      if (billableSubtotal <= 0) return res.status(400).json({ success: false, message: "The selected Fee Term has no billable amount." });
     }
 
     /*
@@ -774,21 +882,21 @@ const createStudent = async (req, res) => {
      *
      * Students intentionally use the existing STUDENT role.
      */
-    createdUser = await User.create({
+    const userValues = {
       name: normalizedName,
       email: normalizedLoginEmail,
       phone: normalizedPhone,
-      password: loginPassword,
+      password: createBootstrapPassword(),
       role: "STUDENT",
       branch: selectedBranch._id,
       isActive: true,
-    });
+    };
 
     /*
      * Create student.
      */
-    createdStudent = await Student.create({
-      user: createdUser._id,
+    const studentValues = {
+      user: null,
       name: normalizedName,
       age: numericAge,
       phone: normalizedPhone,
@@ -796,22 +904,52 @@ const createStudent = async (req, res) => {
       branch: selectedBranch._id,
       plan: selectedPlan._id,
       guardians: normalizedGuardians,
-      planEnrollments: [{ plan: selectedPlan._id, feePlan: selectedPlan._id, branch: selectedBranch._id, program: selectedPlan.programs?.[0]?.program?._id || selectedPlan.programs?.[0]?.program || null, startDate: parsedJoinDate, endDate: enrollmentEndDate(selectedPlan, parsedJoinDate), status: "ACTIVE", enrollmentSource: "ADMISSION", createdBy: req.user._id, ...enrollmentSnapshot(selectedPlan, selectedBranch._id) }],
+      planEnrollments: [{ plan: selectedPlan._id, batch: selectedBatch?._id || null, feeTerm: selectedTerms.term._id, branch: selectedBranch._id, program: id(planPrograms[0].program), startDate: parsedJoinDate, endDate: enrollmentEndDate(selectedPlan, parsedJoinDate), status: "ACTIVE", enrollmentSource: "ADMISSION", createdBy: req.user._id, ...await enrollmentSnapshot(selectedPlan, new Map(programCurricula.map((item) => [item.program, item.curriculum._id]))), billingSnapshot: selectedTerms.billingSnapshot }],
       joinDate: parsedJoinDate,
       status: "ACTIVE",
       currentBelt:
         selectedPlan.startingBelt || selectedPlan.belt || "White Belt",
-    });
+    };
+
+    if (createInvoice || selectedBatch) {
+      const session = await mongoose.startSession();
+      try {
+        await session.withTransaction(async () => {
+          if (selectedBatch) await reserveBatchSeat({ batchId: selectedBatch._id, planId: selectedPlan._id, branchId: selectedBranch._id, startDate: parsedJoinDate, session });
+          [createdUser] = await User.create([userValues], { session });
+          studentValues.user = createdUser._id;
+          [createdStudent] = await Student.create([studentValues], { session });
+          if (createInvoice) createdInvoice = await createEnrollmentInvoice({
+            req,
+            student: createdStudent,
+            enrollment: createdStudent.planEnrollments[0],
+            plan: selectedPlan,
+            terms: selectedTerms.billingSnapshot,
+            branch: selectedBranch,
+            dueDate: parsedInvoiceDueDate,
+            session,
+          });
+          await auditService.record({ req, action: AUDIT_ACTIONS.STUDENT_CREATED, entityType: "STUDENT", entityId: createdStudent._id, branchId: selectedBranch._id, after: { status: createdStudent.status, branchId: selectedBranch._id, planId: selectedPlan._id, joinDate: createdStudent.joinDate, guardianCount: normalizedGuardians.length }, session });
+          auditRecorded = true;
+        });
+      } finally {
+        await session.endSession();
+      }
+    } else {
+      createdUser = await User.create(userValues);
+      studentValues.user = createdUser._id;
+      createdStudent = await Student.create(studentValues);
+    }
 
     /*
      * Return populated student.
      */
     const populatedStudent = await Student.findById(createdStudent._id)
       .populate("branch", "name address")
-      .populate("plan", "name price duration startingBelt isActive programs")
+      .populate("plan", "name duration startingBelt isActive programs")
       .populate("plan.programs.program", "name slug");
 
-    await auditService.record({ req, action: AUDIT_ACTIONS.STUDENT_CREATED, entityType: "STUDENT", entityId: createdStudent._id, branchId: selectedBranch._id, after: { status: createdStudent.status, branchId: selectedBranch._id, planId: selectedPlan._id, joinDate: createdStudent.joinDate, guardianCount: normalizedGuardians.length } });
+    if (!auditRecorded) await auditService.record({ req, action: AUDIT_ACTIONS.STUDENT_CREATED, entityType: "STUDENT", entityId: createdStudent._id, branchId: selectedBranch._id, after: { status: createdStudent.status, branchId: selectedBranch._id, planId: selectedPlan._id, joinDate: createdStudent.joinDate, guardianCount: normalizedGuardians.length } });
 
     await safelyNotify({
       type: "STUDENT_CREATED",
@@ -826,10 +964,20 @@ const createStudent = async (req, res) => {
       actionUrl: "/students",
     });
 
+    let activationEmailSent = false;
+    try {
+      activationEmailSent = await sendAccountActivation(createdUser);
+    } catch (activationError) {
+      console.error("Student account activation email could not be sent.", { name: activationError?.name || "Error" });
+    }
+    if (createdInvoice) await sendInvoiceIssuedEmail(createdInvoice).catch(() => {});
+
     return res.status(201).json({
       success: true,
       message: "Student created successfully",
       student: populatedStudent,
+      activationEmailSent,
+      invoice: createdInvoice,
     });
   } catch (error) {
     console.error("Create student error:", error);
@@ -864,7 +1012,7 @@ const createStudent = async (req, res) => {
       });
     }
 
-    return res.status(500).json({
+    return res.status(error.status || 500).json({
       success: false,
       message:
         process.env.NODE_ENV === "production"
@@ -889,6 +1037,7 @@ const updateStudent = async (req, res) => {
       email,
       branch,
       plan,
+      feeTerm: feeTermId,
       currentBelt,
       status,
       password,
@@ -1071,15 +1220,6 @@ const updateStudent = async (req, res) => {
 
       student.branch = targetBranch._id;
 
-      /*
-       * Keep the student's login account
-       * branch synchronized.
-       */
-      if (student.user) {
-        await User.findByIdAndUpdate(student.user, {
-          branch: targetBranch._id,
-        });
-      }
     }
 
     /*
@@ -1094,6 +1234,9 @@ const updateStudent = async (req, res) => {
      */
     const branchChanged = Boolean(targetBranch && String(targetBranch._id) !== originalBranchId);
     if (plan !== undefined || branchChanged) {
+      if (req.user?.role !== "SUPER_ADMIN" && !req.user?.permissions?.includes("membership.manage")) {
+        return res.status(403).json({ success: false, message: "Membership management permission is required to create an enrollment." });
+      }
       if (isCoach(req)) {
         return res.status(403).json({
           success: false,
@@ -1126,22 +1269,21 @@ const updateStudent = async (req, res) => {
       }
 
       const enrollmentBranch = targetBranch?._id || student.branch;
-      if (selectedPlan.feeBranch && String(selectedPlan.feeBranch) !== String(enrollmentBranch)) {
-        return res.status(400).json({ success: false, message: "Selected fee structure is not available to this branch" });
-      }
-      if (!feeIsActiveForBranch(selectedPlan, enrollmentBranch)) {
-        return res.status(400).json({ success: false, message: "Selected fee structure is inactive for this branch" });
-      }
-
       if (String(student.plan) !== String(selectedPlan._id) || branchChanged) {
         const enrollmentStart = new Date();
         enrollmentStart.setHours(0, 0, 0, 0);
+        const selectedBranch = targetBranch || await Branch.findById(enrollmentBranch);
+        const activeBatches = await Batch.find({ plan: selectedPlan._id, branch: enrollmentBranch, status: "ACTIVE" }).select("_id").lean();
+        if (activeBatches.length) {
+          return res.status(409).json({ success: false, message: "Use Memberships to change this enrollment so a Batch seat can be selected and reserved." });
+        }
+        const selectedTerms = await selectEnrollmentFeeTerm({ feeTermId, plan: selectedPlan, branch: selectedBranch, startDate: enrollmentStart });
         const currentEnrollment = [...(student.planEnrollments || [])].reverse().find((item) => item.status === "ACTIVE");
         if (currentEnrollment) {
           currentEnrollment.status = "COMPLETED";
           currentEnrollment.endDate = enrollmentStart;
         }
-        student.planEnrollments.push({ plan: selectedPlan._id, feePlan: selectedPlan._id, branch: enrollmentBranch, program: selectedPlan.programs?.[0]?.program?._id || selectedPlan.programs?.[0]?.program || null, startDate: enrollmentStart, endDate: enrollmentEndDate(selectedPlan, enrollmentStart), status: "ACTIVE", enrollmentSource: branchChanged ? "BRANCH_TRANSFER" : "PLAN_CHANGE", createdBy: req.user._id, ...enrollmentSnapshot(selectedPlan, enrollmentBranch) });
+        student.planEnrollments.push({ plan: selectedPlan._id, feeTerm: selectedTerms.term._id, branch: enrollmentBranch, program: selectedPlan.programs?.[0]?.program?._id || selectedPlan.programs?.[0]?.program || null, startDate: enrollmentStart, endDate: enrollmentEndDate(selectedPlan, enrollmentStart), status: "ACTIVE", enrollmentSource: branchChanged ? "BRANCH_TRANSFER" : "PLAN_CHANGE", createdBy: req.user._id, ...await enrollmentSnapshot(selectedPlan), billingSnapshot: selectedTerms.billingSnapshot });
         student.plan = selectedPlan._id;
       }
     }
@@ -1304,13 +1446,17 @@ const updateStudent = async (req, res) => {
 
     await student.save();
 
+    if (targetBranch && student.user) {
+      await User.findByIdAndUpdate(student.user, { branch: targetBranch._id });
+    }
+
     if (linkedUser) {
       await linkedUser.save();
     }
 
     const updatedStudent = await Student.findById(id)
       .populate("branch", "name address")
-      .populate("plan", "name price duration startingBelt isActive programs")
+      .populate("plan", "name duration startingBelt isActive programs")
       .populate("plan.programs.program", "name slug");
 
     const auditAfter = { status: student.status, branchId: student.branch, planId: student.plan, currentBelt: student.currentBelt, joinDate: student.joinDate, guardianCount: student.guardians?.length || 0, changedFields: Object.keys(req.body || {}).filter((field) => ["name", "age", "gender", "email", "phone", "address", "guardians", "status", "branch", "plan", "currentBelt", "joinDate", "programBelts"].includes(field)) };
@@ -1352,9 +1498,9 @@ const updateStudent = async (req, res) => {
       });
     }
 
-    return res.status(500).json({
+    return res.status(error.status || 500).json({
       success: false,
-      message: "Failed to update student",
+      message: error.status ? error.message : "Failed to update student",
     });
   }
 };
@@ -1464,6 +1610,7 @@ module.exports = {
   getStudents,
   getStudentById,
   getMyStudentProfile,
+  getAdmissionPreview,
   createStudent,
   updateStudent,
   deleteStudent,

@@ -33,6 +33,11 @@ const timeSlotSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "TrainingSessionType",
     },
+    // Optional transition link: legacy slots remain readable, while slots
+    // assigned to a Batch are the authoritative recurring Batch occurrences.
+    batchId: { type: mongoose.Schema.Types.ObjectId, ref: "Batch", default: null, index: true },
+    roomId: { type: mongoose.Schema.Types.ObjectId, ref: "Room", default: null, index: true },
+    room: { type: String, trim: true, maxlength: 100, default: "" },
     coach: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
     capacity: { type: Number, min: 1, default: null },
 

@@ -5,7 +5,9 @@ const invoiceItemSchema = new mongoose.Schema({
   quantity: { type: Number, required: true, min: 1, default: 1 },
   unitAmount: { type: Number, required: true, min: 0 },
   amount: { type: Number, required: true, min: 0 },
-  kind: { type: String, enum: ["TUITION", "REGISTRATION", "ADJUSTMENT"], default: "TUITION" },
+  kind: { type: String, enum: ["TUITION", "REGISTRATION", "ADJUSTMENT", "MERCHANDISE"], default: "TUITION" },
+  product: { type: mongoose.Schema.Types.ObjectId, ref: "Product", default: null },
+  sku: { type: String, trim: true, uppercase: true, default: "" },
   program: { type: mongoose.Schema.Types.ObjectId, ref: "TrainingSessionType", default: null },
   programName: { type: String, default: "" },
 }, { _id: false });
@@ -13,8 +15,13 @@ const invoiceItemSchema = new mongoose.Schema({
 const invoiceSchema = new mongoose.Schema({
   invoiceNumber: { type: String, required: true, unique: true, trim: true, index: true },
   student: { type: mongoose.Schema.Types.ObjectId, ref: "Student", required: true, index: true },
-  enrollment: { type: mongoose.Schema.Types.ObjectId, required: true, index: true },
+  enrollment: { type: mongoose.Schema.Types.ObjectId, default: null, index: true },
+  kind: { type: String, enum: ["FEES", "MERCHANDISE"], default: "FEES", required: true, index: true },
+  order: { type: mongoose.Schema.Types.ObjectId, ref: "InventoryOrder", default: null, index: true },
   plan: { type: mongoose.Schema.Types.ObjectId, ref: "Plan", default: null },
+  // Historical reference to the agreement chosen at enrollment. Invoice amounts
+  // remain the immutable financial record; this reference is informational.
+  feeTerm: { type: mongoose.Schema.Types.ObjectId, ref: "FeeTerm", default: null },
   branch: { type: mongoose.Schema.Types.ObjectId, ref: "Branch", required: true, index: true },
   items: { type: [invoiceItemSchema], required: true, validate: (items) => Array.isArray(items) && items.length > 0 },
   subtotal: { type: Number, required: true, min: 0 },

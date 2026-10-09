@@ -156,6 +156,17 @@ const DEFAULT_MODULES = [
   },
 
   {
+    key: "promotions",
+    label: "Promotions",
+    href: "/promotions",
+    icon: "Trophy",
+    order: 63,
+    requiredPermission: "promotion.view",
+    allowedRoles: ALL_STAFF,
+    isSystem: true,
+  },
+
+  {
     key: "makeups",
     label: "Makeups",
     href: "/makeups",
@@ -206,7 +217,7 @@ const DEFAULT_MODULES = [
    */
   {
     key: "branch-schedules",
-    label: "Branch Schedules",
+    label: "Training Availability",
     href: "/branch-schedules",
     icon: "CalendarClock",
     order: 95,
@@ -225,14 +236,59 @@ const DEFAULT_MODULES = [
     requiredPermission: "training_session_type.view",
     allowedRoles: ["SUPER_ADMIN", "BRANCH_ADMIN"],
   },
+
   {
-    key: "memberships",
-    label: "Memberships",
-    href: "/memberships",
-    icon: "BadgeCheck",
-    order: 22,
-    requiredPermission: "membership.view",
+    key: "batches",
+    label: "Batches",
+    href: "/batches",
+    icon: "Layers",
+    order: 31,
+    requiredPermission: "plan.view",
+    allowedRoles: ["SUPER_ADMIN", "BRANCH_ADMIN"],
+  },
+
+  {
+    key: "calendar",
+    label: "Academy Calendar",
+    href: "/calendar",
+    icon: "CalendarDays",
+    order: 24,
+    group: "operations",
+    requiredPermission: "calendar.view",
     allowedRoles: ALL_STAFF,
+    isSystem: true,
+  },
+
+  {
+    key: "grading",
+    label: "Grading & Certificates",
+    href: "/grading",
+    icon: "Award",
+    order: 65,
+    requiredPermission: "grading.view",
+    allowedRoles: ALL_STAFF,
+    isSystem: true,
+  },
+  {
+    key: "progress",
+    label: "Progress",
+    href: "/progress",
+    icon: "TrendingUp",
+    order: 68,
+    requiredPermission: "student.view",
+    allowedRoles: ["SUPER_ADMIN", "BRANCH_ADMIN"],
+    isSystem: true,
+  },
+  {
+    key: "inventory",
+    label: "Inventory & Merchandise",
+    href: "/inventory",
+    icon: "Package",
+    order: 72,
+    group: "operations",
+    requiredPermission: "inventory.view",
+    allowedRoles: ["SUPER_ADMIN", "BRANCH_ADMIN"],
+    isSystem: true,
   },
 
   {
@@ -399,6 +455,7 @@ const REQUIRED_MODULE_KEYS = [
   "memberships",
   "holidays",
   "branch-schedules",
+  "batches",
   "training-session-types",
   "reports",
   "fees",
@@ -406,6 +463,11 @@ const REQUIRED_MODULE_KEYS = [
   "settings-staff",
   "settings-maintenance",
   "settings-email",
+  "grading",
+  "promotions",
+  "calendar",
+  "inventory",
+  "progress",
 ];
 
 /*
@@ -528,6 +590,37 @@ const ensureDefaultModules = async () => {
         );
       }
     }
+
+    // Older installations may have been seeded before Module's unique indexes
+    // were enforced. Keep the preferred Memberships record and deactivate any
+    // exact duplicate registrations so navigation returns it only once.
+    const membershipModules = await Module.find({
+      key: "memberships",
+      href: "/memberships",
+    })
+      .sort({ isSystem: -1, isActive: -1, createdAt: 1, _id: 1 })
+      .select("_id")
+      .lean();
+
+    if (membershipModules.length > 1) {
+      await Module.updateMany(
+        { _id: { $in: membershipModules.slice(1).map((module) => module._id) } },
+        { $set: { isActive: false } },
+      );
+    }
+
+    // Calendar initially shipped after the other Operations links. Move only
+    // the old default record; administrator-configured ordering is preserved.
+    await Module.updateOne(
+      {
+        key: "calendar",
+        order: 94,
+        requiredPermission: "calendar.view",
+      },
+      {
+        $set: { order: 24, group: "operations" },
+      },
+    );
 
     // Move the existing inquiries entry into the CRM while preserving its
     // configured permission. The legacy route redirects to /crm.

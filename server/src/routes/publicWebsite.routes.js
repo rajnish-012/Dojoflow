@@ -7,6 +7,7 @@ const {
 const {
   getPublicFAQs,
 } = require("../controllers/faq.controller");
+const { getPublicProducts } = require("../controllers/inventory.controller");
 
 const router = express.Router();
 
@@ -27,5 +28,7 @@ router.get(
   "/faqs",
   getPublicFAQs,
 );
+
+router.get("/merchandise", getPublicProducts);
 
 module.exports = router;

@@ -34,6 +34,7 @@ import {
   SummaryCard,
   Select,
 } from "@/components/ui";
+import StudentCurriculumProgressPanel from "@/components/curriculum/StudentCurriculumProgressPanel";
 
 type Student = {
   _id: string;
@@ -52,8 +53,8 @@ type Student = {
     durationUnit?: string;
     startingBelt?: string;
     curriculum?: CurriculumItem[];
-    milestones?: Milestone[];
   } | null;
+  planEnrollments?: { _id: string; status: string; program?: string | { _id: string }; programs?: { program: string | { _id: string }; curriculumVersion?: string | null }[]; startDate?: string; firstAttendedClassDate?: string | null }[];
 };
 
 type AttendanceItem = {
@@ -99,10 +100,10 @@ type CurriculumItem = {
 };
 
 type Milestone = {
-  day?: number;
   belt?: string;
   skill?: string;
   description?: string;
+  status?: string;
 };
 
 type ProgressData = {
@@ -291,11 +292,6 @@ function normalizeCurriculum(source: any): CurriculumItem[] {
     "items",
     "data",
   ]);
-}
-
-function normalizeMilestones(source: any): Milestone[] {
-  if (Array.isArray(source)) return source;
-  return extractArray<Milestone>(source, ["milestones", "items", "data"]);
 }
 
 function SectionHeading({
@@ -871,9 +867,10 @@ export default function StudentProgressPage() {
         )
       : 0;
 
+  const curriculumEnrollment = [...(student?.planEnrollments || [])].reverse().find((enrollment) => enrollment.status === "ACTIVE" && (enrollment.programs || []).some((item) => String(typeof item.program === "string" ? item.program : item.program?._id) === selectedProgramId && Boolean(item.curriculumVersion)));
+
   const planCurriculum = normalizeCurriculum(student?.plan?.curriculum);
 
-  const planMilestones = normalizeMilestones(student?.plan?.milestones);
 
   const currentCurriculum =
     progress?.currentCurriculum ??
@@ -897,19 +894,8 @@ export default function StudentProgressPage() {
         }
       : null);
 
-  const nextMilestone =
-    progress?.nextMilestone ??
-    planMilestones
-      .filter((milestone) => numberValue(milestone.day) > summary.trainingDay)
-      .sort((a, b) => numberValue(a.day) - numberValue(b.day))[0] ??
-    null;
-
-  const achievedMilestone =
-    progress?.achievedMilestone ??
-    planMilestones
-      .filter((milestone) => numberValue(milestone.day) <= summary.trainingDay)
-      .sort((a, b) => numberValue(b.day) - numberValue(a.day))[0] ??
-    null;
+  const nextMilestone = progress?.nextMilestone ?? null;
+  const achievedMilestone = progress?.achievedMilestone ?? null;
 
   if (loading) {
     return (
@@ -1108,9 +1094,13 @@ export default function StudentProgressPage() {
                       "
                     >
                       <CalendarCheck size={13} />
-                      Joined {formatDate(student.joinDate)}
+                      Joining Date {formatDate(student.joinDate)}
                     </span>
                   )}
+                  <span className="inline-flex items-center gap-1.5">
+                    <CalendarCheck size={13} />
+                    First Attended Class {curriculumEnrollment?.firstAttendedClassDate ? formatDate(curriculumEnrollment.firstAttendedClassDate) : "Not attended yet"}
+                  </span>
                 </div>
               </div>
             </div>
@@ -1183,6 +1173,8 @@ export default function StudentProgressPage() {
             icon={<Clock3 size={20} />}
           />
         </div>
+
+        {student && curriculumEnrollment && selectedProgramId && <StudentCurriculumProgressPanel studentId={student._id} enrollmentId={curriculumEnrollment._id} programId={selectedProgramId} />}
 
         {/* Main Progress */}
         <div
@@ -1702,7 +1694,7 @@ export default function StudentProgressPage() {
                         text-(--ink-muted)
                       "
                     >
-                      Target Day {nextMilestone.day}
+                      {(nextMilestone.status || "Awaiting curriculum progress").replaceAll("_", " ")}
                     </p>
                   </div>
                 </div>

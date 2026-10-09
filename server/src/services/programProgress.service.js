@@ -6,6 +6,35 @@ const indiaDateFormatter = new Intl.DateTimeFormat("en-CA", {
   day: "2-digit",
 });
 
+function deriveProgramProgress(records = [], curriculum = []) {
+  const attendedDates = new Set();
+  const completed = new Set();
+  for (const record of records) {
+    // Only a Present regular Session records actual participation. Absence,
+    // scheduled time, and makeup history do not advance regular progression.
+    const sessionStatus = record.session && typeof record.session === "object" ? record.session.status : null;
+    if (record.attendanceType === "MAKEUP" || record.status !== "PRESENT" || ["CLOSED", "CANCELLED"].includes(sessionStatus)) continue;
+    const date = new Date(record.date);
+    if (Number.isNaN(date.getTime())) continue;
+    const dateKey = indiaDateFormatter.format(date);
+    if (attendedDates.has(dateKey)) continue;
+    attendedDates.add(dateKey);
+    const day = Number(record.planDay);
+    if (Number.isInteger(day) && day > 0) completed.add(day);
+  }
+  const days = [...new Set((curriculum || []).map((item) => Number(item.day)).filter((day) => Number.isInteger(day) && day > 0))].sort((a, b) => a - b);
+  let currentTrainingDay = 0;
+  for (const day of days) {
+    if (!completed.has(day)) break;
+    currentTrainingDay = day;
+  }
+  return {
+    currentTrainingDay,
+    completedDays: days.filter((day) => completed.has(day)),
+    nextDay: days.find((day) => !completed.has(day)) || null,
+  };
+}
+
 async function getProgramLearningProgress({
   studentId,
   programId,
@@ -44,41 +73,15 @@ async function getProgramLearningProgress({
     };
   }
   const records = await Attendance.find(filter)
-    .select("planDay status date createdAt attendanceType")
+    .select("planDay status date createdAt attendanceType session")
+    .populate("session", "status")
     .sort({ date: 1, createdAt: 1, _id: 1 })
     .lean();
-  // Historical duplicates on one calendar date count as one decision.
-  // Makeup attendance is recovery history, never regular progression.
-  const consumedDates = new Set();
-  const completed = new Set();
-  for (const record of records) {
-    if (record.attendanceType === "MAKEUP" || !["PRESENT", "ABSENT"].includes(record.status)) continue;
-    const date = new Date(record.date);
-    if (Number.isNaN(date.getTime())) continue;
-    const dateKey = indiaDateFormatter.format(date);
-    if (consumedDates.has(dateKey)) continue;
-    consumedDates.add(dateKey);
-    const day = Number(record.planDay);
-    if (Number.isInteger(day) && day > 0) completed.add(day);
-  }
-  const days = [
-    ...new Set(
-      (curriculum || [])
-        .map((item) => Number(item.day))
-        .filter((day) => Number.isInteger(day) && day > 0),
-    ),
-  ].sort((a, b) => a - b);
-  let currentTrainingDay = 0;
-  for (const day of days) {
-    if (!completed.has(day)) break;
-    currentTrainingDay = day;
-  }
+  const progress = deriveProgramProgress(records, curriculum);
   return {
-    currentTrainingDay,
-    completedDays: days.filter((day) => completed.has(day)),
-    nextDay: days.find((day) => !completed.has(day)) || null,
+    ...progress,
     attendance: records,
   };
 }
 
-module.exports = { getProgramLearningProgress };
+module.exports = { getProgramLearningProgress, deriveProgramProgress };

@@ -9,6 +9,8 @@ const makeupSchema = new mongoose.Schema(
       index: true,
     },
     enrollment: { type: mongoose.Schema.Types.ObjectId, default: null },
+    originalSession: { type: mongoose.Schema.Types.ObjectId, ref: "Session", default: null },
+    makeupSession: { type: mongoose.Schema.Types.ObjectId, ref: "Session", default: null },
     plan: { type: mongoose.Schema.Types.ObjectId, ref: "Plan", default: null },
     sessionTypeId: { type: mongoose.Schema.Types.ObjectId, ref: "TrainingSessionType", default: null },
     sessionSlotId: { type: mongoose.Schema.Types.ObjectId, default: null },

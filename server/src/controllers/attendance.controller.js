@@ -5,11 +5,15 @@ const Makeup = require("../models/Makeup");
 const Student = require("../models/Student");
 const Branch = require("../models/Branch");
 const Plan = require("../models/Plan");
+const Batch = require("../models/Batch");
+const Curriculum = require("../models/Curriculum");
+const Session = require("../models/Session");
 const CoachStudentAssignment = require("../models/CoachStudentAssignment");
 const { getProgramLearningProgress } = require("../services/programProgress.service");
 const { safelyNotify } = require("../services/notification.service");
 const { resolveProgramCurriculum } = require("../services/curriculumResolver.service");
 const { withAttendanceSessionDetails } = require("../utils/attendanceSession");
+const { resolveSessionForSlot } = require("../services/session.service");
 
 const {
   getBranchDateAvailability,
@@ -18,6 +22,7 @@ const {
 const { isBranchScoped } = require("../utils/access");
 const { findEnrollmentForDate } = require("../services/enrollmentLifecycle.service");
 const auditService = require("../services/audit.service");
+const { recalculateEnrollmentFirstAttendedClassDate } = require("../services/enrollmentAttendance.service");
 const { AUDIT_ACTIONS } = require("../config/auditActions");
 
 /* =========================================================
@@ -357,6 +362,7 @@ const calculateTrainingDay = async (studentId, selectedDate) => {
   const previousRecords = await Attendance.find({
     student: studentId,
     attendanceType: { $ne: "MAKEUP" },
+    status: "PRESENT",
     date: {
       $gte: joinDate,
       $lt: selectedStart,
@@ -939,6 +945,7 @@ const getDailyAttendanceSheet = async (req, res) => {
      * per branch/date.
      */
     const scheduleCache = new Map();
+    const cancelledSlotCache = new Map();
 
     const holidayCache = new Map();
 
@@ -949,7 +956,34 @@ const getDailyAttendanceSheet = async (req, res) => {
         return scheduleCache.get(key);
       }
 
-      const promise = getBranchScheduleForDate(currentBranchId, selectedDate);
+      const promise = (async () => {
+        const schedule = await getBranchScheduleForDate(currentBranchId, selectedDate);
+        const unavailableBatchSlots = new Set();
+        const datedSessionsBySlot = new Map();
+        for (const slot of schedule?.slots || []) {
+          if (!slot.batchId || !slot._id) continue;
+          const datedSession = await resolveSessionForSlot({ branchId: currentBranchId, date: selectedDate, slot });
+          if (!datedSession) unavailableBatchSlots.add(String(slot._id));
+          else datedSessionsBySlot.set(String(slot._id), datedSession);
+        }
+        const curriculumIds = [...new Set([...datedSessionsBySlot.values()].map((session) => String(session.curriculum || "")).filter(Boolean))];
+        const curricula = curriculumIds.length ? await Curriculum.find({ _id: { $in: curriculumIds } }).lean() : [];
+        const curriculumById = new Map(curricula.map((item) => [String(item._id), item]));
+        schedule.slots = (schedule.slots || []).map((slot) => {
+          const session = datedSessionsBySlot.get(String(slot._id || ""));
+          const curriculum = session?.curriculum ? curriculumById.get(String(session.curriculum)) : null;
+          const plannedSteps = curriculum ? curriculum.modules.flatMap((module) => module.steps.filter((step) => (session.plannedStepIds || []).includes(String(step._id))).map((step) => ({ _id: String(step._id), moduleId: String(module._id), moduleName: module.name, title: step.title, description: step.description, completionCriteria: step.completionCriteria }))) : [];
+          return { ...slot, datedSessionId: session?._id || null, plannedCurriculumVersion: curriculum ? { _id: curriculum._id, name: curriculum.name, version: curriculum.version } : null, plannedCurriculum: plannedSteps };
+        });
+        const batchIds = [...new Set((schedule?.slots || []).map((slot) => String(slot.batchId || "")).filter(Boolean))];
+        if (batchIds.length) {
+          const batches = await Batch.find({ _id: { $in: batchIds }, branch: currentBranchId }).select("_id name code").lean();
+          const names = new Map(batches.map((batch) => [String(batch._id), `${batch.name}${batch.code ? ` (${batch.code})` : ""}`]));
+          schedule.slots = (schedule.slots || []).map((slot) => ({ ...slot, batchName: names.get(String(slot.batchId || "")) || "Batch unavailable" }));
+        }
+        cancelledSlotCache.set(key, unavailableBatchSlots);
+        return schedule;
+      })();
 
       scheduleCache.set(key, promise);
 
@@ -1015,17 +1049,20 @@ const getDailyAttendanceSheet = async (req, res) => {
             ? (student.plan?.programs || [])
             : [];
         const branchProgramSlots = (branchSchedule.slots || []).filter((slot) => slot.isActive !== false && slot.sessionTypeId && slot._id);
-        const scheduledSlots = branchProgramSlots.filter((slot) => planEntitlements.some((item) => String(item.program?._id || item.program) === String(slot.sessionTypeId)));
+        const matchesEnrollmentBatch = (slot) => datedEnrollment?.batch ? String(datedEnrollment.batch) === String(slot.batchId || "") : !slot.batchId;
+        const scheduledSlots = branchProgramSlots.filter((slot) => matchesEnrollmentBatch(slot) && planEntitlements.some((item) => String(item.program?._id || item.program) === String(slot.sessionTypeId)));
         const sessionSlots = await Promise.all((branchSchedule.slots || []).map(async (slot) => {
+          const batchEligible = matchesEnrollmentBatch(slot);
           const record = studentAttendance.find((item) => String(item.sessionSlotId || "") === String(slot._id || "")) || (scheduledSlots.length === 1 ? studentAttendance.find((item) => !item.sessionSlotId) : null);
-          const entitlement = planEntitlements.find((item) => String(item.program?._id || item.program) === String(slot.sessionTypeId));
+          const entitlement = batchEligible ? planEntitlements.find((item) => String(item.program?._id || item.program) === String(slot.sessionTypeId)) : null;
           const planProgram = student.plan?.programs?.find((item) => String(item.program?._id || item.program) === String(slot.sessionTypeId));
           const slotCurriculum = resolveProgramCurriculum(entitlement, planProgram, student.plan?.curriculum);
           const learning = slot.sessionTypeId && entitlement ? await getProgramLearningProgress({ studentId: student._id, programId: slot.sessionTypeId, enrollmentId: datedEnrollment?._id, enrollmentStartDate: datedEnrollment?.startDate, enrollmentEndDate: datedEnrollment?.endDate, curriculum: slotCurriculum, asOfDate: selectedDate }) : null;
           const planDayForSlot = record?.planDay || learning?.nextDay || null;
           const configuredCurriculum = slotCurriculum.find((item) => Number(item.day) === Number(planDayForSlot)) || null;
           const curriculumForSlot = record ? { title: record.curriculumTitle, skill: record.curriculumSkill, description: record.curriculumDescription } : configuredCurriculum;
-          return { ...slot, attendance: record || null, entitled: Boolean(entitlement), curriculumAvailable: Boolean(entitlement && configuredCurriculum), curriculumComplete: Boolean(entitlement && slotCurriculum.length > 0 && learning && !learning.nextDay && !record), planDay: planDayForSlot, curriculum: curriculumForSlot, programName: entitlement?.program?.name || "" };
+          const unavailableBatchSession = cancelledSlotCache.get(String(currentBranchId))?.has(String(slot._id || ""));
+          return { ...slot, attendance: record || null, entitled: Boolean(entitlement && !unavailableBatchSession), curriculumAvailable: Boolean(entitlement && !unavailableBatchSession && configuredCurriculum), unavailableBatchSession: Boolean(unavailableBatchSession), curriculumComplete: Boolean(entitlement && slotCurriculum.length > 0 && learning && !learning.nextDay && !record), planDay: planDayForSlot, curriculum: curriculumForSlot, programName: entitlement?.program?.name || "" };
         }));
         // The sheet records one attendance decision per student per date.
         // A schedule may offer several program slots, but once the student is
@@ -1409,6 +1446,8 @@ const markAttendance = async (req, res) => {
       }
     }
     const effectivePrograms = datedEnrollment?.programs?.length ? datedEnrollment.programs : (plan.programs || []);
+    if (datedEnrollment?.batch && String(datedEnrollment.batch) !== String(selectedSlot.batchId || "")) return res.status(403).json({ success: false, message: "This student is assigned to a different Batch for the selected class." });
+    if (!datedEnrollment?.batch && selectedSlot.batchId) return res.status(403).json({ success: false, message: "This student has no Batch assignment for the selected class." });
     const planProgram = effectivePrograms.find((item) => String(item.program?._id || item.program) === String(selectedSlot.sessionTypeId));
     if (!planProgram) return res.status(403).json({ success: false, message: "The student's plan does not include this program. Update the plan entitlement before marking attendance." });
     const Program = require("../models/TrainingSessionType");
@@ -1507,10 +1546,14 @@ const markAttendance = async (req, res) => {
 ===================================================== */
 
     const attendanceDate = new Date(requestedDate);
+    const datedSession = selectedSlot.batchId ? await resolveSessionForSlot({ branchId: studentRecord.branch, date, slot: selectedSlot }) : null;
+    if (selectedSlot.batchId && !datedSession) return res.status(409).json({ success: false, message: "The selected Batch session is no longer active." });
 
     const attendance = await Attendance.create({
       student,
       enrollment: datedEnrollment?._id || null,
+      session: datedSession?._id || null,
+      batch: datedSession?.batch || null,
       plan: plan._id,
       branch: studentRecord.branch,
       sessionTypeId: selectedSlot.sessionTypeId,
@@ -1540,6 +1583,7 @@ const markAttendance = async (req, res) => {
       makeup = await Makeup.create({
         student,
         enrollment: datedEnrollment?._id || null,
+        originalSession: datedSession?._id || null,
         plan: plan._id,
         sessionTypeId: selectedSlot.sessionTypeId,
         sessionSlotId: selectedSlot._id,
@@ -1566,6 +1610,10 @@ const markAttendance = async (req, res) => {
       await Attendance.deleteOne({ _id: attendance._id });
       throw auditError;
     }
+
+    const firstAttendedClassDate = status === "PRESENT" && datedEnrollment?._id
+      ? await recalculateEnrollmentFirstAttendedClassDate({ studentId: studentRecord._id, enrollmentId: datedEnrollment._id })
+      : datedEnrollment?.firstAttendedClassDate || null;
 
     if (status === "ABSENT") {
       await safelyNotify({
@@ -1614,6 +1662,7 @@ const markAttendance = async (req, res) => {
 
       attendance: populatedAttendance,
       makeup,
+      firstAttendedClassDate,
       progression: {
         consumedDay: normalizedPlanDay,
         nextDay: (await getProgramLearningProgress({
@@ -1694,6 +1743,7 @@ const undoAttendance = async (req, res) => {
         if (makeup) await Makeup.deleteOne({ _id: makeup._id }, { session });
         const deleted = await Attendance.deleteOne({ _id: attendance._id, attendanceType: "REGULAR" }, { session });
         if (!deleted.deletedCount) throw new Error("Attendance changed while undoing.");
+        if (attendance.enrollment) await recalculateEnrollmentFirstAttendedClassDate({ studentId: attendance.student, enrollmentId: attendance.enrollment, session });
         await auditService.record({ req, session, action: AUDIT_ACTIONS.ATTENDANCE_UNDONE, entityType: "ATTENDANCE", entityId: attendance._id, branchId: attendance.branch, before: { status: attendance.status, date: attendance.date, makeupRequired: attendance.makeupRequired }, after: { deleted: true } });
       });
     } finally { await session.endSession(); }

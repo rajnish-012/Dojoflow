@@ -5,6 +5,8 @@ const Attendance = require("../models/Attendance");
 const Student = require("../models/Student");
 const CoachStudentAssignment = require("../models/CoachStudentAssignment");
 const { safelyNotify } = require("../services/notification.service");
+const { resolveSessionForSlot } = require("../services/session.service");
+const { sendStudentEmail } = require("../services/studentEmail.service");
 const { findEnrollmentForDate } = require("../services/enrollmentLifecycle.service");
 const {
   validateMakeupDate: validateCentralMakeupDate,
@@ -747,6 +749,7 @@ const createMakeup = async (req, res) => {
       eventKey: `makeup:${makeup._id}:created`,
       actionUrl: "/makeups",
     });
+    await sendStudentEmail({ studentId: studentRecord._id, eventKey: `makeup:${makeup._id}:scheduled:${String(makeupDate)}:${makeup.sessionSlotId}`, category: "MAKEUP_SCHEDULED", subject: "Your makeup class is scheduled", text: [`Your makeup class for Training Day ${planDay} is scheduled for ${String(makeupDate)}.`, "", "Sign in to your student dashboard for the latest details."].join("\n") }).catch(() => {});
     await safelyNotify({
       type: "MAKEUP_SCHEDULED",
       title: "Makeup class scheduled",
@@ -903,7 +906,8 @@ const scheduleMakeup = async (req, res) => {
     if (studentRecord.planEnrollments?.length && !enrollment) {
       return res.status(409).json({ success: false, message: "The student has no active plan enrollment on the selected makeup date" });
     }
-    const originalAttendance = await Attendance.findById(makeup.originalAttendance).select("sessionTypeId sessionSlotId enrollment plan").lean();
+    const originalAttendance = await Attendance.findById(makeup.originalAttendance).select("sessionTypeId sessionSlotId session enrollment plan").lean();
+    makeup.originalSession = originalAttendance?.session || makeup.originalSession || null;
     const assignedProgramId = makeup.sessionTypeId || originalAttendance?.sessionTypeId || sessionSlot.sessionTypeId;
     if (String(sessionSlot.sessionTypeId) !== String(assignedProgramId)) return res.status(409).json({ success: false, message: "Makeup must be booked into a session for the same program as the missed class" });
     makeup.sessionTypeId = assignedProgramId;
@@ -967,6 +971,7 @@ const scheduleMakeup = async (req, res) => {
 
     makeup.makeupDate = selectedStart;
     makeup.sessionSlotId = sessionSlot._id;
+    makeup.makeupSession = sessionSlot.batchId ? (await resolveSessionForSlot({ branchId: makeup.branch, date: String(makeupDate), slot: sessionSlot }))?._id || null : null;
 
     makeup.status = "SCHEDULED";
 
@@ -1001,6 +1006,7 @@ const scheduleMakeup = async (req, res) => {
       eventKey: `makeup:${makeup._id}:scheduled:${String(makeupDate)}:${makeup.sessionSlotId}`,
       actionUrl: "/makeups",
     });
+    await sendStudentEmail({ studentId: makeup.student, eventKey: `makeup:${makeup._id}:scheduled:${String(makeupDate)}:${makeup.sessionSlotId}`, category: "MAKEUP_SCHEDULED", subject: "Your makeup class has been updated", text: [`Your makeup class for Training Day ${makeup.planDay} is scheduled for ${String(makeupDate)}.`, "", "Sign in to your student dashboard for the latest details."].join("\n") }).catch(() => {});
 
     return res.status(200).json({
       success: true,
@@ -1168,6 +1174,8 @@ const completeMakeup = async (req, res) => {
       markedBy: req.user._id,
       sessionTypeId: makeup.sessionTypeId,
       sessionSlotId: makeup.sessionSlotId,
+      session: makeup.makeupSession || null,
+      batch: sessionSlot.batchId || null,
       sessionName: sessionSlot.sessionName || "",
       sessionStartTime: sessionSlot.startTime || "",
       sessionEndTime: sessionSlot.endTime || "",
@@ -1329,6 +1337,8 @@ const cancelMakeup = async (req, res) => {
     });
 
     const populatedMakeup = await populateMakeup(Makeup.findById(makeup._id));
+
+    await sendStudentEmail({ studentId: makeup.student, eventKey: `makeup:${makeup._id}:cancelled`, category: "MAKEUP_CANCELLED", subject: "Your makeup class has been cancelled", text: [`Your makeup class for Training Day ${makeup.planDay} has been cancelled.`, makeup.cancelReason ? `Reason: ${makeup.cancelReason}` : "", "", "Please contact the academy to arrange another session."].filter(Boolean).join("\n") }).catch(() => {});
 
     return res.status(200).json({
       success: true,

@@ -1,8 +1,10 @@
 const mongoose = require("mongoose");
+const { SUPPORTED_CURRENCIES } = require("../utils/currency");
 
 const planEnrollmentProgramSchema = new mongoose.Schema({
   program: { type: mongoose.Schema.Types.ObjectId, ref: "TrainingSessionType", required: true },
   weeklyLimit: { type: Number, default: null },
+  curriculumVersion: { type: mongoose.Schema.Types.ObjectId, ref: "Curriculum", default: null },
   curriculum: [{ day: Number, title: String, description: String, skill: String }],
 }, { _id: false });
 
@@ -16,8 +18,12 @@ const enrollmentStatusHistorySchema = new mongoose.Schema({
 
 const planEnrollmentSchema = new mongoose.Schema({
   plan: { type: mongoose.Schema.Types.ObjectId, ref: "Plan", required: true },
-  feePlan: { type: mongoose.Schema.Types.ObjectId, ref: "Plan", default: null },
+  batch: { type: mongoose.Schema.Types.ObjectId, ref: "Batch", default: null, index: true },
+  // Set only from verified PRESENT attendance for this enrollment.
+  firstAttendedClassDate: { type: Date, default: null },
+  feeTerm: { type: mongoose.Schema.Types.ObjectId, ref: "FeeTerm", default: null, index: true },
   branch: { type: mongoose.Schema.Types.ObjectId, ref: "Branch", default: null },
+  batchTransfers: [{ from: { type: mongoose.Schema.Types.ObjectId, ref: "Batch", default: null }, to: { type: mongoose.Schema.Types.ObjectId, ref: "Batch", required: true }, effectiveDate: { type: Date, required: true }, changedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null }, changedAt: { type: Date, default: Date.now } }],
   program: { type: mongoose.Schema.Types.ObjectId, ref: "TrainingSessionType", default: null },
   startDate: { type: Date, required: true },
   endDate: { type: Date, default: null },
@@ -29,10 +35,14 @@ const planEnrollmentSchema = new mongoose.Schema({
   classesPerWeek: { type: Number, default: null },
   startingBelt: { type: String, default: "White" },
   programs: { type: [planEnrollmentProgramSchema], default: [] },
-  // A dated copy of the plan's fee terms. Later fee plan changes do not
-  // retroactively change what this enrollment agreed to pay.
+  // The immutable financial agreement selected from a FeeTerm at enrollment.
   billingSnapshot: {
-    feeName: { type: String, default: "" },
+    feeTerm: { type: mongoose.Schema.Types.ObjectId, ref: "FeeTerm", default: null },
+    feeTermVersion: { type: Number, default: null },
+    planName: { type: String, trim: true, default: "" },
+    branch: { type: mongoose.Schema.Types.ObjectId, ref: "Branch", default: null },
+    branchName: { type: String, trim: true, default: "" },
+    currency: { type: String, trim: true, uppercase: true, enum: [...SUPPORTED_CURRENCIES, null], default: null },
     amount: { type: Number, min: 0, default: 0 },
     billingFrequency: { type: String, enum: ["ONE_TIME", "MONTHLY", "QUARTERLY", "YEARLY"], default: "ONE_TIME" },
     registrationFee: { type: Number, min: 0, default: 0 },
@@ -126,10 +136,7 @@ const studentSchema = new mongoose.Schema(
     planEnrollments: { type: [planEnrollmentSchema], default: [] },
 
     /*
-     * Official admission/join date.
-     *
-     * Attendance and training-day calculations
-     * depend on this field.
+     * Administrative admission/join date. This does not imply attendance.
      */
     joinDate: {
       type: Date,

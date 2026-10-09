@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { InvoiceTable, PaymentTable } from "@/components/finance/FinanceTables";
+import FeeTermManager from "@/components/finance/FeeTermManager";
 import {
   Banknote,
   CalendarDays,
@@ -10,7 +11,6 @@ import {
   Download,
   Plus,
   RefreshCw,
-  Settings2,
   ShieldAlert,
   WalletCards,
 } from "lucide-react";
@@ -18,9 +18,12 @@ import {
   Badge,
   Button,
   Card,
+  DataFilters,
+  Input,
   LoadingSpinner,
   Modal,
   PageHeader,
+  Select,
   SummaryCard,
 } from "@/components/ui";
 import { useCan, useCurrentRole, PERMISSIONS } from "@/lib/permissions";
@@ -32,7 +35,7 @@ import {
   getFinanceBranches,
   getFinanceDashboard,
   getFinancePayments,
-  getFinancePlans,
+  getFeeTermPlanOptions,
   getFinanceReport,
   getInvoiceCandidates,
   getInvoices,
@@ -40,9 +43,8 @@ import {
   recordPayment,
   refundPayment,
   correctPayment,
-  updateBranchFeePlan,
-  updateFeePlan,
-  type FeePlan,
+  type FeeTermPlanOption,
+  type FeeDiscountRule,
   type FinanceDashboard,
   type FinancePayment,
   type Invoice,
@@ -60,8 +62,8 @@ type Candidate = {
     billingSnapshot?: { discountRules?: DiscountRule[] };
   }[];
 };
-type DiscountRule = NonNullable<FeePlan["discountRules"]>[number];
-type Tab = "invoices" | "payments" | "plans" | "reports";
+type DiscountRule = FeeDiscountRule;
+type Tab = "invoices" | "payments" | "fee-terms" | "reports";
 
 function formatMoney(value: number, currency = "INR") {
   return new Intl.NumberFormat("en-IN", {
@@ -81,7 +83,8 @@ function formatInvoicePeriod(invoice: Invoice) {
   if (!invoice.periodStart) return "Billing period not specified";
   const start = new Date(invoice.periodStart);
   const end = invoice.periodEnd ? new Date(invoice.periodEnd) : null;
-  if (!end || end <= start) return `Billing date: ${formatDate(invoice.periodStart)}`;
+  if (!end || end <= start)
+    return `Billing date: ${formatDate(invoice.periodStart)}`;
   return `${formatDate(invoice.periodStart)} – ${formatDate(
     new Date(end.getTime() - 86400000).toISOString(),
   )}`;
@@ -115,7 +118,7 @@ export default function FeesPage() {
   const [dashboard, setDashboard] = useState<FinanceDashboard | null>(null);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [payments, setPayments] = useState<FinancePayment[]>([]);
-  const [plans, setPlans] = useState<FeePlan[]>([]);
+  const [plans, setPlans] = useState<FeeTermPlanOption[]>([]);
   const [branches, setBranches] = useState<{ _id: string; name: string }[]>([]);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [loading, setLoading] = useState(true);
@@ -149,39 +152,26 @@ export default function FeesPage() {
   const [adjustmentKey, setAdjustmentKey] = useState("");
   const [adjustmentBusy, setAdjustmentBusy] = useState(false);
   const [reportBusy, setReportBusy] = useState(false);
-  const [editingPlan, setEditingPlan] = useState<FeePlan | null>(null);
-  const [planDraft, setPlanDraft] = useState({
-    feeName: "",
-    price: "",
-    billingFrequency: "ONE_TIME",
-    registrationFee: "0",
-    taxRate: "0",
-    effectiveFrom: "",
-    effectiveUntil: "",
-    feeBranch: "",
-    active: true,
-  });
-  const [discountRules, setDiscountRules] = useState<DiscountRule[]>([]);
-  const [ruleDraft, setRuleDraft] = useState({
-    name: "",
-    type: "PERCENT",
-    amount: "",
-  });
-  const [planBusy, setPlanBusy] = useState(false);
+  const [reportBranch, setReportBranch] = useState("");
+  const [reportPlan, setReportPlan] = useState("");
+  const [reportInvoiceStatus, setReportInvoiceStatus] = useState("");
+  const [reportPaymentKind, setReportPaymentKind] = useState("");
+  const [reportFrom, setReportFrom] = useState("");
+  const [reportTo, setReportTo] = useState("");
 
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const [summary, invoiceData, feePlanData, paymentData] =
+      const [summary, invoiceData, feeTermPlanData, paymentData] =
         await Promise.all([
           getFinanceDashboard(),
           getInvoices(),
-          getFinancePlans(),
+          getFeeTermPlanOptions(),
           getFinancePayments(),
         ]);
       setDashboard(summary);
       setInvoices(invoiceData.invoices);
-      setPlans(feePlanData.plans);
+      setPlans(feeTermPlanData.plans);
       setPayments(paymentData.payments);
       setBranches((await getFinanceBranches()).branches);
       if (canManage) {
@@ -198,35 +188,72 @@ export default function FeesPage() {
   }, [canManage]);
 
   useEffect(() => {
-    void refresh();
+    const timer = window.setTimeout(() => { void refresh(); }, 0);
+    return () => window.clearTimeout(timer);
   }, [refresh]);
 
   const filteredInvoices = useMemo(
     () =>
-      invoices.filter((invoice) => {
-        const name =
-          typeof invoice.student === "object" ? invoice.student.name : "";
-        const branch = typeof invoice.branch === "object" ? invoice.branch._id : invoice.branch;
-        return (!invoiceStatusFilter || invoice.status === invoiceStatusFilter) &&
-          (!branchFilter || branch === branchFilter) &&
-          `${invoice.invoiceNumber} ${name} ${invoice.status}`.toLowerCase().includes(search.toLowerCase());
-      }).sort((a, b) => invoiceSort === "amount-desc" ? b.total - a.total : invoiceSort === "amount-asc" ? a.total - b.total : (new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime()) * (invoiceSort === "date-asc" ? 1 : -1)),
+      invoices
+        .filter((invoice) => {
+          const name =
+            typeof invoice.student === "object" ? invoice.student.name : "";
+          const branch =
+            typeof invoice.branch === "object"
+              ? invoice.branch._id
+              : invoice.branch;
+          return (
+            (!invoiceStatusFilter || invoice.status === invoiceStatusFilter) &&
+            (!branchFilter || branch === branchFilter) &&
+            `${invoice.invoiceNumber} ${name} ${invoice.status}`
+              .toLowerCase()
+              .includes(search.toLowerCase())
+          );
+        })
+        .sort((a, b) =>
+          invoiceSort === "amount-desc"
+            ? b.total - a.total
+            : invoiceSort === "amount-asc"
+              ? a.total - b.total
+              : (new Date(a.dueDate).getTime() -
+                  new Date(b.dueDate).getTime()) *
+                (invoiceSort === "date-asc" ? 1 : -1),
+        ),
     [invoices, search, invoiceStatusFilter, branchFilter, invoiceSort],
   );
   const filteredPayments = useMemo(
     () =>
-      payments.filter((payment) => {
-        const student =
-          typeof payment.student === "object" ? payment.student.name || "" : "";
-        const invoice =
-          typeof payment.invoice === "object"
-            ? payment.invoice.invoiceNumber || ""
-            : payment.invoice;
-        const branch = typeof payment.branch === "object" ? payment.branch._id : payment.branch;
-        return (!paymentStatusFilter || payment.kind === paymentStatusFilter) &&
-          (!branchFilter || branch === branchFilter) &&
-          `${student} ${invoice} ${payment.kind} ${payment.method} ${payment.referenceId || ""}`.toLowerCase().includes(search.toLowerCase());
-      }).sort((a, b) => paymentSort === "amount-desc" ? b.amount - a.amount : paymentSort === "amount-asc" ? a.amount - b.amount : (new Date(a.paymentDate).getTime() - new Date(b.paymentDate).getTime()) * (paymentSort === "date-asc" ? 1 : -1)),
+      payments
+        .filter((payment) => {
+          const student =
+            typeof payment.student === "object"
+              ? payment.student.name || ""
+              : "";
+          const invoice =
+            typeof payment.invoice === "object"
+              ? payment.invoice.invoiceNumber || ""
+              : payment.invoice;
+          const branch =
+            typeof payment.branch === "object"
+              ? payment.branch._id
+              : payment.branch;
+          return (
+            (!paymentStatusFilter || payment.kind === paymentStatusFilter) &&
+            (!branchFilter || branch === branchFilter) &&
+            `${student} ${invoice} ${payment.kind} ${payment.method} ${payment.referenceId || ""}`
+              .toLowerCase()
+              .includes(search.toLowerCase())
+          );
+        })
+        .sort((a, b) =>
+          paymentSort === "amount-desc"
+            ? b.amount - a.amount
+            : paymentSort === "amount-asc"
+              ? a.amount - b.amount
+              : (new Date(a.paymentDate).getTime() -
+                  new Date(b.paymentDate).getTime()) *
+                (paymentSort === "date-asc" ? 1 : -1),
+        ),
     [payments, search, paymentStatusFilter, branchFilter, paymentSort],
   );
   const chosenStudent = candidates.find(
@@ -236,103 +263,9 @@ export default function FeesPage() {
   const selectedEnrollmentRecord = enrollmentOptions.find(
     (enrollment) => enrollment._id === selectedEnrollment,
   );
-  const enrollmentPlanId = selectedEnrollmentRecord
-    ? typeof selectedEnrollmentRecord.plan === "object"
-      ? selectedEnrollmentRecord.plan._id
-      : selectedEnrollmentRecord.plan
-    : "";
-  const availableDiscounts = (
-    selectedEnrollmentRecord?.billingSnapshot?.discountRules ||
-    plans.find((plan) => plan._id === enrollmentPlanId)?.discountRules ||
-    []
+  const availableDiscounts: DiscountRule[] = (
+    selectedEnrollmentRecord?.billingSnapshot?.discountRules || []
   ).filter((rule) => rule.active !== false);
-
-  function setDraftForPlanTarget(plan: FeePlan, targetBranch: string) {
-    const branchOverride = targetBranch
-      ? plan.branchFeeOverrides?.find(
-          (item) =>
-            String(
-              typeof item.branch === "object" ? item.branch._id : item.branch,
-            ) === targetBranch,
-        )
-      : undefined;
-    const terms = branchOverride ||
-      plan.effectiveFee || {
-        feeName: plan.feeName || plan.name,
-        amount: plan.price,
-        billingFrequency: plan.billingFrequency || "ONE_TIME",
-        registrationFee: plan.registrationFee || 0,
-        taxRate: plan.taxRate || 0,
-        active: plan.feeActive !== false,
-        effectiveFrom: plan.effectiveFrom,
-        effectiveUntil: plan.effectiveUntil,
-        discountRules: plan.discountRules,
-      };
-    setPlanDraft({
-      feeName: terms.feeName || plan.name,
-      price: String("amount" in terms ? terms.amount : plan.price),
-      billingFrequency: terms.billingFrequency || "ONE_TIME",
-      registrationFee: String(terms.registrationFee || 0),
-      taxRate: String(terms.taxRate || 0),
-      effectiveFrom: terms.effectiveFrom?.slice(0, 10) || "",
-      effectiveUntil: terms.effectiveUntil?.slice(0, 10) || "",
-      feeBranch: targetBranch,
-      active: terms.active !== false,
-    });
-    setDiscountRules((terms.discountRules || []).map((rule) => ({ ...rule })));
-  }
-
-  function beginEditPlan(plan: FeePlan, targetBranch?: string) {
-    setEditingPlan(plan);
-    setDraftForPlanTarget(
-      plan,
-      targetBranch ??
-        (isSuperAdmin ? plan.feeBranch?._id || "" : currentBranchId || ""),
-    );
-  }
-
-  async function savePlan(event: React.FormEvent) {
-    event.preventDefault();
-    if (!editingPlan) return;
-    setPlanBusy(true);
-    try {
-      const values = {
-        feeName: planDraft.feeName,
-        billingFrequency: planDraft.billingFrequency,
-        registrationFee: Number(planDraft.registrationFee),
-        taxRate: Number(planDraft.taxRate),
-        effectiveFrom: planDraft.effectiveFrom || null,
-        effectiveUntil: planDraft.effectiveUntil || null,
-        discountRules,
-        reason: "Fee plan terms updated",
-      };
-      if (planDraft.feeBranch || (!isSuperAdmin && currentBranchId)) {
-        await updateBranchFeePlan(editingPlan._id, {
-          ...values,
-          amount: Number(planDraft.price),
-          active: planDraft.active,
-          branchId: planDraft.feeBranch || currentBranchId,
-        });
-      } else {
-        await updateFeePlan(editingPlan._id, {
-          ...values,
-          price: Number(planDraft.price),
-          feeActive: planDraft.active,
-        });
-      }
-      toast.success(
-        "Fee terms updated. Existing enrollment snapshots remain unchanged.",
-      );
-      setEditingPlan(null);
-      await refresh();
-    } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : "Could not update fee plan",
-      );
-    } finally {
-      setPlanBusy(false);
-    }
-  }
 
   async function submitInvoice(event: React.FormEvent) {
     event.preventDefault();
@@ -448,7 +381,14 @@ export default function FeesPage() {
   async function exportFinanceCsv() {
     setReportBusy(true);
     try {
-      const report = await getFinanceReport();
+      const report = await getFinanceReport({
+        branchId: reportBranch,
+        planId: reportPlan,
+        invoiceStatus: reportInvoiceStatus,
+        paymentKind: reportPaymentKind,
+        from: reportFrom,
+        to: reportTo,
+      });
       const escapeCsv = (value: unknown) =>
         `"${String(value ?? "").replaceAll('"', '""')}"`;
       const rows: unknown[][] = [
@@ -485,6 +425,18 @@ export default function FeesPage() {
           `${payment.direction === "DEBIT" ? "-" : ""}${payment.amount}`,
           payment.kind,
           payment.referenceId || payment.reason || payment.notes,
+        ]);
+      }
+      for (const receipt of report.receipts) {
+        rows.push([
+          "RECEIPT",
+          receipt.date,
+          receipt.receiptNumber,
+          receipt.studentName,
+          typeof receipt.branch === "object" ? receipt.branch.name || "" : receipt.branch,
+          `${receipt.direction === "DEBIT" ? "-" : ""}${receipt.amount}`,
+          receipt.kind,
+          `${receipt.invoiceNumber} · ${receipt.method}`,
         ]);
       }
       for (const audit of report.audits)
@@ -559,6 +511,14 @@ export default function FeesPage() {
   const monthlySpan = Math.max(1, monthlyMax - monthlyMin);
   const monthlyY = (value: number) =>
     20 + ((monthlyMax - value) / monthlySpan) * 82;
+  const reportActiveFilters = [
+    ...(reportBranch ? [{ id: "branch", label: `Branch: ${branches.find((item) => item._id === reportBranch)?.name || "Selected"}`, onClear: () => setReportBranch("") }] : []),
+    ...(reportPlan ? [{ id: "plan", label: `Plan: ${plans.find((item) => item._id === reportPlan)?.name || "Selected"}`, onClear: () => setReportPlan("") }] : []),
+    ...(reportInvoiceStatus ? [{ id: "invoice-status", label: `Invoice: ${reportInvoiceStatus.replaceAll("_", " ")}`, onClear: () => setReportInvoiceStatus("") }] : []),
+    ...(reportPaymentKind ? [{ id: "payment-kind", label: `Movement: ${reportPaymentKind.toLowerCase()}`, onClear: () => setReportPaymentKind("") }] : []),
+    ...(reportFrom ? [{ id: "from", label: `From: ${reportFrom}`, onClear: () => setReportFrom("") }] : []),
+    ...(reportTo ? [{ id: "to", label: `To: ${reportTo}`, onClear: () => setReportTo("") }] : []),
+  ];
 
   return (
     <div className="mx-auto w-full max-w-[1500px] p-4 sm:p-6 xl:p-8">
@@ -633,15 +593,30 @@ export default function FeesPage() {
       <div className="mb-5 grid gap-4 sm:grid-cols-2">
         <SummaryCard
           title="Expected in the next 30 days"
-          value={dashboard ? formatMoney(dashboard.metrics.expectedCollection, dashboard.currency) : "—"}
+          value={
+            dashboard
+              ? formatMoney(
+                  dashboard.metrics.expectedCollection,
+                  dashboard.currency,
+                )
+              : "—"
+          }
           icon={<CalendarDays size={20} />}
           subtitle="Scheduled fees due soon"
         />
         <SummaryCard
           title="Partially paid balance"
-          value={dashboard ? formatMoney(dashboard.metrics.partiallyPaid, dashboard.currency) : "—"}
+          value={
+            dashboard
+              ? formatMoney(dashboard.metrics.partiallyPaid, dashboard.currency)
+              : "—"
+          }
           icon={<Clock3 size={20} />}
-          subtitle={dashboard ? `${dashboard.metrics.partialCount} partially paid invoices` : undefined}
+          subtitle={
+            dashboard
+              ? `${dashboard.metrics.partialCount} partially paid invoices`
+              : undefined
+          }
         />
       </div>
       <div className="mb-5 flex flex-wrap items-center gap-2 border-b border-(--line) pb-3">
@@ -649,7 +624,7 @@ export default function FeesPage() {
           [
             "invoices",
             "payments",
-            "plans",
+            "fee-terms",
             ...(canReport ? ["reports"] : []),
           ] as Tab[]
         ).map((item) => (
@@ -658,7 +633,7 @@ export default function FeesPage() {
             className={`rounded-xl px-4 py-2 text-sm font-semibold capitalize ${tab === item ? "bg-(--accent-soft) text-(--accent)" : "text-(--ink-muted) hover:bg-(--hover-bg)"}`}
             onClick={() => setTab(item)}
           >
-            {item === "plans" ? "Fee plans" : item}
+            {item === "fee-terms" ? "Fee Terms" : item}
           </button>
         ))}
         {canManage && (
@@ -682,163 +657,84 @@ export default function FeesPage() {
           <LoadingSpinner />
         </Card>
       ) : tab === "invoices" ? (
-        <InvoiceTable invoices={filteredInvoices} search={search} onSearch={setSearch} canManage={canManage} canCollect={canCollect} filters={{ status: invoiceStatusFilter, onStatus: setInvoiceStatusFilter, branch: branchFilter, onBranch: setBranchFilter, sort: invoiceSort, onSort: setInvoiceSort, branches, statuses: [{ value: "DRAFT", label: "Draft" }, { value: "ISSUED", label: "Issued" }, { value: "PARTIALLY_PAID", label: "Partially paid" }, { value: "PAID", label: "Paid" }, { value: "OVERDUE", label: "Overdue" }, { value: "CANCELLED", label: "Cancelled" }, { value: "REFUNDED", label: "Refunded" }] }} onIssue={(invoice) => void handleIssue(invoice)} onCancel={(invoice) => void handleCancel(invoice)} onPay={(invoice) => { setPayInvoice(invoice); setPayAmount(String(invoice.balance)); setPaymentKey(`pay-${crypto.randomUUID()}`); }} />
+        <InvoiceTable
+          invoices={filteredInvoices}
+          search={search}
+          onSearch={setSearch}
+          canManage={canManage}
+          canCollect={canCollect}
+          filters={{
+            status: invoiceStatusFilter,
+            onStatus: setInvoiceStatusFilter,
+            branch: branchFilter,
+            onBranch: setBranchFilter,
+            sort: invoiceSort,
+            onSort: setInvoiceSort,
+            branches,
+            statuses: [
+              { value: "DRAFT", label: "Draft" },
+              { value: "ISSUED", label: "Issued" },
+              { value: "PARTIALLY_PAID", label: "Partially paid" },
+              { value: "PAID", label: "Paid" },
+              { value: "OVERDUE", label: "Overdue" },
+              { value: "CANCELLED", label: "Cancelled" },
+              { value: "REFUNDED", label: "Refunded" },
+            ],
+          }}
+          onIssue={(invoice) => void handleIssue(invoice)}
+          onCancel={(invoice) => void handleCancel(invoice)}
+          onPay={(invoice) => {
+            setPayInvoice(invoice);
+            setPayAmount(String(invoice.balance));
+            setPaymentKey(`pay-${crypto.randomUUID()}`);
+          }}
+        />
       ) : tab === "payments" ? (
-        <PaymentTable payments={filteredPayments} currency={dashboard?.currency} search={search} onSearch={setSearch} canRefund={canRefund} canManage={canManage} filters={{ status: paymentStatusFilter, onStatus: setPaymentStatusFilter, branch: branchFilter, onBranch: setBranchFilter, sort: paymentSort, onSort: setPaymentSort, branches, statuses: [{ value: "PAYMENT", label: "Payment" }, { value: "REFUND", label: "Refund" }, { value: "CORRECTION", label: "Correction" }] }} onRefund={(payment) => { setAdjustmentKind("REFUND"); setAdjustmentPayment(payment); setAdjustmentAmount(String(payment.remainingRefundable)); setAdjustmentReason(""); setAdjustmentKey(`refund-${crypto.randomUUID()}`); }} onCorrect={(payment) => { setAdjustmentKind("CORRECTION"); setAdjustmentPayment(payment); setAdjustmentAmount(String(payment.amount)); setAdjustmentReason(""); setAdjustmentKey(`correction-${crypto.randomUUID()}`); }} />
-      ) : tab === "plans" ? (
-        <div className="grid gap-4 xl:grid-cols-2">
-          {plans.map((plan) => {
-            const fee = plan.effectiveFee || {
-              feeName: plan.feeName || plan.name,
-              amount: plan.price,
-              billingFrequency: plan.billingFrequency || "ONE_TIME",
-              registrationFee: plan.registrationFee || 0,
-              taxRate: plan.taxRate || 0,
-              active: plan.feeActive !== false,
-            };
-            const branchFeeOverrides = plan.branchFeeOverrides || [];
-            const showBranchOverrides =
-              isSuperAdmin && !plan.feeBranch && branchFeeOverrides.length > 0;
-            const canEditThisPlan =
-              canManage && (isSuperAdmin || Boolean(currentBranchId));
-            return (
-              <Card key={plan._id} padding="lg">
-                <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                  <div className="min-w-0">
-                    <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-(--accent)">
-                      Fee structure
-                    </p>
-                    <h2 className="mt-1 text-lg font-bold">
-                      {fee.feeName || plan.name}
-                    </h2>
-                    <p className="mt-1 text-sm text-(--ink-muted)">
-                      {plan.programs
-                        ?.map((item) =>
-                          typeof item.program === "object"
-                            ? item.program.name
-                            : "",
-                        )
-                        .filter(Boolean)
-                        .join(", ") || plan.name}
-                    </p>
-                  </div>
-                  {canEditThisPlan && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      leftIcon={<Settings2 size={15} />}
-                      onClick={() => beginEditPlan(plan)}
-                    >
-                      Manage
-                    </Button>
-                  )}
-                </div>
-                <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
-                  <div>
-                    <p className="text-xs text-(--ink-muted)">
-                      {showBranchOverrides ? "Base amount" : "Amount"}
-                    </p>
-                    <p className="mt-1 font-bold">
-                      {formatMoney(fee.amount, dashboard?.currency)}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-(--ink-muted)">
-                      {showBranchOverrides ? "Base billing" : "Billing"}
-                    </p>
-                    <p className="mt-1 font-semibold">
-                      {fee.billingFrequency?.replaceAll("_", " ") || "Custom"}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-(--ink-muted)">
-                      {showBranchOverrides ? "Base registration" : "Registration"}
-                    </p>
-                    <p className="mt-1 font-semibold">
-                      {formatMoney(
-                        fee.registrationFee || 0,
-                        dashboard?.currency,
-                      )}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-(--ink-muted)">
-                      {showBranchOverrides ? "Base tax" : "Tax"}
-                    </p>
-                    <p className="mt-1 font-semibold">{fee.taxRate || 0}%</p>
-                  </div>
-                </div>
-                <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-(--line) pt-3 text-xs text-(--ink-muted)">
-                  <Badge variant={fee.active === false ? "danger" : "success"}>
-                    {fee.active === false ? "Inactive" : "Active"}
-                  </Badge>
-                  {plan.feeBranch?.name || "Available across branches"} ·{" "}
-                  {plan.duration} {plan.durationUnit.toLowerCase()}
-                </div>
-                {showBranchOverrides && (
-                  <div className="mt-4 border-t border-(--line) pt-4">
-                    <p className="text-xs font-bold uppercase tracking-wide text-(--ink-muted)">
-                      Branch-specific fee terms
-                    </p>
-                    <div className="mt-3 space-y-2">
-                      {branchFeeOverrides.map((override) => {
-                        const branchId =
-                          typeof override.branch === "object"
-                            ? override.branch._id
-                            : override.branch;
-                        const branchName =
-                          typeof override.branch === "object"
-                            ? override.branch.name
-                            : branches.find((branch) => branch._id === branchId)
-                                ?.name || "Branch";
-                        return (
-                          <div
-                            key={branchId}
-                            className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-(--surface-muted) px-3 py-2.5"
-                          >
-                            <div>
-                              <p className="text-sm font-semibold">{branchName}</p>
-                              <p className="mt-0.5 text-xs text-(--ink-muted)">
-                                {formatMoney(override.amount, dashboard?.currency)}
-                                {" · "}
-                                {override.billingFrequency.replaceAll("_", " ")}
-                                {" · Registration "}
-                                {formatMoney(
-                                  override.registrationFee || 0,
-                                  dashboard?.currency,
-                                )}
-                                {" · Tax "}
-                                {override.taxRate || 0}%
-                              </p>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <Badge
-                                variant={
-                                  override.active === false ? "danger" : "success"
-                                }
-                              >
-                                {override.active === false ? "Inactive" : "Active"}
-                              </Badge>
-                              {canEditThisPlan && (
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => beginEditPlan(plan, branchId)}
-                                >
-                                  Manage branch terms
-                                </Button>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-              </Card>
-            );
-          })}
-        </div>
+        <PaymentTable
+          payments={filteredPayments}
+          currency={dashboard?.currency}
+          search={search}
+          onSearch={setSearch}
+          canRefund={canRefund}
+          canManage={canManage}
+          filters={{
+            status: paymentStatusFilter,
+            onStatus: setPaymentStatusFilter,
+            branch: branchFilter,
+            onBranch: setBranchFilter,
+            sort: paymentSort,
+            onSort: setPaymentSort,
+            branches,
+            statuses: [
+              { value: "PAYMENT", label: "Payment" },
+              { value: "REFUND", label: "Refund" },
+              { value: "CORRECTION", label: "Correction" },
+            ],
+          }}
+          onRefund={(payment) => {
+            setAdjustmentKind("REFUND");
+            setAdjustmentPayment(payment);
+            setAdjustmentAmount(String(payment.remainingRefundable));
+            setAdjustmentReason("");
+            setAdjustmentKey(`refund-${crypto.randomUUID()}`);
+          }}
+          onCorrect={(payment) => {
+            setAdjustmentKind("CORRECTION");
+            setAdjustmentPayment(payment);
+            setAdjustmentAmount(String(payment.amount));
+            setAdjustmentReason("");
+            setAdjustmentKey(`correction-${crypto.randomUUID()}`);
+          }}
+        />
+      ) : tab === "fee-terms" ? (
+        <FeeTermManager
+          plans={plans}
+          branches={branches}
+          currency={dashboard?.currency}
+          canManage={canManage}
+          isSuperAdmin={isSuperAdmin}
+          currentBranchId={currentBranchId}
+        />
       ) : (
         <div className="grid gap-4 xl:grid-cols-2">
           <Card padding="lg" className="xl:col-span-2">
@@ -859,6 +755,23 @@ export default function FeesPage() {
               >
                 Export report
               </Button>
+            </div>
+            <div className="mt-4">
+              <DataFilters
+                label="Report filters"
+                activeFilters={reportActiveFilters}
+                onClearAll={() => { setReportBranch(""); setReportPlan(""); setReportInvoiceStatus(""); setReportPaymentKind(""); setReportFrom(""); setReportTo(""); }}
+                panelWidth={640}
+                contentClassName="grid gap-4 sm:grid-cols-2 xl:grid-cols-3"
+                responsiveToolbar
+              >
+                <label className="grid gap-1.5 text-xs font-bold text-(--foreground-soft)">Branch<Select value={reportBranch} onChange={(event) => setReportBranch(event.target.value)}><option value="">All permitted branches</option>{branches.map((branch) => <option key={branch._id} value={branch._id}>{branch.name}</option>)}</Select></label>
+                <label className="grid gap-1.5 text-xs font-bold text-(--foreground-soft)">Training plan<Select value={reportPlan} onChange={(event) => setReportPlan(event.target.value)}><option value="">All plans</option>{plans.map((plan) => <option key={plan._id} value={plan._id}>{plan.name}</option>)}</Select></label>
+                <label className="grid gap-1.5 text-xs font-bold text-(--foreground-soft)">Invoice status<Select value={reportInvoiceStatus} onChange={(event) => setReportInvoiceStatus(event.target.value)}><option value="">All invoice statuses</option>{["DRAFT", "ISSUED", "PARTIALLY_PAID", "PAID", "OVERDUE", "CANCELLED", "REFUNDED"].map((status) => <option key={status} value={status}>{status.replaceAll("_", " ")}</option>)}</Select></label>
+                <label className="grid gap-1.5 text-xs font-bold text-(--foreground-soft)">Payment movement<Select value={reportPaymentKind} onChange={(event) => setReportPaymentKind(event.target.value)}><option value="">All payment movements</option>{["PAYMENT", "REFUND", "CORRECTION"].map((kind) => <option key={kind} value={kind}>{kind[0]}{kind.slice(1).toLowerCase()}</option>)}</Select></label>
+                <label className="grid gap-1.5 text-xs font-bold text-(--foreground-soft)">From date<Input type="date" value={reportFrom} onChange={(event) => setReportFrom(event.target.value)} /></label>
+                <label className="grid gap-1.5 text-xs font-bold text-(--foreground-soft)">To date<Input type="date" min={reportFrom || undefined} value={reportTo} onChange={(event) => setReportTo(event.target.value)} /></label>
+              </DataFilters>
             </div>
             <div className="mt-4 h-52 w-full">
               <svg
@@ -1125,7 +1038,7 @@ export default function FeesPage() {
           </div>
           <p className="rounded-xl bg-(--surface-muted) p-3 text-xs leading-5 text-(--ink-muted)">
             The invoice amount, registration fee, discounts, and tax come from
-            the enrollment's saved fee terms. This form does not accept a client
+            the enrollment&apos;s saved fee terms. This form does not accept a client
             supplied total.
           </p>
         </form>
@@ -1168,7 +1081,10 @@ export default function FeesPage() {
             </div>
             <div className="mt-3 space-y-1.5 border-t border-(--line) pt-3 text-xs">
               {payInvoice.items.map((item, index) => (
-                <div key={`${item.kind}-${index}`} className="flex justify-between gap-3">
+                <div
+                  key={`${item.kind}-${index}`}
+                  className="flex justify-between gap-3"
+                >
                   <span>{item.description}</span>
                   <span className="font-semibold">
                     {formatMoney(item.amount, payInvoice.currency)}
@@ -1178,7 +1094,9 @@ export default function FeesPage() {
               {payInvoice.discount > 0 && (
                 <div className="flex justify-between gap-3 text-(--ink-muted)">
                   <span>Discount</span>
-                  <span>-{formatMoney(payInvoice.discount, payInvoice.currency)}</span>
+                  <span>
+                    -{formatMoney(payInvoice.discount, payInvoice.currency)}
+                  </span>
                 </div>
               )}
               <div className="flex justify-between gap-3 text-(--ink-muted)">
@@ -1187,15 +1105,21 @@ export default function FeesPage() {
               </div>
               <div className="flex justify-between gap-3 border-t border-(--line) pt-2 font-bold">
                 <span>Invoice total</span>
-                <span>{formatMoney(payInvoice.total, payInvoice.currency)}</span>
+                <span>
+                  {formatMoney(payInvoice.total, payInvoice.currency)}
+                </span>
               </div>
               <div className="flex justify-between gap-3 text-(--ink-muted)">
                 <span>Already paid</span>
-                <span>{formatMoney(payInvoice.paidAmount, payInvoice.currency)}</span>
+                <span>
+                  {formatMoney(payInvoice.paidAmount, payInvoice.currency)}
+                </span>
               </div>
               <div className="flex justify-between gap-3 font-bold">
                 <span>Remaining balance</span>
-                <span>{formatMoney(payInvoice.balance, payInvoice.currency)}</span>
+                <span>
+                  {formatMoney(payInvoice.balance, payInvoice.currency)}
+                </span>
               </div>
             </div>
           </section>
@@ -1337,261 +1261,6 @@ export default function FeesPage() {
         </form>
       </Modal>
 
-      <Modal
-        open={Boolean(editingPlan)}
-        onClose={() => setEditingPlan(null)}
-        title="Fee plan terms"
-        description="These terms apply to new enrollments. Existing enrollment snapshots remain unchanged."
-        size="lg"
-        footer={
-          <>
-            <Button variant="outline" onClick={() => setEditingPlan(null)}>
-              Cancel
-            </Button>
-            <Button type="submit" form="fee-plan-form" loading={planBusy}>
-              Save fee terms
-            </Button>
-          </>
-        }
-      >
-        <form id="fee-plan-form" onSubmit={savePlan} className="space-y-4">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <label className="block text-sm font-semibold">
-              Fee name
-              <input
-                required
-                value={planDraft.feeName}
-                onChange={(event) =>
-                  setPlanDraft({ ...planDraft, feeName: event.target.value })
-                }
-                className="mt-1.5 h-11 w-full rounded-xl border border-(--line) bg-(--input) px-3 text-sm"
-              />
-            </label>
-            <label className="block text-sm font-semibold">
-              Amount
-              <input
-                required
-                type="number"
-                min="0.01"
-                step="0.01"
-                value={planDraft.price}
-                onChange={(event) =>
-                  setPlanDraft({ ...planDraft, price: event.target.value })
-                }
-                className="mt-1.5 h-11 w-full rounded-xl border border-(--line) bg-(--input) px-3 text-sm"
-              />
-            </label>
-            <label className="block text-sm font-semibold">
-              Billing frequency
-              <select
-                value={planDraft.billingFrequency}
-                onChange={(event) =>
-                  setPlanDraft({
-                    ...planDraft,
-                    billingFrequency: event.target.value,
-                  })
-                }
-                className="mt-1.5 h-11 w-full rounded-xl border border-(--line) bg-(--input) px-3 text-sm"
-              >
-                {["ONE_TIME", "MONTHLY", "QUARTERLY", "YEARLY"].map(
-                  (frequency) => (
-                    <option key={frequency} value={frequency}>
-                      {frequency.replaceAll("_", " ")}
-                    </option>
-                  ),
-                )}
-              </select>
-            </label>
-            <label className="block text-sm font-semibold">
-              Registration fee
-              <input
-                type="number"
-                min="0"
-                step="0.01"
-                value={planDraft.registrationFee}
-                onChange={(event) =>
-                  setPlanDraft({
-                    ...planDraft,
-                    registrationFee: event.target.value,
-                  })
-                }
-                className="mt-1.5 h-11 w-full rounded-xl border border-(--line) bg-(--input) px-3 text-sm"
-              />
-            </label>
-            <label className="block text-sm font-semibold">
-              Tax rate (%)
-              <input
-                type="number"
-                min="0"
-                max="100"
-                step="0.01"
-                value={planDraft.taxRate}
-                onChange={(event) =>
-                  setPlanDraft({ ...planDraft, taxRate: event.target.value })
-                }
-                className="mt-1.5 h-11 w-full rounded-xl border border-(--line) bg-(--input) px-3 text-sm"
-              />
-            </label>
-            {isSuperAdmin && (
-              <label className="block text-sm font-semibold">
-                Fee terms apply to
-                <select
-                  value={planDraft.feeBranch}
-                  onChange={(event) =>
-                    setDraftForPlanTarget(editingPlan!, event.target.value)
-                  }
-                  className="mt-1.5 h-11 w-full rounded-xl border border-(--line) bg-(--input) px-3 text-sm"
-                >
-                  <option value="">Base plan terms</option>
-                  {branches.map((branch) => (
-                    <option key={branch._id} value={branch._id}>
-                      {branch.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
-            {!isSuperAdmin && (
-              <div className="flex items-center text-sm text-(--ink-muted)">
-                These terms apply to your assigned branch.
-              </div>
-            )}
-            <label className="flex items-center gap-2 text-sm font-semibold">
-              <input
-                type="checkbox"
-                checked={planDraft.active}
-                onChange={(event) =>
-                  setPlanDraft({ ...planDraft, active: event.target.checked })
-                }
-                className="h-4 w-4 accent-(--accent)"
-              />
-              Active fee structure
-            </label>
-            <label className="block text-sm font-semibold">
-              Effective from
-              <input
-                type="date"
-                value={planDraft.effectiveFrom}
-                onChange={(event) =>
-                  setPlanDraft({
-                    ...planDraft,
-                    effectiveFrom: event.target.value,
-                  })
-                }
-                className="mt-1.5 h-11 w-full rounded-xl border border-(--line) bg-(--input) px-3 text-sm"
-              />
-            </label>
-            <label className="block text-sm font-semibold">
-              Effective until
-              <input
-                type="date"
-                value={planDraft.effectiveUntil}
-                onChange={(event) =>
-                  setPlanDraft({
-                    ...planDraft,
-                    effectiveUntil: event.target.value,
-                  })
-                }
-                className="mt-1.5 h-11 w-full rounded-xl border border-(--line) bg-(--input) px-3 text-sm"
-              />
-            </label>
-          </div>
-          <div className="rounded-xl border border-(--line) p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-sm font-bold">Discount rules</h3>
-                <p className="mt-1 text-xs text-(--ink-muted)">
-                  Rules can be selected when creating an invoice.
-                </p>
-              </div>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  if (!ruleDraft.name.trim() || !Number(ruleDraft.amount))
-                    return;
-                  setDiscountRules([
-                    ...discountRules,
-                    {
-                      name: ruleDraft.name.trim(),
-                      type: ruleDraft.type as "FIXED" | "PERCENT",
-                      amount: Number(ruleDraft.amount),
-                      active: true,
-                    },
-                  ]);
-                  setRuleDraft({ name: "", type: "PERCENT", amount: "" });
-                }}
-              >
-                Add rule
-              </Button>
-            </div>
-            <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_130px_130px]">
-              <input
-                aria-label="Discount name"
-                placeholder="Discount name"
-                value={ruleDraft.name}
-                onChange={(event) =>
-                  setRuleDraft({ ...ruleDraft, name: event.target.value })
-                }
-                className="h-10 rounded-lg border border-(--line) bg-(--input) px-3 text-sm"
-              />
-              <select
-                aria-label="Discount type"
-                value={ruleDraft.type}
-                onChange={(event) =>
-                  setRuleDraft({ ...ruleDraft, type: event.target.value })
-                }
-                className="h-10 rounded-lg border border-(--line) bg-(--input) px-2 text-sm"
-              >
-                <option value="PERCENT">Percent</option>
-                <option value="FIXED">Fixed amount</option>
-              </select>
-              <input
-                aria-label="Discount amount"
-                type="number"
-                min="0.01"
-                step="0.01"
-                placeholder="Value"
-                value={ruleDraft.amount}
-                onChange={(event) =>
-                  setRuleDraft({ ...ruleDraft, amount: event.target.value })
-                }
-                className="h-10 rounded-lg border border-(--line) bg-(--input) px-3 text-sm"
-              />
-            </div>
-            <div className="mt-3 space-y-2">
-              {discountRules.map((rule, index) => (
-                <div
-                  key={`${rule.name}-${index}`}
-                  className="flex items-center justify-between rounded-lg bg-(--surface-muted) px-3 py-2 text-sm"
-                >
-                  <span>
-                    {rule.name} ·{" "}
-                    {rule.type === "PERCENT"
-                      ? `${rule.amount}%`
-                      : formatMoney(rule.amount, dashboard?.currency)}
-                  </span>
-                  <button
-                    type="button"
-                    aria-label={`Remove ${rule.name}`}
-                    className="text-(--danger)"
-                    onClick={() =>
-                      setDiscountRules(
-                        discountRules.filter(
-                          (_, ruleIndex) => ruleIndex !== index,
-                        ),
-                      )
-                    }
-                  >
-                    Remove
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-        </form>
-      </Modal>
     </div>
   );
 }

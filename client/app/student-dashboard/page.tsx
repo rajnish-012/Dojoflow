@@ -1,6 +1,6 @@
 "use client";
 
-
+import { useRouter } from "next/navigation";
 import { fetchWithSession } from "@/lib/sessionFetch";
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -32,7 +32,12 @@ import {
 } from "@/components/ui";
 import { toast } from "@/lib/toast";
 import { useAcademyBrand } from "@/components/settings/AcademyBrandProvider";
+import { formatCurrency } from "@/lib/currency";
 import StudentFinancePanel from "@/components/finance/StudentFinancePanel";
+import StudentGradingResults from "@/components/student/StudentGradingResults";
+import StudentCurriculumProgressPanel from "@/components/curriculum/StudentCurriculumProgressPanel";
+import { getMyCalendar, type CalendarEvent } from "@/lib/calendarApi";
+import { findCurrentStudentEnrollment, hasFrozenBillingSnapshot, type StudentPlanEnrollment } from "@/lib/enrollmentApi";
 
 const API_URL =
   process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api";
@@ -59,29 +64,20 @@ type Student = {
   plan?: {
     _id?: string;
     name?: string;
-    price?: number;
     duration?: number;
     durationUnit?: string;
     classesPerWeek?: number;
     startingBelt?: string;
     progressReports?: string;
     curriculum?: CurriculumItem[];
-    milestones?: MilestoneItem[];
   } | null;
+  planEnrollments?: StudentPlanEnrollment[];
   guardians?: Array<{ name: string; relationship: string; phone?: string; email?: string; emergencyContact?: boolean; pickupAuthorized?: boolean }>;
 };
 
 type PortalNotification = { _id: string; title: string; message: string; createdAt: string; read: boolean; severity?: string };
 
 type CurriculumItem = {
-  day?: number;
-  title?: string;
-  belt?: string;
-  skill?: string;
-  description?: string;
-};
-
-type MilestoneItem = {
   day?: number;
   title?: string;
   belt?: string;
@@ -116,6 +112,10 @@ type PerformanceRecord = {
     name?: string;
     email?: string;
   } | null;
+};
+
+type UpcomingCalendarProps = {
+  events: CalendarEvent[];
 };
 
 // ======================================================
@@ -186,6 +186,46 @@ function getSafeRating(rating?: number) {
 
 function getRatingPercentage(rating?: number) {
   return (getSafeRating(rating) / 5) * 100;
+}
+
+function formatCalendarDate(value: string) {
+  return new Date(`${value}T00:00:00`).toLocaleDateString("en-IN", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+  });
+}
+
+function UpcomingCalendar({ events }: UpcomingCalendarProps) {
+  const upcoming = events.slice(0, 5);
+  return (
+    <Card padding="md">
+      <div className="mb-4 flex items-start gap-3">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-(--accent-soft) text-(--accent)">
+          <CalendarDays size={19} />
+        </div>
+        <div className="min-w-0">
+          <h2 className="text-lg font-extrabold text-(--foreground)">Upcoming schedule</h2>
+          <p className="mt-1 text-sm text-(--ink-muted)">Your next classes, makeups, grading, and registered academy events.</p>
+        </div>
+      </div>
+      {upcoming.length ? (
+        <div className="divide-y divide-(--line)">
+          {upcoming.map((event) => (
+            <div key={event.id} className="flex min-w-0 items-start justify-between gap-3 py-3 first:pt-0 last:pb-0">
+              <div className="min-w-0">
+                <p className="truncate text-sm font-bold text-(--foreground)">{event.title}</p>
+                <p className="mt-1 text-xs text-(--ink-muted)">{formatCalendarDate(event.start.date)}{event.start.time ? ` · ${event.start.time}` : ""}{event.branch?.name ? ` · ${event.branch.name}` : ""}</p>
+              </div>
+              <Badge variant="neutral">{event.type.replaceAll("_", " ")}</Badge>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="text-sm text-(--ink-muted)">No upcoming schedule items yet.</p>
+      )}
+    </Card>
+  );
 }
 
 // ======================================================
@@ -690,7 +730,13 @@ function PlanSection({
 }: {
   student: Student | null;
 }) {
+  const { settings: academySettings, initialized: academySettingsInitialized } = useAcademyBrand();
   const plan = student?.plan;
+  const currentEnrollment = findCurrentStudentEnrollment(student?.planEnrollments);
+  const currentBillingSnapshot = currentEnrollment?.billingSnapshot;
+  const billingCurrency = currentBillingSnapshot?.currency || academySettings.currency;
+  const formatBillingAmount = (amount: number | undefined) => !billingCurrency && !academySettingsInitialized ? "Loading currency…" : formatCurrency(amount, billingCurrency);
+  const hasCurrentAgreement = hasFrozenBillingSnapshot(currentBillingSnapshot);
 
   return (
     <Card padding="md">
@@ -736,20 +782,26 @@ function PlanSection({
               />
             </div>
 
-            {plan.price !== undefined && (
-              <p className="mt-4 text-sm text-white/90">
-                ₹{plan.price}
-
-                {plan.duration && (
-                  <span>
-                    {" "}
-                    / {plan.duration}{" "}
-                    {String(plan.durationUnit).toUpperCase() ===
-                    "MONTHS"
-                      ? "months"
-                      : "days"}
-                  </span>
-                )}
+            <p className="mt-4 text-xs font-semibold uppercase tracking-wide text-white/70">
+              {hasCurrentAgreement ? "Current enrolled pricing" : "Billing agreement"}
+            </p>
+            <p className="mt-1 text-lg font-bold text-white">
+              {hasCurrentAgreement
+                ? `${formatBillingAmount(currentBillingSnapshot?.amount)}${currentBillingSnapshot?.billingFrequency ? ` / ${currentBillingSnapshot.billingFrequency.toLowerCase().replaceAll("_", " ")}` : ""}`
+                : "Unavailable"}
+            </p>
+            {hasFrozenBillingSnapshot(currentBillingSnapshot) ? (
+              <p className="mt-1 text-xs text-white/70">
+                Registration: {formatBillingAmount(currentBillingSnapshot?.registrationFee || 0)} · Tax: {currentBillingSnapshot?.taxRate || 0}%
+              </p>
+            ) : (
+              <p className="mt-1 text-xs text-white/70">
+                No complete FeeTerm billing agreement is saved for this enrollment.
+              </p>
+            )}
+            {plan.duration && (
+              <p className="mt-2 text-sm text-white/90">
+                Duration: {plan.duration} {String(plan.durationUnit).toUpperCase() === "MONTHS" ? "months" : "days"}
               </p>
             )}
           </div>
@@ -770,10 +822,7 @@ function PlanSection({
               value={`${plan.curriculum?.length || 0} training days`}
             />
 
-            <InfoBox
-              label="Milestones"
-              value={`${plan.milestones?.length || 0}`}
-            />
+
           </div>
 
           {plan.curriculum && plan.curriculum.length > 0 && (
@@ -860,6 +909,7 @@ function InfoBox({
 // ======================================================
 
 export default function StudentDashboard() {
+  const router = useRouter();
   const { settings: academySettings } = useAcademyBrand();
   const academyName = academySettings.academyName.trim() || "Your Academy";
   const [student, setStudent] = useState<Student | null>(null);
@@ -870,6 +920,7 @@ export default function StudentDashboard() {
     [],
   );
   const [notifications, setNotifications] = useState<PortalNotification[]>([]);
+  const [upcomingEvents, setUpcomingEvents] = useState<CalendarEvent[]>([]);
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -890,6 +941,7 @@ export default function StudentDashboard() {
         attendanceResponse,
         performanceResponse,
         notificationResponse,
+        calendarResponse,
       ] = await Promise.all([
         fetchJson<{ student?: Student }>(
           `${API_URL}/students/me`,
@@ -901,12 +953,14 @@ export default function StudentDashboard() {
           `${API_URL}/performance/me`,
         ),
         fetchJson<{ notifications?: PortalNotification[] }>(`${API_URL}/notifications?limit=5`),
+        getMyCalendar().catch(() => []),
       ]);
 
       setStudent(studentResponse.student || null);
       setAttendance(attendanceResponse.attendance || []);
       setPerformance(performanceResponse.performance || []);
       setNotifications(notificationResponse.notifications || []);
+      setUpcomingEvents(calendarResponse);
       setError("");
     } catch (dashboardError) {
       console.error("Student dashboard error:", dashboardError);
@@ -921,7 +975,7 @@ export default function StudentDashboard() {
         message.toLowerCase().includes("unauthorized") ||
         message.toLowerCase().includes("token")
       ) {
-        window.location.href = "/login";
+        router.push("/login");
         return;
       }
 
@@ -937,7 +991,10 @@ export default function StudentDashboard() {
   };
 
   useEffect(() => {
-    void loadDashboard();
+    const timer = window.setTimeout(() => void loadDashboard(), 0);
+    return () => window.clearTimeout(timer);
+    // The initial dashboard request intentionally runs once for the mounted portal.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const attendanceStats = useMemo(() => {
@@ -972,6 +1029,9 @@ export default function StudentDashboard() {
 
   const currentBelt =
     student?.currentBelt || student?.belt || "Not recorded";
+  const activeCurriculumEnrollment = findCurrentStudentEnrollment(student?.planEnrollments);
+  const activeCurriculumProgram = activeCurriculumEnrollment?.programs?.find((item) => item.curriculumVersion) || activeCurriculumEnrollment?.programs?.[0];
+  const activeCurriculumProgramId = activeCurriculumProgram ? (typeof activeCurriculumProgram.program === "string" ? activeCurriculumProgram.program : activeCurriculumProgram.program?._id || "") : typeof activeCurriculumEnrollment?.program === "string" ? activeCurriculumEnrollment.program : activeCurriculumEnrollment?.program?._id || "";
 
   const attendedPlanDays = useMemo(() => {
     return new Set(
@@ -1189,9 +1249,13 @@ export default function StudentDashboard() {
           </div>
         </Card>
 
+        {student?._id && activeCurriculumEnrollment?._id && activeCurriculumProgramId && <StudentCurriculumProgressPanel studentId={student._id} enrollmentId={activeCurriculumEnrollment._id} programId={activeCurriculumProgramId} />}
+
         <div className="grid gap-6 xl:grid-cols-2">
           <AttendanceSection attendance={attendance} />
           <PerformanceSection performance={performance} />
+          <StudentGradingResults />
+          <UpcomingCalendar events={upcomingEvents} />
         </div>
 
         <div className="mt-6 grid gap-6 xl:grid-cols-2">

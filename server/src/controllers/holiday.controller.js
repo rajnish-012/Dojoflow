@@ -1,6 +1,17 @@
 const mongoose = require("mongoose");
 const Holiday = require("../models/Holiday");
 
+async function refreshBatchCompletionDates() {
+  try { await require("../services/batchCompletion.service").recalculateAllBatchCompletions(); }
+  catch (error) { console.error("Batch completion dates could not be recalculated after Holiday change", { name: error?.name || "Error" }); }
+}
+
+async function reconcileHolidayCalendar(date, branchId) {
+  try { await require("../services/session.service").reconcileSessionsForHoliday({ date, branchId }); }
+  catch (error) { console.error("Scheduled Sessions could not be reconciled after Holiday change", { name: error?.name || "Error" }); }
+  await refreshBatchCompletionDates();
+}
+
 /* =========================================================
    DATE HELPERS
 ========================================================= */
@@ -661,6 +672,7 @@ const createHoliday = async (req, res) => {
       isActive: true,
       createdBy: req.user._id,
     });
+    await reconcileHolidayCalendar(formatDate(holiday.date), holiday.branch);
 
     const populatedHoliday = await populateHoliday(
       Holiday.findById(holiday._id),
@@ -718,6 +730,9 @@ const updateHoliday = async (req, res) => {
         message: "You do not have permission to modify this holiday",
       });
     }
+
+    const previousDate = formatDate(holiday.date);
+    const previousBranch = holiday.branch ? holiday.branch.toString() : null;
 
     const { date, name, description, branch, isActive } = req.body;
 
@@ -843,6 +858,8 @@ const updateHoliday = async (req, res) => {
     holiday.updatedBy = req.user._id;
 
     await holiday.save();
+    await reconcileHolidayCalendar(previousDate, previousBranch);
+    await reconcileHolidayCalendar(formatDate(holiday.date), holiday.branch);
 
     const updatedHoliday = await populateHoliday(Holiday.findById(holiday._id));
 
@@ -909,6 +926,7 @@ const deleteHoliday = async (req, res) => {
     holiday.updatedBy = req.user._id;
 
     await holiday.save();
+    await refreshBatchCompletionDates();
 
     return res.status(200).json({
       success: true,

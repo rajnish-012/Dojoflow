@@ -18,6 +18,7 @@ let Role;
 let User;
 let Student;
 let Plan;
+let FeeTerm;
 let Attendance;
 let Holiday;
 let Makeup;
@@ -26,6 +27,8 @@ let Inquiry;
 let Trial;
 let TrainingSessionType;
 let BranchSchedule;
+let Session;
+let Batch;
 let Performance;
 let Notification;
 let Invoice;
@@ -35,6 +38,15 @@ let FinanceAudit;
 let AuditLog;
 let AttendanceCorrection;
 let AcademySettings;
+let GradingEvent;
+let GradingEvaluation;
+let BeltHistory;
+let Curriculum;
+let StudentCurriculumMilestone;
+let StudentCurriculumStepProgress;
+let Certificate;
+let AcademyEvent;
+let AcademyEventRegistration;
 let fixture;
 
 const permissions = [
@@ -44,11 +56,23 @@ const permissions = [
   "makeup.view", "makeup.manage", "branch_schedule.view", "branch_schedule.manage",
   "performance.view", "promotion.view", "promotion.manage", "report.view", "inquiry.view", "inquiry.update", "student.create", "plan.view", "finance.manage",
   "finance.view", "finance.manage", "finance.collect", "finance.refund", "finance.report", "student.finance.view",
+  "grading.view", "grading.create", "grading.update", "grading.evaluate", "grading.finalize", "grading.publish", "grading.cancel",
+  "certificate.view", "certificate.generate", "certificate.download", "student.grading.view",
+  "calendar.view", "event.view", "event.manage", "event.register",
+  "module.view", "module.manage",
+  "curriculum.view", "curriculum.manage",
+  "inventory.view", "inventory.create", "inventory.update", "inventory.adjust", "inventory.transfer", "inventory.purchase", "inventory.sale", "inventory.return", "inventory.damage", "inventory.report", "inventory.manage",
 ];
 const origin = "http://localhost:3000";
 const calendarDateOffset = (offset = 0) => {
   const date = new Date();
   date.setDate(date.getDate() + offset);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+};
+const nextWeekday = (weekday, offset = 1) => {
+  const date = new Date();
+  date.setDate(date.getDate() + offset);
+  while (date.getDay() !== weekday) date.setDate(date.getDate() + 1);
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 };
 
@@ -81,6 +105,20 @@ const createStudent = (values = {}) => Student.create({
   plan: fixture.plan._id,
   joinDate: new Date("2026-01-01T00:00:00.000Z"),
   status: values.status || "ACTIVE",
+});
+
+const makeEnrollmentFeeTerm = (branch = fixture.branchA, values = {}) => FeeTerm.create({
+  plan: values.plan || fixture.plan._id,
+  branch: values.branch === undefined ? branch._id : values.branch,
+  billingFrequency: values.billingFrequency || "MONTHLY",
+  amount: values.amount ?? 100,
+  registrationFee: values.registrationFee ?? 20,
+  taxRate: values.taxRate ?? 10,
+  discountRules: values.discountRules || [],
+  effectiveFrom: values.effectiveFrom || new Date("2020-01-01T00:00:00.000Z"),
+  effectiveUntil: values.effectiveUntil ?? null,
+  status: values.status || "ACTIVE",
+  version: 1,
 });
 
 async function configureAttendanceFixture({ curriculumDays = 7, studentIds = ["studentA"] } = {}) {
@@ -144,6 +182,7 @@ before(async () => {
   User = require("../../src/models/User");
   Student = require("../../src/models/Student");
   Plan = require("../../src/models/Plan");
+  FeeTerm = require("../../src/models/FeeTerm");
   Attendance = require("../../src/models/Attendance");
   Holiday = require("../../src/models/Holiday");
   Makeup = require("../../src/models/Makeup");
@@ -152,6 +191,8 @@ before(async () => {
   Trial = require("../../src/models/Trial");
   TrainingSessionType = require("../../src/models/TrainingSessionType");
   BranchSchedule = require("../../src/models/BranchSchedule");
+  Session = require("../../src/models/Session");
+  Batch = require("../../src/models/Batch");
   Performance = require("../../src/models/Performance");
   Notification = require("../../src/models/Notification");
   Invoice = require("../../src/models/Invoice");
@@ -161,6 +202,20 @@ before(async () => {
   AuditLog = require("../../src/models/AuditLog");
   AttendanceCorrection = require("../../src/models/AttendanceCorrection");
   AcademySettings = require("../../src/models/AcademySettings");
+  GradingEvent = require("../../src/models/GradingEvent");
+  GradingEvaluation = require("../../src/models/GradingEvaluation");
+  BeltHistory = require("../../src/models/BeltHistory");
+  Curriculum = require("../../src/models/Curriculum");
+  StudentCurriculumMilestone = require("../../src/models/StudentCurriculumMilestone");
+  StudentCurriculumStepProgress = require("../../src/models/StudentCurriculumStepProgress");
+  Certificate = require("../../src/models/Certificate");
+  AcademyEvent = require("../../src/models/AcademyEvent");
+  AcademyEventRegistration = require("../../src/models/AcademyEventRegistration");
+  const Product = require("../../src/models/Product");
+  const Supplier = require("../../src/models/Supplier");
+  const BranchInventory = require("../../src/models/BranchInventory");
+  const StockMovement = require("../../src/models/StockMovement");
+  const InventoryOrder = require("../../src/models/InventoryOrder");
   await mongoose.connect(process.env.MONGO_URI);
   await Attendance.syncIndexes();
   await Makeup.syncIndexes();
@@ -170,8 +225,12 @@ before(async () => {
   await Payment.syncIndexes();
   await Receipt.syncIndexes();
   await FinanceAudit.syncIndexes();
+  await FeeTerm.syncIndexes();
   await AttendanceCorrection.syncIndexes();
   await Trial.syncIndexes();
+  await GradingEvaluation.syncIndexes();
+  await Certificate.syncIndexes();
+  await Promise.all([Product.syncIndexes(), Supplier.syncIndexes(), BranchInventory.syncIndexes(), StockMovement.syncIndexes(), InventoryOrder.syncIndexes(), AcademyEvent.syncIndexes(), AcademyEventRegistration.syncIndexes()]);
 });
 
 after(async () => {
@@ -189,12 +248,191 @@ beforeEach(async () => {
   await Role.create({ key: "SUPER_ADMIN", name: "Super Admin", dataScope: "ALL", permissions: [], isSystem: true });
   fixture.userA = await createUser({ email: "branch-a@example.test", branch: fixture.branchA._id });
   fixture.userB = await createUser({ email: "branch-b@example.test", branch: fixture.branchB._id });
-  fixture.plan = await Plan.create({ name: "Basic Plan", price: 100, duration: 1 });
+  fixture.plan = await Plan.create({ name: "Basic Plan", duration: 1 });
+  fixture.feeTerm = await makeEnrollmentFeeTerm(null, { branch: null, status: "RETIRED", billingFrequency: "ONE_TIME", effectiveFrom: new Date("2019-01-01T00:00:00.000Z") });
   fixture.studentA = await createStudent({ name: "Student A", branch: fixture.branchA._id, phone: "9000000001" });
   fixture.studentB = await createStudent({ name: "Student B", branch: fixture.branchB._id, phone: "9000000002" });
-  fixture.studentA.planEnrollments = [{ plan: fixture.plan._id, startDate: new Date("2026-01-01T00:00:00.000Z"), status: "ACTIVE", billingSnapshot: { feeName: "Basic Monthly Fees", amount: 100, billingFrequency: "MONTHLY", registrationFee: 20, taxRate: 10, discountRules: [] } }];
-  fixture.studentB.planEnrollments = [{ plan: fixture.plan._id, startDate: new Date("2026-01-01T00:00:00.000Z"), status: "ACTIVE", billingSnapshot: { feeName: "Basic Monthly Fees", amount: 100, billingFrequency: "MONTHLY", registrationFee: 20, taxRate: 10, discountRules: [] } }];
+  const agreed = { feeTerm: fixture.feeTerm._id, feeTermVersion: fixture.feeTerm.version, planName: fixture.plan.name, branch: fixture.branchA._id, branchName: fixture.branchA.name, amount: 100, billingFrequency: "ONE_TIME", registrationFee: 20, taxRate: 10, discountRules: [], effectiveFrom: fixture.feeTerm.effectiveFrom, effectiveUntil: fixture.feeTerm.effectiveUntil };
+  fixture.studentA.planEnrollments = [{ plan: fixture.plan._id, feeTerm: fixture.feeTerm._id, branch: fixture.branchA._id, startDate: new Date("2026-01-01T00:00:00.000Z"), status: "ACTIVE", billingSnapshot: agreed }];
+  fixture.studentB.planEnrollments = [{ plan: fixture.plan._id, feeTerm: fixture.feeTerm._id, branch: fixture.branchB._id, startDate: new Date("2026-01-01T00:00:00.000Z"), status: "ACTIVE", billingSnapshot: { ...agreed, branch: fixture.branchB._id, branchName: fixture.branchB.name } }];
   await Promise.all([fixture.studentA.save(), fixture.studentB.save()]);
+});
+
+test("sidebar section reorder persists atomically without changing child order and enforces module permissions", async () => {
+  const Module = require("../../src/models/Module");
+  const modules = await Module.create([
+    { key: "academy-a", label: "Academy A", href: "/academy-a", order: 10, group: "Academy", requiredPermission: "student.view" },
+    { key: "academy-b", label: "Academy B", href: "/academy-b", order: 20, group: "Academy", requiredPermission: "student.view" },
+    { key: "operations-a", label: "Operations A", href: "/operations-a", order: 30, group: "Operations", requiredPermission: "student.view" },
+    { key: "custom-a", label: "Custom A", href: "/custom-a", order: 40, group: "My Custom Section", requiredPermission: "student.view" },
+  ]);
+  const moduleCookie = makeCookie(fixture.userA);
+  const noAccess = await createUser({ role: "NO_ACCESS", email: "module-reorder-no-access@example.test" });
+  const rejectedUnauthorized = await request(app).put("/api/modules/reorder").set("Cookie", makeCookie(noAccess)).set("Origin", origin).send({ sections: [{ id: "operations", order: 10 }] });
+  assert.equal(rejectedUnauthorized.status, 403);
+
+  const invalid = await request(app).put("/api/modules/reorder").set("Cookie", moduleCookie).set("Origin", origin).send({ sections: [{ id: "missing-section", order: 10 }] });
+  assert.equal(invalid.status, 404);
+  const duplicateOrder = await request(app).put("/api/modules/reorder").set("Cookie", moduleCookie).set("Origin", origin).send({ sections: [{ id: "academy", order: 10 }, { id: "operations", order: 10 }] });
+  assert.equal(duplicateOrder.status, 400);
+  const mixedChildSections = await request(app).put("/api/modules/reorder").set("Cookie", moduleCookie).set("Origin", origin).send({ items: [{ id: String(modules[0]._id), order: 10 }, { id: String(modules[2]._id), order: 20 }] });
+  assert.equal(mixedChildSections.status, 400);
+
+  const moved = await request(app).put("/api/modules/reorder").set("Cookie", moduleCookie).set("Origin", origin).send({
+    sections: [
+      { id: "operations", order: 10 },
+      { id: "academy", order: 20 },
+      { id: "custom:my custom section", order: 30 },
+    ],
+  });
+  assert.equal(moved.status, 200);
+  assert.deepEqual(moved.body.sections, [
+    { id: "operations", sectionOrder: 10 },
+    { id: "academy", sectionOrder: 20 },
+    { id: "custom:my custom section", sectionOrder: 30 },
+  ]);
+
+  const persisted = await Module.find({ _id: { $in: modules.map((module) => module._id) } }).sort({ sectionOrder: 1, order: 1 }).lean();
+  assert.deepEqual(persisted.map((module) => module.key), ["operations-a", "academy-a", "academy-b", "custom-a"]);
+  assert.deepEqual(persisted.filter((module) => module.group === "Academy").map((module) => module.order), [10, 20]);
+  assert.deepEqual(persisted.map((module) => module.href), ["/operations-a", "/academy-a", "/academy-b", "/custom-a"]);
+  const navigation = await request(app).get("/api/modules/navigation").set("Cookie", moduleCookie);
+  assert.equal(navigation.status, 200);
+  assert.equal(navigation.body.modules.find((module) => module.key === "operations-a").sectionOrder, 10);
+  assert.equal(navigation.body.modules.find((module) => module.key === "academy-a").sectionOrder, 20);
+
+  const childMove = await request(app).put("/api/modules/reorder").set("Cookie", moduleCookie).set("Origin", origin).send({ items: [{ id: String(modules[1]._id), order: 10 }, { id: String(modules[0]._id), order: 20 }] });
+  assert.equal(childMove.status, 200);
+  const afterChildMove = await Module.find({ _id: { $in: modules.map((module) => module._id) } }).lean();
+  assert.equal(afterChildMove.find((module) => module.key === "academy-a").sectionOrder, 20);
+  assert.equal(afterChildMove.find((module) => module.key === "academy-b").sectionOrder, 20);
+  assert.equal(afterChildMove.find((module) => module.key === "operations-a").sectionOrder, 10);
+});
+
+test("inventory validates products, records idempotent purchases, and isolates branch stock", async () => {
+  const Product = require("../../src/models/Product");
+  const BranchInventory = require("../../src/models/BranchInventory");
+  const StockMovement = require("../../src/models/StockMovement");
+  const cookie = makeCookie(fixture.userA);
+  const unauthorized = await createUser({ role: "NO_ACCESS" });
+  assert.equal((await request(app).get("/api/inventory/stock").set("Cookie", makeCookie(unauthorized))).status, 403);
+  const badCategory = await request(app).post("/api/inventory/products").set("Cookie", cookie).set("Origin", origin).send({ name: "Bad category", sku: "BAD-1", category: "FOOD", sellingPrice: 10 });
+  assert.equal(badCategory.status, 400);
+  const created = await request(app).post("/api/inventory/products").set("Cookie", cookie).set("Origin", origin).send({ name: "Karate Gi", sku: "GI-001", category: "UNIFORM", sellingPrice: 1500, isPublished: true });
+  assert.equal(created.status, 201);
+  const duplicate = await request(app).post("/api/inventory/products").set("Cookie", cookie).set("Origin", origin).send({ name: "Another Gi", sku: "gi-001", category: "UNIFORM", sellingPrice: 1600 });
+  assert.equal(duplicate.status, 409);
+
+  const movementBody = { productId: String(created.body.product._id), branchId: String(fixture.branchA._id), quantity: 5, purchasePrice: 500, minimumStock: 2, reason: "Initial supplier purchase", idempotencyKey: "inventory-purchase-001" };
+  const purchase = await request(app).post("/api/inventory/purchases").set("Cookie", cookie).set("Origin", origin).send(movementBody);
+  assert.equal(purchase.status, 201);
+  assert.equal(purchase.body.inventory.quantity, 5);
+  const replay = await request(app).post("/api/inventory/purchases").set("Cookie", cookie).set("Origin", origin).send(movementBody);
+  assert.equal(replay.status, 200);
+  assert.equal(replay.body.duplicate, true);
+  const mismatchedReplay = await request(app).post("/api/inventory/purchases").set("Cookie", cookie).set("Origin", origin).send({ ...movementBody, purchasePrice: 501 });
+  assert.equal(mismatchedReplay.status, 409);
+  assert.equal(await StockMovement.countDocuments({ product: created.body.product._id }), 1);
+  assert.equal(await BranchInventory.countDocuments({ product: created.body.product._id, branch: fixture.branchA._id }), 1);
+  assert.equal((await BranchInventory.findOne({ product: created.body.product._id, branch: fixture.branchB._id })), null);
+
+  const outsider = await request(app).get("/api/inventory/stock?branch=" + fixture.branchB._id).set("Cookie", cookie);
+  assert.equal(outsider.status, 200);
+  assert.equal(outsider.body.inventory.length, 1);
+  assert.equal(String(outsider.body.inventory[0].branch._id), String(fixture.branchA._id));
+});
+
+test("inventory transfers are atomic and public merchandise omits internal fields", async () => {
+  const Product = require("../../src/models/Product");
+  const BranchInventory = require("../../src/models/BranchInventory");
+  const StockMovement = require("../../src/models/StockMovement");
+  const admin = await createUser({ role: "SUPER_ADMIN", branch: null });
+  const created = await Product.create({ name: "ForceStrike Gloves", sku: "GLOVE-01", category: "GLOVES", sellingPrice: 800, supplier: new mongoose.Types.ObjectId(), isPublished: true, createdBy: admin._id });
+  const aStock = await BranchInventory.create({ product: created._id, branch: fixture.branchA._id, quantity: 9, purchasePrice: 300, minimumStock: 1 });
+  const key = "inventory-transfer-001";
+  const transferBody = { productId: String(created._id), sourceBranch: String(fixture.branchA._id), destinationBranch: String(fixture.branchB._id), quantity: 4, reason: "Balance branch stock", idempotencyKey: key };
+  const transferred = await request(app).post("/api/inventory/transfers").set("Cookie", makeCookie(admin)).set("Origin", origin).send(transferBody);
+  assert.equal(transferred.status, 201);
+  const replay = await request(app).post("/api/inventory/transfers").set("Cookie", makeCookie(admin)).set("Origin", origin).send(transferBody);
+  assert.equal(replay.status, 200);
+  assert.equal(replay.body.duplicate, true);
+  const mismatchedReplay = await request(app).post("/api/inventory/transfers").set("Cookie", makeCookie(admin)).set("Origin", origin).send({ ...transferBody, quantity: 3 });
+  assert.equal(mismatchedReplay.status, 409);
+  const branchTransfer = await request(app).post("/api/inventory/transfers").set("Cookie", makeCookie(fixture.userA)).set("Origin", origin).send({ ...transferBody, idempotencyKey: "inventory-transfer-branch" });
+  assert.equal(branchTransfer.status, 403);
+  const sameBranch = await request(app).post("/api/inventory/transfers").set("Cookie", makeCookie(admin)).set("Origin", origin).send({ ...transferBody, destinationBranch: String(fixture.branchA._id), idempotencyKey: "inventory-transfer-same" });
+  assert.equal(sameBranch.status, 400);
+  const insufficient = await request(app).post("/api/inventory/transfers").set("Cookie", makeCookie(admin)).set("Origin", origin).send({ ...transferBody, quantity: 50, idempotencyKey: "inventory-transfer-short" });
+  assert.equal(insufficient.status, 409);
+  assert.equal((await BranchInventory.findOne({ product: created._id, branch: fixture.branchA._id })).quantity, 5);
+  assert.equal((await BranchInventory.findOne({ product: created._id, branch: fixture.branchB._id })).quantity, 4);
+  assert.equal(await StockMovement.countDocuments({ transferId: transferred.body.transferId }), 2);
+
+  const publicResult = await request(app).get("/api/public/website/merchandise");
+  assert.equal(publicResult.status, 200);
+  const publicProduct = publicResult.body.products.find((item) => item._id === String(created._id));
+  assert.equal(publicProduct.availability, "IN_STOCK");
+  assert.equal("purchasePrice" in publicProduct, false);
+  assert.equal("supplier" in publicProduct, false);
+  assert.equal("branch" in publicProduct, false);
+  assert.equal("quantity" in publicProduct, false);
+});
+
+test("merchandise orders reserve stock and paid invoices complete sales exactly once", async () => {
+  const Product = require("../../src/models/Product");
+  const BranchInventory = require("../../src/models/BranchInventory");
+  const InventoryOrder = require("../../src/models/InventoryOrder");
+  const StockMovement = require("../../src/models/StockMovement");
+  const product = await Product.create({ name: "Academy Belt", sku: "BELT-01", category: "BELTS", sellingPrice: 250, createdBy: fixture.userA._id });
+  await BranchInventory.create({ product: product._id, branch: fixture.branchA._id, quantity: 6, purchasePrice: 80, minimumStock: 1 });
+  const cookie = makeCookie(fixture.userA);
+  const orderBody = { studentId: String(fixture.studentA._id), branchId: String(fixture.branchA._id), items: [{ productId: String(product._id), quantity: 2 }], fulfillment: "PICKUP", idempotencyKey: "inventory-order-0001" };
+  const created = await request(app).post("/api/inventory/orders").set("Cookie", cookie).set("Origin", origin).send(orderBody);
+  assert.equal(created.status, 201);
+  const order = await InventoryOrder.findById(created.body.order._id);
+  assert.equal(order.status, "PAYMENT_PENDING");
+  assert.equal((await BranchInventory.findOne({ product: product._id, branch: fixture.branchA._id })).reservedQuantity, 2);
+  const payment = await request(app).post(`/api/finance/invoices/${order.invoice}/payments`).set("Cookie", cookie).set("Origin", origin).send({ amount: 500, method: "CASH", idempotencyKey: "inventory-payment-001", reference: "cash-counter" });
+  assert.equal(payment.status, 201);
+  const inventory = await BranchInventory.findOne({ product: product._id, branch: fixture.branchA._id });
+  assert.equal(inventory.quantity, 4);
+  assert.equal(inventory.reservedQuantity, 0);
+  assert.equal((await InventoryOrder.findById(order._id)).status, "PAID");
+  assert.equal(await StockMovement.countDocuments({ relatedOrder: order._id, type: "SALE" }), 1);
+  const orderItem = (await InventoryOrder.findById(order._id)).items[0];
+  const returned = await request(app).post(`/api/inventory/orders/${order._id}/items/${orderItem._id}/returns`).set("Cookie", cookie).set("Origin", origin).send({ quantity: 1, reason: "Correct size returned", disposition: "RESTOCK", idempotencyKey: "inventory-return-001" });
+  assert.equal(returned.status, 201);
+  assert.equal((await BranchInventory.findOne({ product: product._id, branch: fixture.branchA._id })).quantity, 5);
+  const sale = await StockMovement.findOne({ relatedOrder: order._id, type: "SALE" });
+  await assert.rejects(sale.save(), /immutable/i);
+  await assert.rejects(StockMovement.updateOne({ _id: sale._id }, { $set: { reason: "rewritten" } }), /immutable/i);
+  const repeated = await request(app).post(`/api/finance/invoices/${order.invoice}/payments`).set("Cookie", cookie).set("Origin", origin).send({ amount: 500, method: "CASH", idempotencyKey: "inventory-payment-001", reference: "cash-counter" });
+  assert.equal(repeated.status, 200);
+  assert.equal(await StockMovement.countDocuments({ relatedOrder: order._id, type: "SALE" }), 1);
+});
+
+test("stock damage prevents negative inventory and cancelling an unpaid order releases its reservation", async () => {
+  const Product = require("../../src/models/Product");
+  const BranchInventory = require("../../src/models/BranchInventory");
+  const InventoryOrder = require("../../src/models/InventoryOrder");
+  const StockMovement = require("../../src/models/StockMovement");
+  const product = await Product.create({ name: "Training T-shirt", sku: "TEE-01", category: "MERCHANDISE", sellingPrice: 300, createdBy: fixture.userA._id });
+  const cookie = makeCookie(fixture.userA);
+  const purchase = await request(app).post("/api/inventory/purchases").set("Cookie", cookie).set("Origin", origin).send({ productId: String(product._id), branchId: String(fixture.branchA._id), quantity: 3, purchasePrice: 100, minimumStock: 1, reason: "Opening stock received", idempotencyKey: "inventory-purchase-tee" });
+  assert.equal(purchase.status, 201);
+  const damage = await request(app).post("/api/inventory/damage").set("Cookie", cookie).set("Origin", origin).send({ productId: String(product._id), branchId: String(fixture.branchA._id), quantity: 2, reason: "Damaged during storage", idempotencyKey: "inventory-damage-tee" });
+  assert.equal(damage.status, 201);
+  const overDamage = await request(app).post("/api/inventory/damage").set("Cookie", cookie).set("Origin", origin).send({ productId: String(product._id), branchId: String(fixture.branchA._id), quantity: 2, reason: "Would make stock negative", idempotencyKey: "inventory-damage-too-many" });
+  assert.equal(overDamage.status, 409);
+  const orderResponse = await request(app).post("/api/inventory/orders").set("Cookie", cookie).set("Origin", origin).send({ studentId: String(fixture.studentA._id), branchId: String(fixture.branchA._id), items: [{ productId: String(product._id), quantity: 1 }], fulfillment: "PICKUP", idempotencyKey: "inventory-order-cancel-1" });
+  assert.equal(orderResponse.status, 201);
+  const cancelled = await request(app).post(`/api/inventory/orders/${orderResponse.body.order._id}/cancel`).set("Cookie", cookie).set("Origin", origin).send({ reason: "Student changed their selection" });
+  assert.equal(cancelled.status, 200);
+  const inventory = await BranchInventory.findOne({ product: product._id, branch: fixture.branchA._id });
+  assert.equal(inventory.quantity, 1);
+  assert.equal(inventory.reservedQuantity, 0);
+  assert.equal((await InventoryOrder.findById(orderResponse.body.order._id)).status, "CANCELLED");
+  assert.equal(await StockMovement.countDocuments({ relatedOrder: orderResponse.body.order._id, type: "RELEASE" }), 1);
 });
 
 test("notification APIs are authenticated, paginated, branch-scoped, and user-specific", async () => {
@@ -250,6 +488,25 @@ test("notification APIs are authenticated, paginated, branch-scoped, and user-sp
   assert.equal(restricted.status, 200);
   assert.equal(restricted.body.pagination.total, 0);
   assert.equal(restricted.body.unreadCount, 0);
+});
+
+test("legacy inquiry notifications route to the authorized CRM page", async () => {
+  const inquiryNotification = await Notification.create({
+    recipient: fixture.userA._id,
+    type: "INQUIRY_RECEIVED",
+    title: "New inquiry received",
+    message: "A prospect submitted an inquiry.",
+    severity: "INFO",
+    branch: fixture.branchA._id,
+    requiredPermission: "inquiry.view",
+    eventKey: "test:legacy-inquiry-link",
+    entityType: "INQUIRY",
+    entityId: new mongoose.Types.ObjectId(),
+    actionUrl: "/inquiries",
+  });
+  const response = await request(app).get("/api/notifications?limit=10").set("Cookie", makeCookie(fixture.userA));
+  assert.equal(response.status, 200);
+  assert.equal(response.body.notifications.find((item) => item._id === String(inquiryNotification._id)).actionUrl, "/crm");
 });
 
 test("notification read state can be updated individually and in bulk", async () => {
@@ -446,12 +703,133 @@ test("weekly schedule API validates sessions, filters branch scope and builds a 
   assert.equal(invalid.status, 400);
 });
 
+test("Session close and reopen is permission checked, attendance safe, audited once, and idempotent", async () => {
+  const program = await TrainingSessionType.create({ name: "Closure Karate", normalizedName: "closure-karate", slug: "closure-karate", isActive: true });
+  const futureDate = nextWeekday(1);
+  const makeSession = (overrides = {}) => Session.create({
+    batch: new mongoose.Types.ObjectId(), branch: fixture.branchA._id, plan: fixture.plan._id, program: program._id,
+    schedule: new mongoose.Types.ObjectId(), scheduleSlotId: new mongoose.Types.ObjectId(), date: futureDate,
+    dayOfWeek: new Date(`${futureDate}T12:00:00`).getDay(), startTime: "10:00", endTime: "11:00", ...overrides,
+  });
+  const protectedSession = await makeSession();
+  await Attendance.create({
+    student: fixture.studentA._id, branch: fixture.branchA._id, session: protectedSession._id,
+    date: new Date(`${futureDate}T12:00:00`), planDay: 1, curriculumTitle: "History protected",
+    status: "ABSENT", attendanceType: "REGULAR", markedBy: fixture.userA._id,
+  });
+  const protectedResponse = await request(app).patch(`/api/branch-schedules/sessions/${protectedSession._id}/status`)
+    .set("Cookie", makeCookie(fixture.userA)).set("Origin", origin).send({ status: "CLOSED", reason: "Coach unavailable" });
+  assert.equal(protectedResponse.status, 409);
+  assert.equal((await Session.findById(protectedSession._id)).status, "SCHEDULED");
+
+  fixture.plan.duration = 3;
+  fixture.plan.durationUnit = "MONTHS";
+  fixture.plan.classesPerWeek = 2;
+  fixture.plan.programs = [{ program: program._id, weeklyLimit: 2 }];
+  await fixture.plan.save();
+  await Curriculum.create({ plan: fixture.plan._id, program: program._id, version: 1, name: "Eight sessions", status: "PUBLISHED", publishedAt: new Date(), modules: [{ name: "Core", order: 1, steps: Array.from({ length: 8 }, (_, index) => ({ title: `Step ${index + 1}` })) }] });
+  const mondaySlot = new mongoose.Types.ObjectId();
+  const wednesdaySlot = new mongoose.Types.ObjectId();
+  const weeklySchedule = Array.from({ length: 7 }, (_, dayOfWeek) => ({
+    dayOfWeek, isClosed: ![1, 3].includes(dayOfWeek),
+    slots: dayOfWeek === 1 ? [{ _id: mondaySlot, batchId: null, sessionTypeId: program._id, startTime: "10:00", endTime: "11:00", isActive: true }]
+      : dayOfWeek === 3 ? [{ _id: wednesdaySlot, batchId: null, sessionTypeId: program._id, startTime: "12:00", endTime: "13:00", isActive: true }] : [],
+  }));
+  const schedule = await BranchSchedule.create({ branch: fixture.branchA._id, weeklySchedule });
+  const twoWeeksBefore = new Date(`${futureDate}T12:00:00`);
+  twoWeeksBefore.setDate(twoWeeksBefore.getDate() - 21);
+  const pastTrainingDate = `${twoWeeksBefore.getFullYear()}-${String(twoWeeksBefore.getMonth() + 1).padStart(2, "0")}-${String(twoWeeksBefore.getDate()).padStart(2, "0")}`;
+  const batch = await Batch.create({ name: "Closure Batch", code: "CLOSE-01", branch: fixture.branchA._id, plan: fixture.plan._id, capacity: 20, status: "ACTIVE", startDate: pastTrainingDate, calculatedEndDate: calendarDateOffset(45) });
+  schedule.weeklySchedule.find((day) => day.dayOfWeek === 1).slots[0].batchId = batch._id;
+  schedule.weeklySchedule.find((day) => day.dayOfWeek === 3).slots[0].batchId = batch._id;
+  await schedule.save();
+  const wednesday = new Date(`${futureDate}T12:00:00`);
+  wednesday.setDate(wednesday.getDate() + 2);
+  const wednesdayDate = `${wednesday.getFullYear()}-${String(wednesday.getMonth() + 1).padStart(2, "0")}-${String(wednesday.getDate()).padStart(2, "0")}`;
+  const batchSession = (date, slotId, startTime, endTime) => Session.create({
+    batch: batch._id, branch: fixture.branchA._id, plan: fixture.plan._id, program: program._id,
+    schedule: schedule._id, scheduleSlotId: slotId, date, dayOfWeek: new Date(`${date}T12:00:00`).getDay(),
+    startTime, endTime, status: "SCHEDULED",
+  });
+  const absentButDelivered = await batchSession(pastTrainingDate, mondaySlot, "10:00", "11:00");
+  absentButDelivered.status = "COMPLETED";
+  await absentButDelivered.save();
+  await Attendance.create({
+    student: fixture.studentA._id, branch: fixture.branchA._id, session: absentButDelivered._id, batch: batch._id,
+    plan: fixture.plan._id, sessionTypeId: program._id, sessionSlotId: mondaySlot,
+    date: new Date(`${pastTrainingDate}T12:00:00`), planDay: 1, curriculumTitle: "Training occurred",
+    status: "ABSENT", attendanceType: "REGULAR", markedBy: fixture.userA._id,
+  });
+  const mondaySession = await batchSession(futureDate, mondaySlot, "10:00", "11:00");
+  const wednesdaySession = await batchSession(wednesdayDate, wednesdaySlot, "12:00", "13:00");
+  const { calculateBatchCompletion } = require("../../src/services/batchCompletion.service");
+  const initialCompletion = await calculateBatchCompletion(batch._id);
+  assert.ok(initialCompletion.deliveredSessions >= 4 && initialCompletion.deliveredSessions < 8);
+  await Batch.updateOne({ _id: batch._id }, { $set: { calculatedEndDate: initialCompletion.calculatedEndDate } });
+  const originalEnd = initialCompletion.calculatedEndDate;
+  const rangeEnd = originalEnd;
+  const sessionCountBeforeCalendarReads = await Session.countDocuments({ batch: batch._id });
+  const calendarUrl = `/api/calendar?start=${futureDate}&end=${rangeEnd}`;
+  const calendarOne = await request(app).get(calendarUrl).set("Cookie", makeCookie(fixture.userA));
+  const calendarTwo = await request(app).get(calendarUrl).set("Cookie", makeCookie(fixture.userA));
+  assert.equal(calendarOne.status, 200, JSON.stringify(calendarOne.body));
+  assert.equal(calendarTwo.status, 200, JSON.stringify(calendarTwo.body));
+  const batchCalendarEvents = calendarTwo.body.events.filter((event) => String(event.metadata?.batchId) === String(batch._id));
+  assert.ok(batchCalendarEvents.some((event) => event.start.date === futureDate && event.source === "session"));
+  assert.equal(new Set(batchCalendarEvents.map((event) => event.id)).size, batchCalendarEvents.length);
+  assert.equal(await Session.countDocuments({ batch: batch._id }), sessionCountBeforeCalendarReads);
+  const calendarDate = new Date(`${futureDate}T12:00:00`);
+  const availability = await request(app).get(`/api/branch-schedules/${fixture.branchA._id}/calendar?year=${calendarDate.getFullYear()}&month=${calendarDate.getMonth() + 1}`).set("Cookie", makeCookie(fixture.userA));
+  assert.equal(availability.status, 200, JSON.stringify(availability.body));
+  const firstAvailability = availability.body.days.find((day) => day.date === futureDate);
+  assert.ok(firstAvailability.slots.some((slot) => String(slot.batchId?._id || slot.batchId) === String(batch._id)));
+  const noAccess = await createUser({ role: "NO_ACCESS", email: "session-close-no-access@example.test" });
+  const denied = await request(app).patch(`/api/branch-schedules/sessions/${mondaySession._id}/status`)
+    .set("Cookie", makeCookie(noAccess)).set("Origin", origin).send({ status: "CLOSED", reason: "Unauthorized attempt" });
+  assert.equal(denied.status, 403);
+  assert.equal((await Session.findById(mondaySession._id)).status, "SCHEDULED");
+
+  const cookie = makeCookie(fixture.userA);
+  const closeMonday = () => request(app).patch(`/api/branch-schedules/sessions/${mondaySession._id}/status`).set("Cookie", cookie).set("Origin", origin)
+    .send({ status: "CLOSED", reason: "Coach unavailable" });
+  const firstClose = await closeMonday();
+  assert.equal(firstClose.status, 200, JSON.stringify(firstClose.body));
+  assert.equal(firstClose.body.session.status, "CLOSED");
+  assert.equal(firstClose.body.session.closureReason, "Coach unavailable");
+  assert.ok(firstClose.body.batch.calculatedEndDate > originalEnd);
+  const closedCalendar = await request(app).get(calendarUrl).set("Cookie", makeCookie(fixture.userA));
+  assert.ok(closedCalendar.body.events.some((event) => event.source === "session" && String(event.metadata?.sessionId) === String(mondaySession._id) && event.status === "CLOSED"));
+  assert.equal(await AuditLog.countDocuments({ entityType: "SESSION", entityId: mondaySession._id, action: "SESSION_CLOSED" }), 1);
+  assert.equal((await closeMonday()).status, 200);
+  assert.equal(await AuditLog.countDocuments({ entityType: "SESSION", entityId: mondaySession._id, action: "SESSION_CLOSED" }), 1);
+  const closeWednesday = await request(app).patch(`/api/branch-schedules/sessions/${wednesdaySession._id}/status`).set("Cookie", cookie).set("Origin", origin)
+    .send({ status: "CLOSED", reason: "Branch maintenance" });
+  assert.equal(closeWednesday.status, 200, JSON.stringify(closeWednesday.body));
+  const completionWithTwoClosures = closeWednesday.body.batch.calculatedEndDate;
+  assert.ok(completionWithTwoClosures > firstClose.body.batch.calculatedEndDate);
+  assert.equal(await AuditLog.countDocuments({ entityType: "SESSION", action: "SESSION_CLOSED", entityId: { $in: [mondaySession._id, wednesdaySession._id] } }), 2);
+
+  const reopenMonday = () => request(app).patch(`/api/branch-schedules/sessions/${mondaySession._id}/status`).set("Cookie", cookie).set("Origin", origin).send({ status: "SCHEDULED" });
+  const firstReopen = await reopenMonday();
+  assert.equal(firstReopen.status, 200, JSON.stringify(firstReopen.body));
+  assert.equal(firstReopen.body.session.status, "SCHEDULED");
+  assert.equal(firstReopen.body.session.closureReason, "");
+  assert.ok(firstReopen.body.batch.calculatedEndDate < completionWithTwoClosures);
+  assert.equal(await AuditLog.countDocuments({ entityType: "SESSION", entityId: mondaySession._id, action: "SESSION_REOPENED" }), 1);
+  assert.equal((await reopenMonday()).status, 200);
+  assert.equal(await AuditLog.countDocuments({ entityType: "SESSION", entityId: mondaySession._id, action: "SESSION_REOPENED" }), 1);
+  const reopenWednesday = await request(app).patch(`/api/branch-schedules/sessions/${wednesdaySession._id}/status`).set("Cookie", cookie).set("Origin", origin).send({ status: "SCHEDULED" });
+  assert.equal(reopenWednesday.status, 200, JSON.stringify(reopenWednesday.body));
+  assert.equal(reopenWednesday.body.batch.calculatedEndDate, originalEnd);
+});
+
 test("student admission creates a linked login and profile; update and deactivation stay synchronized", async () => {
   const cookie = makeCookie(fixture.userA);
+  const feeTerm = await makeEnrollmentFeeTerm();
   const created = await request(app).post("/api/students").set("Cookie", cookie).set("Origin", origin).send({
     name: "New Test Student", age: 19, phone: "9000000011", email: "profile@example.test",
     loginEmail: "login@example.test", loginPassword: "new student secure passphrase",
-    branch: String(fixture.branchA._id), plan: String(fixture.plan._id),
+    branch: String(fixture.branchA._id), plan: String(fixture.plan._id), feeTerm: String(feeTerm._id),
   });
   assert.equal(created.status, 201, JSON.stringify(created.body));
   const studentId = created.body.student._id;
@@ -473,6 +851,50 @@ test("student admission creates a linked login and profile; update and deactivat
   assert.equal(deactivated.status, 200);
   assert.equal((await Student.findById(studentId)).status, "INACTIVE");
   assert.equal((await User.findById(linkedUserId)).isActive, false);
+});
+
+test("student admission reserves a selected Batch before creating the new student profile", async () => {
+  const program = await TrainingSessionType.create({ name: "Batch Admission Regression", normalizedName: "batch admission regression", slug: "batch-admission-regression" });
+  fixture.plan.classesPerWeek = 1;
+  fixture.plan.programs = [{ program: program._id }];
+  await fixture.plan.save();
+  await Curriculum.create({
+    plan: fixture.plan._id,
+    program: program._id,
+    version: 1,
+    name: "Admission Regression Curriculum",
+    status: "PUBLISHED",
+    publishedAt: new Date(),
+    modules: [{ name: "Basics", order: 1, steps: [{ title: "First lesson" }] }],
+  });
+  const batch = await Batch.create({
+    name: "Admission Regression Batch",
+    code: "ADMISSION-REGRESSION-01",
+    plan: fixture.plan._id,
+    branch: fixture.branchA._id,
+    capacity: 5,
+    status: "ACTIVE",
+    startDate: calendarDateOffset(0),
+    calculatedEndDate: calendarDateOffset(14),
+  });
+  const feeTerm = await makeEnrollmentFeeTerm();
+  const response = await request(app).post("/api/students")
+    .set("Cookie", makeCookie(fixture.userA)).set("Origin", origin)
+    .send({
+      name: "Batch Admission Regression Student",
+      age: 18,
+      phone: "9000000991",
+      loginEmail: "batch-admission-regression@example.test",
+      branch: String(fixture.branchA._id),
+      plan: String(fixture.plan._id),
+      feeTerm: String(feeTerm._id),
+      batch: String(batch._id),
+      joinDate: calendarDateOffset(0),
+    });
+
+  assert.equal(response.status, 201, JSON.stringify(response.body));
+  assert.equal(String(response.body.student.planEnrollments[0].batch), String(batch._id));
+  assert.equal(await Student.countDocuments({ "planEnrollments.batch": batch._id }), 1);
 });
 
 test("reset token is single use; invalid and expired tokens are rejected", async () => {
@@ -623,6 +1045,40 @@ test("startup repairs inactive required system modules such as Reports", async (
   const reports = await Module.findOne({ key: "reports" }).lean();
   assert.equal(reports.isActive, true);
   assert.equal(reports.isSystem, true);
+
+  const progress = await Module.find({ key: "progress", href: "/progress" }).lean();
+  assert.equal(progress.length, 1);
+  assert.equal(progress[0].requiredPermission, "student.view");
+  const grading = await Module.findOne({ key: "grading", href: "/grading" }).lean();
+  assert.equal(grading?.isActive, true);
+  assert.equal(grading?.requiredPermission, "grading.view");
+  const promotions = await Module.find({ key: "promotions", href: "/promotions" }).lean();
+  assert.equal(promotions.length, 1);
+  assert.equal(promotions[0].requiredPermission, "promotion.view");
+
+  const branchAdminRole = await Role.create({
+    key: "BRANCH_ADMIN",
+    name: "Branch Admin",
+    dataScope: "BRANCH",
+    permissions: ["student.view", "training_session_type.view", "promotion.view"],
+  });
+  const branchAdmin = await createUser({ role: branchAdminRole.key, branch: fixture.branchA._id });
+  const navigation = await request(app)
+    .get("/api/modules/navigation")
+    .set("Cookie", makeCookie(branchAdmin));
+  assert.equal(navigation.status, 200);
+  assert.equal(navigation.body.modules.filter((module) => module.key === "progress").length, 1);
+  assert.equal(navigation.body.modules.filter((module) => module.key === "promotions").length, 1);
+  assert.equal(navigation.body.modules.find((module) => module.key === "training-session-types")?.href, "/training-session-types");
+
+  const progressDetail = await request(app)
+    .get(`/api/progress/student/${fixture.studentA._id}`)
+    .set("Cookie", makeCookie(branchAdmin));
+  assert.equal(progressDetail.status, 200, JSON.stringify(progressDetail.body));
+  const crossBranchProgress = await request(app)
+    .get(`/api/progress/student/${fixture.studentB._id}`)
+    .set("Cookie", makeCookie(branchAdmin));
+  assert.equal(crossBranchProgress.status, 403);
 });
 
 test("attendance uniqueness index rejects duplicate student/calendar-date records across sessions", async () => {
@@ -791,7 +1247,7 @@ test("attendance undo rejects completed makeup recovery and linked performance h
   assert.equal(rejected.body.code, "ATTENDANCE_HAS_PERFORMANCE");
 });
 
-test("ABSENT always creates one exact curriculum snapshot and advances regular progression even when makeupRequired is false", async () => {
+test("ABSENT creates one exact curriculum snapshot but does not advance attended progression", async () => {
   const { slotA, curriculum } = await configureAttendanceFixture();
   const response = await request(app).post("/api/attendance").set("Cookie", makeCookie(fixture.userA)).set("Origin", origin).send({
     student: String(fixture.studentA._id), date: "2026-10-03", status: "ABSENT", makeupRequired: false, sessionSlotId: slotA,
@@ -801,19 +1257,19 @@ test("ABSENT always creates one exact curriculum snapshot and advances regular p
   assert.equal(response.body.attendance.planDay, 1);
   assert.equal(response.body.makeup.planDay, 1);
   assert.equal(response.body.makeup.curriculumTitle, curriculum[0].title);
-  assert.equal(response.body.progression.nextDay, 2);
+  assert.equal(response.body.progression.nextDay, 1);
   assert.equal(await Makeup.countDocuments({ originalAttendance: response.body.attendance._id }), 1);
 });
 
-test("an unresolved absence does not block the next regular curriculum day", async () => {
+test("an unresolved absence leaves the learning day outstanding until the student attends", async () => {
   const { slotA, slotB } = await configureAttendanceFixture();
   const cookie = makeCookie(fixture.userA);
   const absent = await markRequest(cookie, fixture.studentA, "2026-10-02", "ABSENT", slotA);
   assert.equal(absent.status, 201, JSON.stringify(absent.body));
   const nextDay = await markRequest(cookie, fixture.studentA, "2026-10-03", "PRESENT", slotB);
   assert.equal(nextDay.status, 201, JSON.stringify(nextDay.body));
-  assert.equal(nextDay.body.attendance.planDay, 2);
-  assert.equal(nextDay.body.progression.nextDay, 3);
+  assert.equal(nextDay.body.attendance.planDay, 1);
+  assert.equal(nextDay.body.progression.nextDay, 2);
 });
 
 test("a later makeup completion keeps its original lesson snapshot and does not alter regular progression", async () => {
@@ -828,7 +1284,7 @@ test("a later makeup completion keeps its original lesson snapshot and does not 
   const before = require("../../src/services/programProgress.service");
   const curriculum = fixture.plan.programs[0].curriculum;
   const progressBefore = await before.getProgramLearningProgress({ studentId: fixture.studentA._id, programId: absent.body.attendance.sessionTypeId, curriculum, asOfDate: "2026-10-05" });
-  assert.equal(progressBefore.currentTrainingDay, 5);
+  assert.equal(progressBefore.currentTrainingDay, 4);
 
   const scheduled = await request(app).put(`/api/makeups/${absent.body.makeup._id}/schedule`)
     .set("Cookie", cookie).set("Origin", origin).send({ makeupDate: calendarDateOffset(), sessionSlotId: slotB });
@@ -841,7 +1297,7 @@ test("a later makeup completion keeps its original lesson snapshot and does not 
   assert.equal(await Notification.countDocuments({ recipient: fixture.userA._id, type: "MAKEUP_SCHEDULED" }), 1);
   assert.equal(await Notification.countDocuments({ recipient: fixture.userA._id, type: "MAKEUP_COMPLETED" }), 1);
   const progressAfter = await before.getProgramLearningProgress({ studentId: fixture.studentA._id, programId: absent.body.attendance.sessionTypeId, curriculum, asOfDate: "2026-10-05" });
-  assert.equal(progressAfter.currentTrainingDay, 5);
+  assert.equal(progressAfter.currentTrainingDay, 4);
   assert.equal(await Attendance.countDocuments({ student: fixture.studentA._id, attendanceType: "MAKEUP" }), 1);
 });
 
@@ -906,7 +1362,7 @@ test("manual makeup recovery snapshots the original absence, not the student's l
     studentId: fixture.studentA._id, programId: fixture.plan.programs[0].program,
     enrollmentId: fixture.studentA.planEnrollments[0]._id, curriculum: fixture.plan.programs[0].curriculum, asOfDate: "2026-10-05",
   });
-  assert.equal(progress.currentTrainingDay, 5);
+  assert.equal(progress.currentTrainingDay, 1, "a later Present record does not skip the earlier absent step");
 });
 
 test("holiday and closed branch days create no regular attendance, makeup, or progression", async () => {
@@ -1074,37 +1530,555 @@ async function makeFinanceInvoice(user = fixture.userA, student = fixture.studen
   });
 }
 
-test("fee plan settings update existing plan pricing and keep new enrollment billing snapshots stable", async () => {
-  const root = await createUser({ role: "SUPER_ADMIN", branch: null, email: "finance-root@example.test" });
-  const update = await request(app).put(`/api/finance/plans/${fixture.plan._id}`).set("Cookie", makeCookie(root)).set("Origin", origin).send({
-    feeName: "Karate monthly tuition", price: 500, billingFrequency: "MONTHLY", registrationFee: 25, taxRate: 5,
-    feeBranch: String(fixture.branchA._id), discountRules: [{ name: "Family discount", type: "PERCENT", amount: 10, active: true }], reason: "Annual fee schedule approved",
-  });
+function fixtureBillingSnapshot(overrides = {}) {
+  return {
+    feeTerm: fixture.feeTerm._id,
+    feeTermVersion: fixture.feeTerm.version,
+    planName: fixture.plan.name,
+    branch: fixture.branchA._id,
+    branchName: fixture.branchA.name,
+    amount: 100,
+    billingFrequency: "MONTHLY",
+    registrationFee: 20,
+    taxRate: 10,
+    discountRules: [],
+    effectiveFrom: fixture.feeTerm.effectiveFrom,
+    effectiveUntil: fixture.feeTerm.effectiveUntil,
+    ...overrides,
+  };
+}
+
+test("public inquiry plan catalog exposes plan identity without legacy Plan pricing", async () => {
+  const response = await request(app).get("/api/plans/public");
+  assert.equal(response.status, 200, response.body.message);
+  const plan = response.body.plans.find((item) => String(item._id) === String(fixture.plan._id));
+  assert.ok(plan);
+  assert.equal(plan.name, fixture.plan.name);
+  assert.equal(plan.price, undefined);
+});
+
+test("legacy Plan milestones remain readable but Plan updates cannot create or replace them", async () => {
+  const root = await createUser({ role: "SUPER_ADMIN", branch: null, email: "legacy-plan-milestones@example.test" });
+  const legacy = [{ day: 8, belt: "Green", skill: "Legacy skill", description: "Preserved historical configuration" }];
+  fixture.plan.milestones = legacy;
+  await fixture.plan.save();
+
+  const read = await request(app).get(`/api/plans/${fixture.plan._id}`).set("Cookie", makeCookie(root));
+  assert.equal(read.status, 200);
+  assert.equal(read.body.plan.milestones[0].belt, "Green");
+
+  const update = await request(app).put(`/api/plans/${fixture.plan._id}`).set("Cookie", makeCookie(root)).set("Origin", origin).send({ name: "Updated plan", milestones: [{ day: 1, belt: "Yellow" }] });
   assert.equal(update.status, 200, update.body.message);
-  assert.equal((await Plan.findById(fixture.plan._id)).price, 500);
-  assert.equal(await FinanceAudit.countDocuments({ action: "FEE_PLAN_UPDATED", branch: fixture.branchA._id }), 1);
+  const saved = await Plan.findById(fixture.plan._id).lean();
+  assert.equal(saved.name, "Updated plan");
+  assert.deepEqual(saved.milestones.map((item) => ({ day: item.day, belt: item.belt, skill: item.skill, description: item.description })), legacy);
+});
+
+test("legacy Plan pricing APIs are removed and Plan rejects pricing fields", async () => {
+  const root = await createUser({ role: "SUPER_ADMIN", branch: null, email: "finance-root@example.test" });
+  const removedList = await request(app).get("/api/finance/plans").set("Cookie", makeCookie(root));
+  assert.equal(removedList.status, 404);
+  const removedUpdate = await request(app).put(`/api/finance/plans/${fixture.plan._id}`).set("Cookie", makeCookie(root)).set("Origin", origin).send({ price: 500 });
+  assert.equal(removedUpdate.status, 404);
+  const rejectedPlanPrice = await request(app).put(`/api/plans/${fixture.plan._id}`).set("Cookie", makeCookie(root)).set("Origin", origin).send({ price: 500 });
+  assert.equal(rejectedPlanPrice.status, 400);
+  assert.equal((await Plan.findById(fixture.plan._id)).price, undefined);
 
   const invoice = await makeFinanceInvoice();
   assert.equal(invoice.status, 201, invoice.body.message);
   assert.equal(invoice.body.invoice.total, 132, "The enrollment's immutable amount and tax snapshot apply to its invoice");
-  assert.equal(invoice.body.invoice.items[0].description, "Basic Monthly Fees");
+  assert.equal(invoice.body.invoice.items[0].description, "Basic Plan");
 });
 
-test("branch admins can manage only their branch fee override and inactive fees block invoicing", async () => {
-  const update = await request(app).put(`/api/finance/plans/${fixture.plan._id}/branch-fees`).set("Cookie", makeCookie(fixture.userA)).set("Origin", origin).send({ branchId: String(fixture.branchA._id), amount: 220, feeName: "Branch A tuition", billingFrequency: "MONTHLY" });
-  assert.equal(update.status, 200, update.body.message);
-  assert.equal(update.body.branchFee.amount, 220);
-  const forbidden = await request(app).put(`/api/finance/plans/${fixture.plan._id}/branch-fees`).set("Cookie", makeCookie(fixture.userA)).set("Origin", origin).send({ branchId: String(fixture.branchB._id), amount: 330 });
-  assert.equal(forbidden.status, 403);
-  const branchAPlans = await request(app).get("/api/finance/plans").set("Cookie", makeCookie(fixture.userA));
-  const branchBPlans = await request(app).get("/api/finance/plans").set("Cookie", makeCookie(fixture.userB));
-  assert.equal(branchAPlans.body.plans.find((item) => String(item._id) === String(fixture.plan._id)).effectiveFee.amount, 220);
-  assert.equal(branchBPlans.body.plans.find((item) => String(item._id) === String(fixture.plan._id)).effectiveFee.amount, fixture.plan.price);
-  const inactive = await request(app).put(`/api/finance/plans/${fixture.plan._id}/branch-fees`).set("Cookie", makeCookie(fixture.userA)).set("Origin", origin).send({ branchId: String(fixture.branchA._id), active: false });
-  assert.equal(inactive.status, 200);
+test("Plan renames preserve frozen enrollment and financial history", async () => {
+  const root = await createUser({ role: "SUPER_ADMIN", branch: null, email: "plan-rename-root@example.test" });
+  const originalInvoice = await makeFinanceInvoice(fixture.userA, fixture.studentA);
+  assert.equal(originalInvoice.status, 201, originalInvoice.body.message);
+  const originalPayment = await request(app)
+    .post(`/api/finance/invoices/${originalInvoice.body.invoice._id}/payments`)
+    .set("Cookie", makeCookie(fixture.userA))
+    .set("Origin", origin)
+    .set("Idempotency-Key", "plan-rename-history-payment-001")
+    .send({ amount: 50, method: "CASH" });
+  assert.equal(originalPayment.status, 201, originalPayment.body.message);
+
+  const beforeStudent = await Student.findById(fixture.studentA._id).lean();
+  const beforeInvoice = await Invoice.findById(originalInvoice.body.invoice._id).lean();
+  const beforePayment = await Payment.findById(originalPayment.body.payment._id).lean();
+  const beforeReceipt = await Receipt.findById(originalPayment.body.receipt._id).lean();
+  const beforeHistory = JSON.parse(JSON.stringify({
+    billingSnapshot: beforeStudent.planEnrollments[0].billingSnapshot,
+    items: beforeInvoice.items,
+    subtotal: beforeInvoice.subtotal,
+    discount: beforeInvoice.discount,
+    tax: beforeInvoice.tax,
+    total: beforeInvoice.total,
+    paymentAmount: beforePayment.amount,
+    paymentReference: beforePayment.referenceId,
+    receiptNumber: beforeReceipt.receiptNumber,
+    receiptAmount: beforeReceipt.amount,
+    receiptInvoiceNumber: beforeReceipt.invoiceNumber,
+  }));
+
+  const renamed = await request(app)
+    .put(`/api/plans/${fixture.plan._id}`)
+    .set("Cookie", makeCookie(root))
+    .set("Origin", origin)
+    .send({ name: "Advanced Karate" });
+  assert.equal(renamed.status, 200, renamed.body.message);
+
+  const planOptions = await request(app)
+    .get("/api/finance/plan-options")
+    .set("Cookie", makeCookie(fixture.userA));
+  assert.equal(planOptions.status, 200, planOptions.body.message);
+  const currentPlan = planOptions.body.plans.find((item) => String(item._id) === String(fixture.plan._id));
+  assert.equal(currentPlan.name, "Advanced Karate");
+  assert.equal(currentPlan.price, undefined);
+
+  const currentStudent = await request(app)
+    .get(`/api/students/${fixture.studentA._id}`)
+    .set("Cookie", makeCookie(root));
+  assert.equal(currentStudent.status, 200, currentStudent.body.message);
+  assert.equal(currentStudent.body.student.plan.name, "Advanced Karate");
+
+  const memberships = await request(app)
+    .get("/api/enrollments/dashboard")
+    .set("Cookie", makeCookie(root));
+  assert.equal(memberships.status, 200, memberships.body.message);
+  assert.equal(
+    memberships.body.memberships.find((item) => String(item.student._id) === String(fixture.studentA._id)).planName,
+    "Advanced Karate",
+  );
+
+  const afterStudent = await Student.findById(fixture.studentA._id).lean();
+  const afterInvoice = await Invoice.findById(originalInvoice.body.invoice._id).lean();
+  const afterPayment = await Payment.findById(originalPayment.body.payment._id).lean();
+  const afterReceipt = await Receipt.findById(originalPayment.body.receipt._id).lean();
+  const afterHistory = JSON.parse(JSON.stringify({
+    billingSnapshot: afterStudent.planEnrollments[0].billingSnapshot,
+    items: afterInvoice.items,
+    subtotal: afterInvoice.subtotal,
+    discount: afterInvoice.discount,
+    tax: afterInvoice.tax,
+    total: afterInvoice.total,
+    paymentAmount: afterPayment.amount,
+    paymentReference: afterPayment.referenceId,
+    receiptNumber: afterReceipt.receiptNumber,
+    receiptAmount: afterReceipt.amount,
+    receiptInvoiceNumber: afterReceipt.invoiceNumber,
+  }));
+  assert.deepEqual(afterHistory, beforeHistory);
+
+  const newStudent = await createStudent({
+    name: "Amit After Rename",
+    phone: "9000000099",
+    branch: fixture.branchA._id,
+  });
+  const newEnrollment = await request(app)
+    .post(`/api/enrollments/students/${newStudent._id}`)
+    .set("Cookie", makeCookie(root))
+    .set("Origin", origin)
+    .send({
+      plan: String(fixture.plan._id),
+      branch: String(fixture.branchA._id),
+      feeTerm: String((await makeEnrollmentFeeTerm(fixture.branchA, { amount: 4000, billingFrequency: "ONE_TIME", registrationFee: 1000, taxRate: 18 }))._id),
+      startDate: calendarDateOffset(0),
+      createInvoice: true,
+    });
+  assert.equal(newEnrollment.status, 201, newEnrollment.body.message);
+  assert.equal(newEnrollment.body.enrollment.billingSnapshot.planName, "Advanced Karate");
+  assert.equal(newEnrollment.body.enrollment.billingSnapshot.amount, 4000);
+  assert.equal(newEnrollment.body.invoice.items[0].description, "Advanced Karate");
+  assert.equal(newEnrollment.body.invoice.total, 5900);
+});
+
+test("FeeTerms support scoped frequencies, effective versions, availability, and finance authorization", async () => {
+  const branchACookie = makeCookie(fixture.userA);
+  const branchBCookie = makeCookie(fixture.userB);
+  const create = (cookie, values) => request(app)
+    .post(`/api/finance/plans/${fixture.plan._id}/fee-terms`)
+    .set("Cookie", cookie)
+    .set("Origin", origin)
+    .send(values);
+  const branchATerm = {
+    branch: String(fixture.branchA._id),
+    billingFrequency: "MONTHLY",
+    amount: 1200,
+    registrationFee: 500,
+    taxRate: 18,
+    discountRules: [{ name: "Sibling", type: "PERCENT", amount: 10, active: true }],
+    effectiveFrom: "2027-10-01",
+    effectiveUntil: "2027-12-31",
+  };
+
+  const independentName = await create(branchACookie, { ...branchATerm, feeName: "Independent label" });
+  assert.equal(independentName.status, 400);
+
+  const monthly = await create(branchACookie, branchATerm);
+  assert.equal(monthly.status, 201, monthly.body.message);
+  assert.equal(String(monthly.body.feeTerm.plan._id), String(fixture.plan._id));
+  assert.equal(monthly.body.feeTerm.plan.name, "Basic Plan");
+  assert.equal(monthly.body.feeTerm.planName, undefined);
+  assert.equal(monthly.body.feeTerm.version, 1);
+  const feeTermIndexes = await FeeTerm.collection.indexes();
+  assert.ok(feeTermIndexes.some((index) => index.name === "uniq_fee_term_scope_start" && index.unique));
+  assert.ok(feeTermIndexes.some((index) => index.name === "fee_term_branch_status_dates"));
+
+  const quarterly = await create(branchACookie, {
+    ...branchATerm,
+    billingFrequency: "QUARTERLY",
+    amount: 3300,
+  });
+  assert.equal(quarterly.status, 201, quarterly.body.message);
+
+  const branchBMonthly = await create(branchBCookie, {
+    ...branchATerm,
+    branch: String(fixture.branchB._id),
+    amount: 1000,
+  });
+  assert.equal(branchBMonthly.status, 201, branchBMonthly.body.message);
+
+  const sequential = await create(branchACookie, {
+    ...branchATerm,
+    amount: 1400,
+    effectiveFrom: "2028-01-01",
+    effectiveUntil: "2028-03-31",
+  });
+  assert.equal(sequential.status, 201, sequential.body.message);
+  assert.equal(sequential.body.feeTerm.version, 2);
+
+  const overlap = await create(branchACookie, {
+    ...branchATerm,
+    amount: 1300,
+    effectiveFrom: "2027-12-01",
+    effectiveUntil: "2028-01-31",
+  });
+  assert.equal(overlap.status, 409);
+  assert.match(overlap.body.message, /overlap/i);
+
+  const duplicateStart = await create(branchACookie, { ...branchATerm, amount: 1250 });
+  assert.equal(duplicateStart.status, 409);
+
+  const concurrentTerms = await Promise.all([
+    create(branchBCookie, {
+      ...branchATerm,
+      branch: String(fixture.branchB._id),
+      billingFrequency: "ONE_TIME",
+      amount: 4000,
+      effectiveFrom: "2035-01-01",
+      effectiveUntil: null,
+    }),
+    create(branchBCookie, {
+      ...branchATerm,
+      branch: String(fixture.branchB._id),
+      billingFrequency: "ONE_TIME",
+      amount: 4200,
+      effectiveFrom: "2035-02-01",
+      effectiveUntil: null,
+    }),
+  ]);
+  assert.deepEqual(concurrentTerms.map((response) => response.status).sort(), [201, 409]);
+
+  const future = await create(branchACookie, {
+    ...branchATerm,
+    billingFrequency: "ONE_TIME",
+    amount: 4000,
+    effectiveFrom: "2030-01-01",
+    effectiveUntil: null,
+  });
+  assert.equal(future.status, 201, future.body.message);
+
+  const expired = await create(branchACookie, {
+    ...branchATerm,
+    billingFrequency: "YEARLY",
+    amount: 9000,
+    effectiveFrom: "2025-01-01",
+    effectiveUntil: "2025-12-31",
+  });
+  assert.equal(expired.status, 201, expired.body.message);
+
+  const list = await request(app)
+    .get(`/api/finance/plans/${fixture.plan._id}/fee-terms`)
+    .set("Cookie", branchACookie);
+  assert.equal(list.status, 200, list.body.message);
+  assert.equal(list.body.feeTerms.length, 6);
+  assert.ok(list.body.feeTerms.every((term) => !term.branch || String(term.branch?._id || term.branch) === String(fixture.branchA._id)));
+
+  const scopedList = await request(app).get("/api/finance/fee-terms").set("Cookie", branchACookie);
+  assert.equal(scopedList.status, 200);
+  assert.ok(scopedList.body.feeTerms.every((term) => !term.branch || String(term.branch._id || term.branch) === String(fixture.branchA._id)));
+  assert.equal((await request(app).get(`/api/finance/fee-terms?branchId=${fixture.branchB._id}`).set("Cookie", branchACookie)).status, 403);
+  const filteredTerms = await request(app)
+    .get(`/api/finance/fee-terms?planId=${fixture.plan._id}&branchId=${fixture.branchA._id}&billingFrequency=MONTHLY&status=ACTIVE&asOf=2027-11-01`)
+    .set("Cookie", branchACookie);
+  assert.equal(filteredTerms.status, 200);
+  assert.equal(filteredTerms.body.feeTerms.length, 1);
+  assert.equal(filteredTerms.body.feeTerms[0].billingFrequency, "MONTHLY");
+
+  const available = await request(app)
+    .get(`/api/finance/fee-terms/available?planId=${fixture.plan._id}&branchId=${fixture.branchA._id}&asOf=2027-11-01`)
+    .set("Cookie", branchACookie);
+  assert.equal(available.status, 200, available.body.message);
+  assert.deepEqual(available.body.feeTerms.map((term) => term.billingFrequency).sort(), ["MONTHLY", "QUARTERLY"]);
+  assert.ok(available.body.feeTerms.every((term) => term.plan.name === "Basic Plan"));
+  assert.equal(available.body.availability.applicableCount, 2);
+
+  const beforeFuture = await request(app)
+    .get(`/api/finance/fee-terms/available?planId=${fixture.plan._id}&branchId=${fixture.branchA._id}&asOf=2029-12-31`)
+    .set("Cookie", branchACookie);
+  assert.equal(beforeFuture.status, 200);
+  assert.ok(beforeFuture.body.availability.notYetEffectiveCount > 0);
+  assert.ok(beforeFuture.body.availability.expiredCount > 0);
+  assert.ok(!beforeFuture.body.feeTerms.some((term) => String(term._id) === String(future.body.feeTerm._id)));
+  assert.ok(!beforeFuture.body.feeTerms.some((term) => String(term._id) === String(expired.body.feeTerm._id)));
+
+  const retired = await request(app)
+    .patch(`/api/finance/fee-terms/${quarterly.body.feeTerm._id}`)
+    .set("Cookie", branchACookie)
+    .set("Origin", origin)
+    .send({ status: "RETIRED", reason: "Quarterly product withdrawn" });
+  assert.equal(retired.status, 200, retired.body.message);
+  const afterRetirement = await request(app)
+    .get(`/api/finance/fee-terms/available?planId=${fixture.plan._id}&branchId=${fixture.branchA._id}&asOf=2027-11-01`)
+    .set("Cookie", branchACookie);
+  assert.equal(afterRetirement.status, 200);
+  assert.deepEqual(afterRetirement.body.feeTerms.map((term) => term.billingFrequency), ["MONTHLY"]);
+  assert.ok(afterRetirement.body.availability.inactiveCount > 0);
+
+  const yearly = await create(branchACookie, {
+    ...branchATerm,
+    billingFrequency: "YEARLY",
+    amount: 12000,
+    effectiveFrom: "2027-01-01",
+    effectiveUntil: null,
+  });
+  assert.equal(yearly.status, 201, yearly.body.message);
+  const successor = await request(app)
+    .post(`/api/finance/fee-terms/${yearly.body.feeTerm._id}/supersede`)
+    .set("Cookie", branchACookie)
+    .set("Origin", origin)
+    .send({
+      amount: 13200,
+      registrationFee: 500,
+      taxRate: 18,
+      effectiveFrom: "2028-01-01",
+      effectiveUntil: null,
+      reason: "Annual rate revision",
+    });
+  assert.equal(successor.status, 201, successor.body.message);
+  assert.equal(successor.body.previous.status, "RETIRED");
+  assert.equal(new Date(successor.body.previous.effectiveUntil).toISOString().slice(0, 10), "2027-12-31");
+  assert.equal(successor.body.feeTerm.version, yearly.body.feeTerm.version + 1);
+  assert.equal(String(successor.body.feeTerm.supersedes), String(yearly.body.feeTerm._id));
+
+  const crossBranchUpdate = await request(app)
+    .patch(`/api/finance/fee-terms/${branchBMonthly.body.feeTerm._id}`)
+    .set("Cookie", branchACookie)
+    .set("Origin", origin)
+    .send({ amount: 1100 });
+  assert.equal(crossBranchUpdate.status, 404);
+
+  const financeViewRole = await Role.create({ key: "FEE_TERM_VIEW", name: "Fee term viewer", dataScope: "BRANCH", permissions: ["finance.view"] });
+  const financeViewer = await createUser({ role: financeViewRole.key, email: "fee-term-view@example.test" });
+  assert.equal((await request(app).get(`/api/finance/plans/${fixture.plan._id}/fee-terms`).set("Cookie", makeCookie(financeViewer))).status, 200);
+  assert.equal((await request(app).get("/api/finance/fee-terms").set("Cookie", makeCookie(financeViewer))).status, 200);
+  assert.equal((await create(makeCookie(financeViewer), { ...branchATerm, effectiveFrom: "2031-01-01" })).status, 403);
+
+  const membershipRole = await Role.create({ key: "FEE_TERM_MEMBERSHIP", name: "Fee term membership", dataScope: "BRANCH", permissions: ["membership.manage"] });
+  const membershipManager = await createUser({ role: membershipRole.key, email: "fee-term-membership@example.test" });
+  assert.equal((await request(app).get(`/api/finance/fee-terms/available?planId=${fixture.plan._id}&branchId=${fixture.branchA._id}&asOf=2027-11-01`).set("Cookie", makeCookie(membershipManager))).status, 200);
+
+  assert.equal(await FinanceAudit.countDocuments({ action: "FEE_TERM_CREATED" }), 8);
+  assert.equal(await FinanceAudit.countDocuments({ action: "FEE_TERM_RETIRED" }), 1);
+  assert.equal(await FinanceAudit.countDocuments({ action: "FEE_TERM_SUPERSEDED" }), 1);
+
+  const planAfter = await Plan.findById(fixture.plan._id).lean();
+  for (const field of ["price", "billingFrequency", "registrationFee", "taxRate", "feeName", "branchFeeOverrides"]) {
+    assert.equal(Object.hasOwn(planAfter, field), false);
+  }
+  assert.equal(await FeeTerm.countDocuments({ plan: fixture.plan._id }), 10);
+});
+
+test("FeeTerms allow zero tuition amounts while rejecting negative financial values", async () => {
+  const cookie = makeCookie(fixture.userA);
+  const valid = await request(app)
+    .post(`/api/finance/plans/${fixture.plan._id}/fee-terms`)
+    .set("Cookie", cookie)
+    .set("Origin", origin)
+    .send({ branch: String(fixture.branchA._id), billingFrequency: "ONE_TIME", amount: 0, registrationFee: 0, taxRate: 0, effectiveFrom: "2040-01-01" });
+  assert.equal(valid.status, 201, valid.body.message);
+  assert.equal(valid.body.feeTerm.amount, 0);
+
+  const invalid = await request(app)
+    .post(`/api/finance/plans/${fixture.plan._id}/fee-terms`)
+    .set("Cookie", cookie)
+    .set("Origin", origin)
+    .send({ branch: String(fixture.branchA._id), billingFrequency: "MONTHLY", amount: -1, registrationFee: 0, taxRate: 0, effectiveFrom: "2040-01-01" });
+  assert.equal(invalid.status, 400);
+});
+
+test("legacy branch override API is removed and billing requires the saved agreement", async () => {
+  const removed = await request(app).put(`/api/finance/plans/${fixture.plan._id}/branch-fees`).set("Cookie", makeCookie(fixture.userA)).set("Origin", origin).send({ branchId: String(fixture.branchA._id), amount: 220 });
+  assert.equal(removed.status, 404);
   const made = await makeFinanceInvoice(fixture.userA, fixture.studentA);
-  assert.equal(made.status, 409);
-  assert.match(made.body.message, /inactive/i);
+  assert.equal(made.status, 201, made.body.message);
+  assert.equal(made.body.invoice.total, 132, "an existing enrollment's captured fee remains billable");
+
+  const legacyStudent = await createStudent({ name: "Legacy Unfrozen Enrollment" });
+  legacyStudent.planEnrollments = [{ plan: fixture.plan._id, branch: fixture.branchA._id, startDate: new Date("2026-01-01T00:00:00.000Z"), status: "ACTIVE" }];
+  await legacyStudent.save();
+  const legacyInvoice = await makeFinanceInvoice(fixture.userA, legacyStudent);
+  assert.equal(legacyInvoice.status, 409, "an enrollment without a frozen snapshot cannot use Plan pricing");
+  assert.match(legacyInvoice.body.message, /no valid FeeTerm billing agreement/i);
+});
+
+test("invoice creation recognizes zero-valued frozen FeeTerm agreements and rejects missing agreements", async () => {
+  const cookie = makeCookie(fixture.userA);
+  const makeAgreedStudent = async (feeTerm, amount, registrationFee, billingFrequency) => {
+    const student = await createStudent({ name: `Frozen zero-safe ${billingFrequency}` });
+    student.planEnrollments = [{
+      plan: fixture.plan._id,
+      feeTerm: feeTerm._id,
+      branch: fixture.branchA._id,
+      startDate: new Date(`${calendarDateOffset(-30)}T00:00:00.000Z`),
+      status: "ACTIVE",
+      billingSnapshot: {
+        feeTerm: feeTerm._id,
+        feeTermVersion: feeTerm.version,
+        planName: fixture.plan.name,
+        branch: fixture.branchA._id,
+        effectiveFrom: feeTerm.effectiveFrom,
+        effectiveUntil: feeTerm.effectiveUntil,
+        amount,
+        billingFrequency,
+        registrationFee,
+        taxRate: 0,
+      },
+    }];
+    await student.save();
+    return student;
+  };
+
+  const registrationOnlyTerm = await makeEnrollmentFeeTerm(fixture.branchA, { amount: 0, registrationFee: 25, taxRate: 0, billingFrequency: "MONTHLY" });
+  const registrationOnlyStudent = await makeAgreedStudent(registrationOnlyTerm, 0, 25, "MONTHLY");
+  const registrationOnlyInvoice = await makeFinanceInvoice(fixture.userA, registrationOnlyStudent);
+  assert.equal(registrationOnlyInvoice.status, 201, registrationOnlyInvoice.body.message);
+  assert.equal(registrationOnlyInvoice.body.invoice.total, 25);
+  assert.equal(registrationOnlyInvoice.body.invoice.items[0].unitAmount, 0);
+  assert.equal(String(registrationOnlyInvoice.body.invoice.feeTerm), String(registrationOnlyTerm._id));
+
+  const tuitionTerm = await makeEnrollmentFeeTerm(fixture.branchA, { amount: 80, registrationFee: 0, taxRate: 0, billingFrequency: "QUARTERLY" });
+  const tuitionStudent = await makeAgreedStudent(tuitionTerm, 80, 0, "QUARTERLY");
+  const tuitionInvoice = await makeFinanceInvoice(fixture.userA, tuitionStudent);
+  assert.equal(tuitionInvoice.status, 201, tuitionInvoice.body.message);
+  assert.equal(tuitionInvoice.body.invoice.total, 80);
+  assert.equal(tuitionInvoice.body.invoice.feeTerm, String(tuitionTerm._id));
+
+  const zeroTerm = await makeEnrollmentFeeTerm(fixture.branchA, { amount: 0, registrationFee: 0, taxRate: 0, billingFrequency: "YEARLY" });
+  const zeroStudent = await makeAgreedStudent(zeroTerm, 0, 0, "YEARLY");
+  const zeroInvoice = await makeFinanceInvoice(fixture.userA, zeroStudent);
+  assert.equal(zeroInvoice.status, 400);
+  assert.match(zeroInvoice.body.message, /no billable amount/i);
+  assert.equal(await Invoice.countDocuments({ student: zeroStudent._id }), 0, "the Plan price must not be substituted for a zero-value frozen agreement");
+
+  const legacyStudent = await createStudent({ name: "Missing FeeTerm Agreement" });
+  legacyStudent.planEnrollments = [{ plan: fixture.plan._id, branch: fixture.branchA._id, startDate: new Date(`${calendarDateOffset(-30)}T00:00:00.000Z`), status: "ACTIVE" }];
+  await legacyStudent.save();
+  const legacyInvoice = await makeFinanceInvoice(fixture.userA, legacyStudent);
+  assert.equal(legacyInvoice.status, 409, legacyInvoice.body.message);
+  assert.equal(await Invoice.countDocuments({ student: legacyStudent._id }), 0);
+});
+
+test("new enrollments require a valid FeeTerm and freeze its complete agreement without trusting client prices", async () => {
+  const valid = await makeEnrollmentFeeTerm(fixture.branchA, {
+    amount: 1250,
+    registrationFee: 150,
+    taxRate: 5,
+    billingFrequency: "QUARTERLY",
+    discountRules: [{ name: "Family", type: "PERCENT", amount: 10, active: true }],
+  });
+  const student = await createStudent({ name: "Fee Term Enrollment" });
+  const cookie = makeCookie(fixture.userA);
+  const base = {
+    plan: String(fixture.plan._id),
+    branch: String(fixture.branchA._id),
+    feeTerm: String(valid._id),
+    startDate: calendarDateOffset(0),
+  };
+
+  const wrongPlan = await Plan.create({ name: "Different Plan", price: 999, duration: 1 });
+  const wrongPlanAttempt = await request(app).post(`/api/enrollments/students/${student._id}`).set("Cookie", cookie).set("Origin", origin).send({ ...base, plan: String(wrongPlan._id) });
+  assert.equal(wrongPlanAttempt.status, 400);
+  assert.match(wrongPlanAttempt.body.message, /does not belong/i);
+
+  const otherBranchTerm = await makeEnrollmentFeeTerm(fixture.branchB, { billingFrequency: "YEARLY" });
+  const wrongBranchAttempt = await request(app).post(`/api/enrollments/students/${student._id}`).set("Cookie", cookie).set("Origin", origin).send({ ...base, feeTerm: String(otherBranchTerm._id) });
+  assert.equal(wrongBranchAttempt.status, 400);
+
+  const expired = await makeEnrollmentFeeTerm(fixture.branchA, { billingFrequency: "ONE_TIME", effectiveFrom: new Date("2020-01-01T00:00:00.000Z"), effectiveUntil: new Date("2020-12-31T00:00:00.000Z") });
+  const expiredAttempt = await request(app).post(`/api/enrollments/students/${student._id}`).set("Cookie", cookie).set("Origin", origin).send({ ...base, feeTerm: String(expired._id) });
+  assert.equal(expiredAttempt.status, 400);
+  assert.match(expiredAttempt.body.message, /expired/i);
+
+  const future = await makeEnrollmentFeeTerm(fixture.branchA, { billingFrequency: "YEARLY", effectiveFrom: new Date("2035-01-01T00:00:00.000Z") });
+  const futureAttempt = await request(app).post(`/api/enrollments/students/${student._id}`).set("Cookie", cookie).set("Origin", origin).send({ ...base, feeTerm: String(future._id) });
+  assert.equal(futureAttempt.status, 400);
+  assert.match(futureAttempt.body.message, /not effective/i);
+
+  const retired = await makeEnrollmentFeeTerm(fixture.branchA, { billingFrequency: "ONE_TIME", effectiveFrom: new Date("2021-01-01T00:00:00.000Z"), status: "RETIRED" });
+  const retiredAttempt = await request(app).post(`/api/enrollments/students/${student._id}`).set("Cookie", cookie).set("Origin", origin).send({ ...base, feeTerm: String(retired._id) });
+  assert.equal(retiredAttempt.status, 400);
+  assert.match(retiredAttempt.body.message, /not active/i);
+
+  const enrolled = await request(app).post(`/api/enrollments/students/${student._id}`).set("Cookie", cookie).set("Origin", origin).send({ ...base, amount: 1, registrationFee: 0, taxRate: 0, billingFrequency: "MONTHLY" });
+  assert.equal(enrolled.status, 201, enrolled.body.message);
+  const agreement = enrolled.body.enrollment.billingSnapshot;
+  const agreementBefore = JSON.parse(JSON.stringify(agreement));
+  assert.equal(String(enrolled.body.enrollment.feeTerm), String(valid._id));
+  assert.equal(String(agreement.feeTerm), String(valid._id));
+  assert.equal(agreement.feeTermVersion, 1);
+  assert.equal(agreement.planName, fixture.plan.name);
+  assert.equal(String(agreement.branch), String(fixture.branchA._id));
+  assert.equal(agreement.billingFrequency, "QUARTERLY");
+  assert.equal(agreement.amount, 1250);
+  assert.equal(agreement.registrationFee, 150);
+  assert.equal(agreement.taxRate, 5);
+  assert.equal(agreement.discountRules[0].name, "Family");
+
+  const blockedEdit = await request(app).patch(`/api/finance/fee-terms/${valid._id}`).set("Cookie", makeCookie(fixture.userA)).set("Origin", origin).send({ amount: 9999 });
+  assert.equal(blockedEdit.status, 409);
+  const retire = await request(app).patch(`/api/finance/fee-terms/${valid._id}`).set("Cookie", makeCookie(fixture.userA)).set("Origin", origin).send({ status: "RETIRED" });
+  assert.equal(retire.status, 200);
+  const saved = await Student.findById(student._id).lean();
+  assert.deepEqual(JSON.parse(JSON.stringify(saved.planEnrollments[0].billingSnapshot)), agreementBefore);
+});
+
+test("FeeTerm currency is snapshotted through enrollment and invoice after Academy Settings changes", async () => {
+  await AcademySettings.create({ academyName: "ForceStrike Academy", currency: "AED" });
+  const cookie = makeCookie(fixture.userA);
+  const created = await request(app)
+    .post(`/api/finance/plans/${fixture.plan._id}/fee-terms`)
+    .set("Cookie", cookie)
+    .set("Origin", origin)
+    .send({ branch: String(fixture.branchA._id), billingFrequency: "ONE_TIME", amount: 1200, registrationFee: 300, taxRate: 5, effectiveFrom: "2026-01-01" });
+  assert.equal(created.status, 201, created.body.message);
+  assert.equal(created.body.feeTerm.currency, "AED");
+
+  await AcademySettings.updateOne({}, { $set: { currency: "INR" } });
+  const student = await createStudent({ name: "Currency Snapshot Student" });
+  const enrolled = await request(app)
+    .post(`/api/enrollments/students/${student._id}`)
+    .set("Cookie", cookie)
+    .set("Origin", origin)
+    .send({ plan: String(fixture.plan._id), branch: String(fixture.branchA._id), feeTerm: String(created.body.feeTerm._id), startDate: calendarDateOffset(0), createInvoice: true });
+  assert.equal(enrolled.status, 201, enrolled.body.message);
+  assert.equal(enrolled.body.enrollment.billingSnapshot.currency, "AED");
+  assert.equal(enrolled.body.invoice.currency, "AED");
+  assert.equal(enrolled.body.invoice.subtotal, 1500);
+  assert.equal(enrolled.body.invoice.tax, 75);
+  assert.equal(enrolled.body.invoice.total, 1575);
+  assert.equal(enrolled.body.enrollment.billingSnapshot.amount, 1200);
+  assert.equal(enrolled.body.enrollment.billingSnapshot.registrationFee, 300);
 });
 
 test("invoice creation includes registration fee, tax, saved discount rules, and blocks duplicate periods", async () => {
@@ -1259,7 +2233,7 @@ test("student finance profile and receipt access are limited to the linked stude
   const studentRole = await Role.create({ key: "STUDENT", name: "Student", dataScope: "BRANCH", permissions: ["student.finance.view"] });
   const account = await createUser({ role: studentRole.key, email: "student-finance@example.test" });
   const student = await createStudent({ user: account._id, name: "Linked Finance Student", branch: fixture.branchA._id, phone: "9000000099" });
-  student.planEnrollments = [{ plan: fixture.plan._id, startDate: new Date("2026-01-01T00:00:00.000Z"), status: "ACTIVE", billingSnapshot: { feeName: "Basic Monthly Fees", amount: 100, billingFrequency: "MONTHLY", registrationFee: 20, taxRate: 10 } }];
+  student.planEnrollments = [{ plan: fixture.plan._id, feeTerm: fixture.feeTerm._id, branch: fixture.branchA._id, startDate: new Date("2026-01-01T00:00:00.000Z"), status: "ACTIVE", billingSnapshot: fixtureBillingSnapshot() }];
   await student.save();
   const made = await makeFinanceInvoice(fixture.userA, student);
   const pay = await request(app).post(`/api/finance/invoices/${made.body.invoice._id}/payments`).set("Cookie", makeCookie(fixture.userA)).set("Origin", origin).set("Idempotency-Key", "finance-student-profile-pay-1").send({ amount: 10, method: "UPI" });
@@ -1278,7 +2252,7 @@ test("finance reminders are idempotent for staff and notify the linked student",
   const studentRole = await Role.create({ key: "STUDENT", name: "Student", dataScope: "BRANCH", permissions: ["student.finance.view"] });
   const account = await createUser({ role: studentRole.key, email: "reminder-student@example.test" });
   const student = await createStudent({ user: account._id, name: "Reminder Student", branch: fixture.branchA._id, phone: "9000000077" });
-  student.planEnrollments = [{ plan: fixture.plan._id, startDate: new Date("2026-01-01T00:00:00.000Z"), status: "ACTIVE", billingSnapshot: { feeName: "Basic Monthly Fees", amount: 100, billingFrequency: "MONTHLY", registrationFee: 0, taxRate: 0 } }];
+  student.planEnrollments = [{ plan: fixture.plan._id, feeTerm: fixture.feeTerm._id, branch: fixture.branchA._id, startDate: new Date("2026-01-01T00:00:00.000Z"), status: "ACTIVE", billingSnapshot: fixtureBillingSnapshot({ registrationFee: 0, taxRate: 0 }) }];
   await student.save();
   const made = await makeFinanceInvoice(fixture.userA, student, { dueDate: new Date(Date.now() - 86400000).toISOString() });
   const { refreshFinanceReminders } = require("../../src/services/financeReminder.service");
@@ -1298,6 +2272,191 @@ test("finance indexes protect invoice cycles, idempotency, receipt numbers, and 
   assert.ok(paymentIndexes.some((index) => index.name === "uniq_payment_reference" && index.unique));
   assert.ok(receiptIndexes.some((index) => index.key.receiptNumber === 1 && index.unique));
   assert.ok(auditIndexes.some((index) => index.key.branch === 1 && index.key.createdAt === -1));
+});
+
+test("Add Student can atomically issue an enrollment invoice and collect a partial payment with a receipt", async () => {
+  const term = await makeEnrollmentFeeTerm(fixture.branchA, {
+    amount: 500,
+    registrationFee: 50,
+    taxRate: 10,
+    billingFrequency: "MONTHLY",
+  });
+  const cookie = makeCookie(fixture.userA);
+  const created = await request(app).post("/api/students").set("Cookie", cookie).set("Origin", origin).send({
+    name: "Admission Invoice Student",
+    age: 17,
+    phone: "+919811223377",
+    email: "admission-invoice-student@example.test",
+    loginEmail: "admission-invoice-login@example.test",
+    branch: String(fixture.branchA._id),
+    plan: String(fixture.plan._id),
+    feeTerm: String(term._id),
+    joinDate: calendarDateOffset(0),
+    createInvoice: true,
+    invoiceDueDate: calendarDateOffset(7),
+  });
+  assert.equal(created.status, 201, created.body.message);
+  assert.ok(created.body.invoice);
+  assert.equal(created.body.invoice.total, 605);
+  assert.equal(String(created.body.invoice.student), String(created.body.student._id));
+  assert.equal(String(created.body.invoice.feeTerm), String(term._id));
+  assert.equal(String(created.body.invoice.enrollment), String(created.body.student.planEnrollments[0]._id));
+
+  const partial = await request(app).post(`/api/finance/invoices/${created.body.invoice._id}/payments`)
+    .set("Cookie", cookie).set("Origin", origin).set("Idempotency-Key", "add-student-partial-pay-1")
+    .send({ amount: 100, method: "CASH" });
+  assert.equal(partial.status, 201, partial.body.message);
+  assert.equal(partial.body.invoice.paidAmount, 100);
+  assert.equal(partial.body.invoice.balance, 505);
+  assert.equal(String(partial.body.receipt.invoice), String(created.body.invoice._id));
+  assert.equal(String(partial.body.receipt.payment), String(partial.body.payment._id));
+});
+
+test("invoices continue from the enrollment snapshot after its FeeTerm and Plan change", async () => {
+  const startDate = calendarDateOffset(-45);
+  const term = await makeEnrollmentFeeTerm(fixture.branchA, {
+    amount: 1250,
+    registrationFee: 150,
+    taxRate: 5,
+    effectiveUntil: new Date(`${startDate}T00:00:00.000Z`),
+  });
+  const student = await createStudent({ name: "Frozen Invoice Agreement" });
+  const agreedPlanName = fixture.plan.name;
+  const cookie = makeCookie(fixture.userA);
+  const enrollmentDoc = await Student.findById(student._id);
+  enrollmentDoc.planEnrollments.push({
+    plan: fixture.plan._id,
+    feeTerm: term._id,
+    branch: fixture.branchA._id,
+    startDate: new Date(`${startDate}T00:00:00.000Z`),
+    status: "ACTIVE",
+    billingSnapshot: {
+      feeTerm: term._id,
+      feeTermVersion: term.version,
+      planName: agreedPlanName,
+      branch: fixture.branchA._id,
+      branchName: fixture.branchA.name,
+      active: true,
+      amount: 1250,
+      billingFrequency: "MONTHLY",
+      registrationFee: 150,
+      taxRate: 5,
+      discountRules: [],
+      effectiveFrom: term.effectiveFrom,
+      effectiveUntil: term.effectiveUntil,
+    },
+  });
+  await enrollmentDoc.save();
+  const enrollment = enrollmentDoc.planEnrollments[0];
+
+  term.status = "RETIRED";
+  await term.save();
+  fixture.plan.name = "Renamed Current Plan";
+  await fixture.plan.save();
+
+  const nextStart = new Date(`${calendarDateOffset(0)}T00:00:00.000Z`);
+  const invoiceResponse = await request(app).post("/api/finance/invoices").set("Cookie", cookie).set("Origin", origin).send({
+    studentId: String(student._id), enrollmentId: String(enrollment._id), dueDate: new Date(nextStart.getTime() + 7 * 86400000).toISOString(), periodStart: nextStart.toISOString(),
+  });
+  assert.equal(invoiceResponse.status, 201, invoiceResponse.body.message);
+  assert.equal(invoiceResponse.body.invoice.total, 1470);
+  assert.equal(invoiceResponse.body.invoice.items[0].description, agreedPlanName);
+  assert.equal(String(invoiceResponse.body.invoice.feeTerm), String(term._id));
+});
+
+test("finance reports and collection dashboards stay tied to posted records when a FeeTerm is superseded", async () => {
+  const term = await makeEnrollmentFeeTerm(fixture.branchA, {
+    amount: 500,
+    registrationFee: 0,
+    taxRate: 0,
+  });
+  const enrollment = fixture.studentA.planEnrollments[0];
+  enrollment.feeTerm = term._id;
+  enrollment.billingSnapshot = {
+    feeTerm: term._id,
+    feeTermVersion: term.version,
+    planName: fixture.plan.name,
+    branch: fixture.branchA._id,
+    branchName: fixture.branchA.name,
+    amount: 500,
+    billingFrequency: term.billingFrequency,
+    registrationFee: 0,
+    taxRate: 0,
+    discountRules: [],
+    effectiveFrom: term.effectiveFrom,
+    effectiveUntil: term.effectiveUntil,
+  };
+  await fixture.studentA.save();
+
+  const cookie = makeCookie(fixture.userA);
+  const invoiceResponse = await makeFinanceInvoice(fixture.userA, fixture.studentA);
+  assert.equal(invoiceResponse.status, 201, invoiceResponse.body.message);
+  const invoice = invoiceResponse.body.invoice;
+  assert.equal(invoice.total, 500);
+
+  const paymentResponse = await request(app)
+    .post(`/api/finance/invoices/${invoice._id}/payments`)
+    .set("Cookie", cookie)
+    .set("Origin", origin)
+    .set("Idempotency-Key", "fee-term-report-history-payment")
+    .send({ amount: 125, method: "CASH" });
+  assert.equal(paymentResponse.status, 201, paymentResponse.body.message);
+  const receiptId = paymentResponse.body.receipt._id;
+
+  const reportsBefore = await request(app).get("/api/finance/reports").set("Cookie", cookie);
+  const filteredBefore = await request(app)
+    .get(`/api/finance/reports?branchId=${fixture.branchA._id}&planId=${fixture.plan._id}&invoiceStatus=PARTIALLY_PAID&paymentKind=PAYMENT&from=${calendarDateOffset(0)}&to=${calendarDateOffset(0)}`)
+    .set("Cookie", cookie);
+  const dashboardBefore = await request(app).get("/api/finance/dashboard").set("Cookie", cookie);
+  const receiptBefore = await request(app).get(`/api/finance/receipts/${receiptId}`).set("Cookie", cookie);
+  assert.equal(reportsBefore.status, 200);
+  assert.equal(filteredBefore.status, 200, filteredBefore.body.message);
+  assert.equal(filteredBefore.body.invoices.length, 1);
+  assert.equal(filteredBefore.body.payments.length, 1);
+  assert.equal(filteredBefore.body.receipts.length, 1);
+  assert.equal((await request(app).get(`/api/finance/reports?branchId=${fixture.branchB._id}`).set("Cookie", cookie)).status, 403);
+  assert.equal(dashboardBefore.status, 200);
+  assert.equal(receiptBefore.status, 200);
+
+  const superseded = await request(app)
+    .post(`/api/finance/fee-terms/${term._id}/supersede`)
+    .set("Cookie", cookie)
+    .set("Origin", origin)
+    .send({ amount: 650, registrationFee: 0, taxRate: 0, effectiveFrom: calendarDateOffset(0), reason: "Approved current price update" });
+  assert.equal(superseded.status, 201, superseded.body.message);
+
+  const reportsAfter = await request(app).get("/api/finance/reports").set("Cookie", cookie);
+  const filteredAfter = await request(app)
+    .get(`/api/finance/reports?branchId=${fixture.branchA._id}&planId=${fixture.plan._id}&invoiceStatus=PARTIALLY_PAID&paymentKind=PAYMENT&from=${calendarDateOffset(0)}&to=${calendarDateOffset(0)}`)
+    .set("Cookie", cookie);
+  const dashboardAfter = await request(app).get("/api/finance/dashboard").set("Cookie", cookie);
+  const receiptAfter = await request(app).get(`/api/finance/receipts/${receiptId}`).set("Cookie", cookie);
+  assert.equal(reportsAfter.status, 200);
+  assert.equal(filteredAfter.status, 200);
+  assert.equal(dashboardAfter.status, 200);
+  assert.equal(receiptAfter.status, 200);
+
+  const invoiceFields = (body) => body.invoices.map(({ _id, invoiceNumber, total, paidAmount, balance, items }) => ({ _id, invoiceNumber, total, paidAmount, balance, items }));
+  const paymentFields = (body) => body.payments.map(({ _id, amount, direction, kind, invoice }) => ({ _id, amount, direction, kind, invoice }));
+  assert.deepEqual(invoiceFields(reportsAfter.body), invoiceFields(reportsBefore.body));
+  assert.deepEqual(paymentFields(reportsAfter.body), paymentFields(reportsBefore.body));
+  assert.deepEqual(filteredAfter.body.invoices.map(({ _id, total, paidAmount, balance }) => ({ _id, total, paidAmount, balance })), filteredBefore.body.invoices.map(({ _id, total, paidAmount, balance }) => ({ _id, total, paidAmount, balance })));
+  assert.deepEqual(filteredAfter.body.receipts, filteredBefore.body.receipts);
+  assert.deepEqual(dashboardAfter.body.metrics, dashboardBefore.body.metrics);
+  assert.deepEqual(dashboardAfter.body.charts, dashboardBefore.body.charts);
+  assert.deepEqual(receiptAfter.body.receipt, receiptBefore.body.receipt);
+  assert.equal(reportsAfter.body.invoices.find((item) => String(item._id) === String(invoice._id)).total, 500);
+  assert.equal((await Student.findById(fixture.studentA._id)).planEnrollments.id(enrollment._id).billingSnapshot.amount, 500);
+
+  const newStudent = await createStudent({ name: "Updated FeeTerm Enrollment" });
+  const newEnrollment = await request(app)
+    .post(`/api/enrollments/students/${newStudent._id}`)
+    .set("Cookie", cookie)
+    .set("Origin", origin)
+    .send({ plan: String(fixture.plan._id), branch: String(fixture.branchA._id), feeTerm: String(superseded.body.feeTerm._id), startDate: calendarDateOffset(0), createInvoice: true });
+  assert.equal(newEnrollment.status, 201, newEnrollment.body.message);
+  assert.equal(newEnrollment.body.enrollment.billingSnapshot.amount, 650);
+  assert.equal(newEnrollment.body.invoice.total, 650);
 });
 
 test("CRM lead pipeline enforces permissions, branch isolation, and auditable status transitions", async () => {
@@ -1343,7 +2502,8 @@ test("CRM conversion creates one student, enrollment, and optional invoice and i
   const lead = await Inquiry.create({ fullName: "Admission Candidate", email: "admission-candidate@example.test", phone: "+919877665544", age: 19, branch: fixture.branchA._id, plan: fixture.plan._id, status: "INTERESTED", statusHistory: [{ from: "TRIAL_COMPLETED", to: "INTERESTED", changedBy: fixture.userA._id }] });
   const cookie = makeCookie(fixture.userA);
   const url = `/api/inquiries/${lead._id}/convert`;
-  const input = { age: 19, plan: String(fixture.plan._id), createInvoice: true };
+  const feeTerm = await makeEnrollmentFeeTerm();
+  const input = { age: 19, plan: String(fixture.plan._id), branch: String(fixture.branchA._id), feeTerm: String(feeTerm._id), joinDate: calendarDateOffset(0), createInvoice: true };
   const first = await request(app).post(url).set("Cookie", cookie).set("Origin", origin).send(input);
   assert.equal(first.status, 201, first.body.message);
   assert.equal(first.body.student.name, "Admission Candidate");
@@ -1362,7 +2522,8 @@ test("CRM conversion creates one student, enrollment, and optional invoice and i
 test("CRM conversion reuses an existing student and overdue follow-ups notify assigned staff once", async () => {
   const lead = await Inquiry.create({ fullName: fixture.studentA.name, email: "existing-person@example.test", phone: fixture.studentA.phone, age: 18, branch: fixture.branchA._id, plan: fixture.plan._id, status: "CONTACTED" });
   const cookie = makeCookie(fixture.userA);
-  const converted = await request(app).post(`/api/inquiries/${lead._id}/convert`).set("Cookie", cookie).set("Origin", origin).send({ plan: String(fixture.plan._id) });
+  const feeTerm = await makeEnrollmentFeeTerm();
+  const converted = await request(app).post(`/api/inquiries/${lead._id}/convert`).set("Cookie", cookie).set("Origin", origin).send({ plan: String(fixture.plan._id), branch: String(fixture.branchA._id), feeTerm: String(feeTerm._id), joinDate: calendarDateOffset(0) });
   assert.equal(converted.status, 201, converted.body.message);
   assert.equal(String(converted.body.student._id), String(fixture.studentA._id));
   assert.equal(await Student.countDocuments({ phone: fixture.studentA.phone }), 1);
@@ -1376,12 +2537,32 @@ test("CRM conversion reuses an existing student and overdue follow-ups notify as
 });
 
 test("membership renewal keeps enrollment history, bills through Finance, and notifies once", async () => {
+  const feeTerm = await makeEnrollmentFeeTerm();
+  const nonBillableTerm = await FeeTerm.collection.insertOne({
+    plan: fixture.plan._id,
+    branch: fixture.branchA._id,
+    billingFrequency: "ONE_TIME",
+    amount: 0,
+    registrationFee: 0,
+    taxRate: 0,
+    discountRules: [],
+    effectiveFrom: new Date("2020-01-01T00:00:00.000Z"),
+    effectiveUntil: null,
+    status: "ACTIVE",
+    version: 1,
+  });
   const student = await createStudent({ name: "Renewal Student" });
   const expiredOn = calendarDateOffset(-1);
-  student.planEnrollments = [{ plan: fixture.plan._id, feePlan: fixture.plan._id, branch: fixture.branchA._id, startDate: new Date("2026-01-01T00:00:00.000Z"), endDate: new Date(`${expiredOn}T12:00:00.000Z`), status: "ACTIVE", enrollmentSource: "ADMISSION", createdBy: fixture.userA._id }];
+  student.planEnrollments = [{ plan: fixture.plan._id, branch: fixture.branchA._id, startDate: new Date("2026-01-01T00:00:00.000Z"), endDate: new Date(`${expiredOn}T12:00:00.000Z`), status: "ACTIVE", enrollmentSource: "ADMISSION", createdBy: fixture.userA._id }];
   await student.save();
   const cookie = makeCookie(fixture.userA);
-  const response = await request(app).post(`/api/enrollments/students/${student._id}/renewals`).set("Cookie", cookie).set("Origin", origin).send({ plan: String(fixture.plan._id), startDate: calendarDateOffset(0), createInvoice: true });
+  const rejected = await request(app).post(`/api/enrollments/students/${student._id}/renewals`).set("Cookie", cookie).set("Origin", origin).send({ plan: String(fixture.plan._id), branch: String(fixture.branchA._id), feeTerm: String(nonBillableTerm.insertedId), startDate: calendarDateOffset(0), createInvoice: true });
+  assert.equal(rejected.status, 400);
+  const afterRejectedRenewal = await Student.findById(student._id).lean();
+  assert.equal(afterRejectedRenewal.planEnrollments.length, 1, "a failed required invoice rolls back the new enrollment");
+  assert.equal(afterRejectedRenewal.planEnrollments[0].status, "ACTIVE", "a failed renewal leaves the previous agreement unchanged");
+  assert.equal(await Invoice.countDocuments({ student: student._id }), 0);
+  const response = await request(app).post(`/api/enrollments/students/${student._id}/renewals`).set("Cookie", cookie).set("Origin", origin).send({ plan: String(fixture.plan._id), branch: String(fixture.branchA._id), feeTerm: String(feeTerm._id), startDate: calendarDateOffset(0), createInvoice: true });
   assert.equal(response.status, 201, response.body.message);
   assert.ok(response.body.invoice, response.body.invoiceError);
   const saved = await Student.findById(student._id).lean();
@@ -1391,7 +2572,7 @@ test("membership renewal keeps enrollment history, bills through Finance, and no
   assert.equal(await Invoice.countDocuments({ student: student._id, enrollment: saved.planEnrollments[1]._id }), 1);
   const noticeCount = await Notification.countDocuments({ type: "MEMBERSHIP_RENEWAL_COMPLETED", entityId: saved.planEnrollments[1]._id });
   assert.equal(noticeCount, 1);
-  const replay = await request(app).post(`/api/enrollments/students/${student._id}/renewals`).set("Cookie", cookie).set("Origin", origin).send({ plan: String(fixture.plan._id), startDate: calendarDateOffset(0) });
+  const replay = await request(app).post(`/api/enrollments/students/${student._id}/renewals`).set("Cookie", cookie).set("Origin", origin).send({ plan: String(fixture.plan._id), branch: String(fixture.branchA._id), feeTerm: String(feeTerm._id), startDate: calendarDateOffset(0) });
   assert.equal(replay.status, 409);
   const history = await request(app).get(`/api/enrollments/students/${student._id}`).set("Cookie", cookie);
   assert.equal(history.status, 200);
@@ -1430,7 +2611,8 @@ test("membership read and manage permissions are independent at the API boundary
   const manageRead = await request(app).get("/api/enrollments/dashboard").set("Cookie", manageCookie);
   assert.equal(manageRead.status, 403);
   const newStudent = await createStudent({ name: "Managed Enrollment" });
-  const manageWrite = await request(app).post(`/api/enrollments/students/${newStudent._id}`).set("Cookie", manageCookie).set("Origin", origin).send({ plan: String(fixture.plan._id), startDate: calendarDateOffset(0) });
+  const feeTerm = await makeEnrollmentFeeTerm();
+  const manageWrite = await request(app).post(`/api/enrollments/students/${newStudent._id}`).set("Cookie", manageCookie).set("Origin", origin).send({ plan: String(fixture.plan._id), branch: String(fixture.branchA._id), feeTerm: String(feeTerm._id), startDate: calendarDateOffset(0) });
   assert.equal(manageWrite.status, 201, manageWrite.body.message);
   assert.equal(manageWrite.body.invoice, null);
 
@@ -1440,11 +2622,12 @@ test("membership read and manage permissions are independent at the API boundary
 });
 
 test("branch transfer creates a new enrollment snapshot and preserves the previous branch history", async () => {
+  const feeTerm = await makeEnrollmentFeeTerm(fixture.branchB);
   const student = fixture.studentA;
-  student.planEnrollments = [{ plan: fixture.plan._id, feePlan: fixture.plan._id, branch: fixture.branchA._id, startDate: new Date("2026-01-01T00:00:00.000Z"), endDate: new Date("2026-12-31T12:00:00.000Z"), status: "ACTIVE" }];
+  student.planEnrollments = [{ plan: fixture.plan._id, branch: fixture.branchA._id, startDate: new Date("2026-01-01T00:00:00.000Z"), endDate: new Date("2026-12-31T12:00:00.000Z"), status: "ACTIVE" }];
   await student.save();
   const admin = await createUser({ role: "SUPER_ADMIN", branch: null });
-  const response = await request(app).put(`/api/students/${student._id}`).set("Cookie", makeCookie(admin)).set("Origin", origin).send({ branch: String(fixture.branchB._id) });
+  const response = await request(app).put(`/api/students/${student._id}`).set("Cookie", makeCookie(admin)).set("Origin", origin).send({ branch: String(fixture.branchB._id), feeTerm: String(feeTerm._id) });
   assert.equal(response.status, 200, response.body.message);
   const saved = await Student.findById(student._id).lean();
   assert.equal(saved.planEnrollments.length, 2);
@@ -1530,4 +2713,324 @@ test("historical attendance correction requires a reason, separates approval, an
   const rejection = await request(app).post(`/api/attendance/corrections/${requested.body.correction._id}/reject`).set("Cookie", makeCookie(otherApprover)).set("Origin", origin).send({ reason: "Evidence does not support the change" });
   assert.equal(rejection.status, 200);
   assert.equal((await Attendance.findById(rejectedAttendance._id)).status, "PRESENT");
+});
+
+test("grading reuses promotion eligibility, validates evaluations, promotes through the existing workflow, and issues a promotion certificate", async () => {
+  const cookie = makeCookie(fixture.userA);
+  const program = await TrainingSessionType.create({ name: `Grading Karate ${crypto.randomUUID()}`, normalizedName: `grading-${crypto.randomUUID()}`, slug: `grading-${crypto.randomUUID()}`, isActive: true });
+  const curriculum = [{ day: 1, title: "Foundations", skill: "stance" }];
+  const curriculumVersion = await Curriculum.create({ plan: fixture.plan._id, program: program._id, version: 1, name: "Grading Karate Curriculum", status: "PUBLISHED", modules: [{ name: "Foundations", order: 1, steps: [{ title: "Foundations", isMilestone: true, milestoneName: "First grading milestone", milestoneCriteria: "Coach confirms foundations", rewards: [{ rewardId: "yellow-belt", type: "BELT_PROGRESSION", name: "Yellow", targetBelt: "Yellow", requiresFormalGrading: true }] }] }] });
+  fixture.plan.programs = [{ program: program._id, curriculum, weeklyLimit: 4 }];
+  fixture.plan.milestones = [{ day: 1, belt: "Orange", skill: "Legacy only" }];
+  await fixture.plan.save();
+  fixture.studentA.planEnrollments[0].programs = [{ program: program._id, curriculumVersion: curriculumVersion._id, curriculum, weeklyLimit: 4 }];
+  await fixture.studentA.save();
+  await StudentCurriculumMilestone.create({ student: fixture.studentA._id, branch: fixture.branchA._id, enrollment: fixture.studentA.planEnrollments[0]._id, plan: fixture.plan._id, program: program._id, curriculum: curriculumVersion._id, milestoneStepId: curriculumVersion.modules[0].steps[0]._id, milestoneName: "First grading milestone", milestoneCriteria: "Coach confirms foundations", status: "EARNED", criteriaMetAt: new Date(), earnedAt: new Date(), rewards: [{ rewardId: "yellow-belt", type: "BELT_PROGRESSION", name: "Yellow", targetBelt: "Yellow", requiresFormalGrading: true, status: "AWAITING_GRADING" }] });
+  await Attendance.create({ student: fixture.studentA._id, branch: fixture.branchA._id, plan: fixture.plan._id, sessionTypeId: program._id, date: new Date(), planDay: 1, curriculumTitle: "Foundations", status: "PRESENT", attendanceType: "REGULAR", markedBy: fixture.userA._id });
+
+  const eligibility = await request(app).get(`/api/grading/eligibility?branch=${fixture.branchA._id}&program=${program._id}&date=${calendarDateOffset(1)}`).set("Cookie", cookie);
+  assert.equal(eligibility.status, 200);
+  assert.equal(eligibility.body.students.find((item) => item.student._id === String(fixture.studentA._id)).eligible, true);
+
+  const created = await request(app).post("/api/grading").set("Cookie", cookie).set("Origin", origin).send({ date: calendarDateOffset(1), branch: String(fixture.branchA._id), program: String(program._id), examiner: String(fixture.userA._id), studentIds: [String(fixture.studentA._id)], notes: "Quarterly grading" });
+  assert.equal(created.status, 201, JSON.stringify(created.body));
+  const eventId = created.body.event._id;
+  assert.equal((await request(app).get(`/api/grading/${eventId}`).set("Cookie", cookie)).status, 200);
+  assert.equal((await request(app).get(`/api/grading/${eventId}`).set("Cookie", makeCookie(fixture.userB))).status, 404);
+  assert.equal((await request(app).post(`/api/grading/${eventId}/start`).set("Cookie", cookie).set("Origin", origin)).status, 200);
+
+  const badScore = await request(app).put(`/api/grading/${eventId}/students/${fixture.studentA._id}/evaluation`).set("Cookie", cookie).set("Origin", origin).send({ criteria: { technique: { value: 101 }, discipline: { value: 80 }, attendance: { value: 80 }, performance: { value: 80 } }, overallScore: 80, remarks: "", result: "PASS" });
+  assert.equal(badScore.status, 400);
+  const evaluationInput = { criteria: Object.fromEntries(["technique", "discipline", "attendance", "performance"].map((key) => [key, { value: 80, remarks: "Good progress" }])), overallScore: 82, remarks: "Ready to advance", result: "PASS" };
+  const saved = await request(app).put(`/api/grading/${eventId}/students/${fixture.studentA._id}/evaluation`).set("Cookie", cookie).set("Origin", origin).send(evaluationInput);
+  assert.equal(saved.status, 200, JSON.stringify(saved.body));
+  assert.equal(await GradingEvaluation.countDocuments({ event: eventId, student: fixture.studentA._id }), 1);
+  const finalized = await request(app).post(`/api/grading/${eventId}/students/${fixture.studentA._id}/evaluation/finalize`).set("Cookie", cookie).set("Origin", origin);
+  assert.equal(finalized.status, 200, JSON.stringify(finalized.body));
+  assert.ok(finalized.body.promotion?._id);
+  const changedStudent = await Student.findById(fixture.studentA._id);
+  assert.equal(changedStudent.currentBelt, "Yellow");
+  const history = await BeltHistory.findOne({ student: fixture.studentA._id, gradingEvent: eventId });
+  assert.ok(history);
+  assert.equal(String(history.approvedBy), String(fixture.userA._id));
+  const locked = await request(app).put(`/api/grading/${eventId}/students/${fixture.studentA._id}/evaluation`).set("Cookie", cookie).set("Origin", origin).send(evaluationInput);
+  assert.equal(locked.status, 409);
+
+  const certificateResponse = await request(app).post(`/api/certificates/promotions/${history._id}`).set("Cookie", cookie).set("Origin", origin);
+  assert.equal(certificateResponse.status, 201, JSON.stringify(certificateResponse.body));
+  assert.match(certificateResponse.body.certificate.certificateNumber, /^CRT-/);
+  const certificateRead = await request(app).get(`/api/certificates/${certificateResponse.body.certificate._id}`).set("Cookie", cookie);
+  assert.equal(certificateRead.status, 200);
+  assert.equal(certificateRead.body.certificate.belt, "Yellow");
+  const achievement = await request(app).post("/api/certificates/achievements").set("Cookie", cookie).set("Origin", origin).send({ studentId: String(fixture.studentA._id), achievement: "Dojo Spirit Award" });
+  assert.equal(achievement.status, 201);
+  const sameAchievement = await request(app).post("/api/certificates/achievements").set("Cookie", cookie).set("Origin", origin).send({ studentId: String(fixture.studentA._id), achievement: "Dojo Spirit Award" });
+  assert.equal(sameAchievement.status, 200);
+  const completedStudent = await Student.findById(fixture.studentA._id);
+  completedStudent.planEnrollments[0].status = "COMPLETED";
+  await completedStudent.save();
+  const completionCertificate = await request(app).post("/api/certificates/program-completion").set("Cookie", cookie).set("Origin", origin).send({ studentId: String(fixture.studentA._id), enrollmentId: String(completedStudent.planEnrollments[0]._id), programId: String(program._id) });
+  assert.equal(completionCertificate.status, 201, JSON.stringify(completionCertificate.body));
+
+  assert.equal((await request(app).post(`/api/grading/${eventId}/publish`).set("Cookie", cookie).set("Origin", origin)).status, 200);
+  assert.equal((await request(app).post(`/api/grading/${eventId}/complete`).set("Cookie", cookie).set("Origin", origin)).status, 200);
+  assert.equal((await GradingEvent.findById(eventId)).status, "COMPLETED");
+  assert.ok(await AuditLog.countDocuments({ entityType: "GRADING_EVENT", entityId: eventId }));
+});
+
+test("grading rejects ineligible students, duplicate event evaluations, and cross-branch event access", async () => {
+  const cookie = makeCookie(fixture.userA);
+  const program = await TrainingSessionType.create({ name: `Grading Basics ${crypto.randomUUID()}`, normalizedName: `grading-basics-${crypto.randomUUID()}`, slug: `grading-basics-${crypto.randomUUID()}`, isActive: true });
+  const curriculum = [{ day: 1, title: "Foundations", skill: "stance" }];
+  fixture.plan.programs = [{ program: program._id, curriculum }];
+  fixture.plan.milestones = [{ day: 1, belt: "Yellow", skill: "Foundations" }];
+  await fixture.plan.save();
+  fixture.studentA.planEnrollments[0].programs = [{ program: program._id, curriculum }];
+  await fixture.studentA.save();
+  const candidates = await request(app).get(`/api/grading/eligibility?branch=${fixture.branchA._id}&program=${program._id}&date=${calendarDateOffset(1)}`).set("Cookie", cookie);
+  assert.equal(candidates.status, 200);
+  assert.equal(candidates.body.students.find((item) => item.student._id === String(fixture.studentA._id)).eligible, false);
+  assert.match(candidates.body.students.find((item) => item.student._id === String(fixture.studentA._id)).reason, /milestone/i);
+  const rejected = await request(app).post("/api/grading").set("Cookie", cookie).set("Origin", origin).send({ date: calendarDateOffset(1), branch: String(fixture.branchA._id), program: String(program._id), examiner: String(fixture.userA._id), studentIds: [String(fixture.studentA._id)] });
+  assert.equal(rejected.status, 400);
+  const noPermission = await request(app).post("/api/grading").set("Cookie", makeCookie(await createUser({ role: "NO_ACCESS" }))).set("Origin", origin).send({});
+  assert.equal(noPermission.status, 403);
+});
+
+test("Super Admin can access grading and certificate APIs while unauthorized roles remain blocked", async () => {
+  const superAdmin = await createUser({ role: "SUPER_ADMIN", branch: null });
+  const noAccess = await createUser({ role: "NO_ACCESS" });
+  const superAdminCookie = makeCookie(superAdmin);
+
+  const grading = await request(app).get("/api/grading").set("Cookie", superAdminCookie);
+  assert.equal(grading.status, 200, JSON.stringify(grading.body));
+
+  const certificates = await request(app).get("/api/certificates").set("Cookie", superAdminCookie);
+  assert.equal(certificates.status, 200, JSON.stringify(certificates.body));
+
+  const createGrading = await request(app).post("/api/grading").set("Cookie", superAdminCookie).set("Origin", origin).send({});
+  assert.equal(createGrading.status, 400, JSON.stringify(createGrading.body));
+  const issueCertificate = await request(app).post("/api/certificates/achievements").set("Cookie", superAdminCookie).set("Origin", origin).send({});
+  assert.equal(issueCertificate.status, 400, JSON.stringify(issueCertificate.body));
+
+  assert.equal((await request(app).get("/api/grading").set("Cookie", makeCookie(noAccess))).status, 403);
+  assert.equal((await request(app).get("/api/certificates").set("Cookie", makeCookie(noAccess))).status, 403);
+});
+
+test("FAIL and PENDING grading results publish without changing belt or promotion history", async () => {
+  const cookie = makeCookie(fixture.userA);
+  const program = await TrainingSessionType.create({ name: `Results Karate ${crypto.randomUUID()}`, normalizedName: `results-${crypto.randomUUID()}`, slug: `results-${crypto.randomUUID()}`, isActive: true });
+  const curriculum = [{ day: 1, title: "Basics", skill: "stance" }];
+  fixture.plan.programs = [{ program: program._id, curriculum }];
+  fixture.plan.milestones = [{ day: 1, belt: "Yellow", skill: "Basics" }];
+  await fixture.plan.save();
+  fixture.studentA.planEnrollments[0].programs = [{ program: program._id, curriculum }];
+  await fixture.studentA.save();
+  const studentC = await createStudent({ name: "Student C", phone: "9000000003", branch: fixture.branchA._id });
+  studentC.planEnrollments = [{ plan: fixture.plan._id, startDate: new Date("2026-01-01T00:00:00.000Z"), status: "ACTIVE", programs: [{ program: program._id, curriculum }] }];
+  await studentC.save();
+  for (const student of [fixture.studentA, studentC]) await Attendance.create({ student: student._id, branch: fixture.branchA._id, plan: fixture.plan._id, sessionTypeId: program._id, date: new Date(), planDay: 1, curriculumTitle: "Basics", status: "PRESENT", markedBy: fixture.userA._id });
+  const created = await request(app).post("/api/grading").set("Cookie", cookie).set("Origin", origin).send({ date: calendarDateOffset(1), branch: String(fixture.branchA._id), program: String(program._id), examiner: String(fixture.userA._id), studentIds: [String(fixture.studentA._id), String(studentC._id)] });
+  assert.equal(created.status, 201, JSON.stringify(created.body));
+  const eventId = created.body.event._id;
+  assert.equal((await request(app).post(`/api/grading/${eventId}/start`).set("Cookie", cookie).set("Origin", origin)).status, 200);
+  const evaluationInput = (result) => ({ criteria: Object.fromEntries(["technique", "discipline", "attendance", "performance"].map((key) => [key, { value: 70, remarks: "Reviewed" }])), overallScore: 70, remarks: "Assessment recorded", result });
+  for (const [student, result] of [[fixture.studentA, "FAIL"], [studentC, "PENDING"]]) {
+    const saved = await request(app).put(`/api/grading/${eventId}/students/${student._id}/evaluation`).set("Cookie", cookie).set("Origin", origin).send(evaluationInput(result));
+    assert.equal(saved.status, 200);
+    assert.equal((await request(app).post(`/api/grading/${eventId}/students/${student._id}/evaluation/finalize`).set("Cookie", cookie).set("Origin", origin)).status, 200);
+  }
+  assert.equal((await request(app).post(`/api/grading/${eventId}/publish`).set("Cookie", cookie).set("Origin", origin)).status, 200);
+  assert.equal((await Student.findById(fixture.studentA._id)).currentBelt, "White");
+  assert.equal((await Student.findById(studentC._id)).currentBelt, "White");
+  assert.equal(await BeltHistory.countDocuments({ gradingEvent: eventId }), 0);
+});
+
+test("academy calendar aggregates scoped data and generic events validate conflicts and registrations", async () => {
+  const cookie = makeCookie(fixture.userA);
+  const date = calendarDateOffset(7);
+  const program = await TrainingSessionType.create({ name: `Calendar Karate ${crypto.randomUUID()}`, normalizedName: `calendar-${crypto.randomUUID()}`, slug: `calendar-${crypto.randomUUID()}`, isActive: true });
+  fixture.studentA.planEnrollments[0].programs = [{ program: program._id, curriculum: [] }];
+  await fixture.studentA.save();
+  const coach = await createUser({ role: "COACH", branch: fixture.branchA._id, email: "calendar-coach@example.test" });
+  const weekday = new Date(`${date}T00:00:00`).getDay();
+  await BranchSchedule.create({ branch: fixture.branchA._id, weeklySchedule: [{ dayOfWeek: weekday, isClosed: false, slots: [{ sessionName: "Calendar class", sessionTypeId: program._id, coach: coach._id, startTime: "08:00", endTime: "09:00", isActive: true }] }] });
+  const lead = await Inquiry.create({ fullName: "Trial Prospect", email: "calendar-trial@example.test", phone: "9000000088", branch: fixture.branchA._id });
+  await Trial.create({ lead: lead._id, branch: fixture.branchA._id, program: program._id, coach: coach._id, trialDate: new Date(`${date}T00:00:00`), startTime: "12:00", endTime: "13:00", createdBy: fixture.userA._id });
+  const eventInput = { name: "Open workshop", category: "WORKSHOP", branch: String(fixture.branchA._id), startDate: date, endDate: date, startTime: "10:00", endTime: "11:00", coach: String(coach._id), capacity: 2, location: "Studio A", registrationRequired: true, status: "OPEN" };
+  const created = await request(app).post("/api/academy-events").set("Cookie", cookie).set("Origin", origin).send(eventInput);
+  assert.equal(created.status, 201, JSON.stringify(created.body));
+  const eventId = created.body.event._id;
+  const calendar = await request(app).get(`/api/calendar?start=${date}&end=${date}`).set("Cookie", cookie);
+  assert.equal(calendar.status, 200, JSON.stringify(calendar.body));
+  assert.ok(calendar.body.events.some((item) => item.type === "CLASS"));
+  assert.ok(calendar.body.events.some((item) => item.source === "academy_event" && item.sourceId === eventId));
+  const crossBranch = await request(app).get(`/api/calendar?start=${date}&end=${date}&branch=${fixture.branchB._id}`).set("Cookie", cookie);
+  assert.equal(crossBranch.status, 403);
+  const conflictInput = { ...eventInput, name: "Conflicting workshop", startTime: "10:30", endTime: "11:30", location: "Studio B" };
+  const preview = await request(app).post("/api/academy-events/validate").set("Cookie", cookie).set("Origin", origin).send(conflictInput);
+  assert.equal(preview.status, 200);
+  assert.ok(preview.body.blocking.some((conflict) => conflict.type === "COACH"));
+  const blocked = await request(app).post("/api/academy-events").set("Cookie", cookie).set("Origin", origin).send(conflictInput);
+  assert.equal(blocked.status, 409);
+  const registration = await request(app).post(`/api/academy-events/${eventId}/registrations`).set("Cookie", cookie).set("Origin", origin).send({ student: String(fixture.studentA._id) });
+  assert.equal(registration.status, 201, JSON.stringify(registration.body));
+  assert.equal(await AcademyEventRegistration.countDocuments({ event: eventId, student: fixture.studentA._id, status: "REGISTERED" }), 1);
+  assert.ok(await AcademyEvent.findById(eventId));
+});
+
+test("published Curriculum append preserves identity and progress, serializes Plan capacity, and recalculates its Batch", async () => {
+  const program = await TrainingSessionType.create({ name: "Append Test", normalizedName: "append test", slug: "append-test" });
+  fixture.plan.duration = 1;
+  fixture.plan.durationUnit = "MONTHS";
+  fixture.plan.classesPerWeek = 2; // 10 theoretical sessions.
+  fixture.plan.programs = [{ program: program._id, curriculum: [] }];
+  await fixture.plan.save();
+
+  const oldSteps = Array.from({ length: 9 }, (_, index) => ({ title: `Existing ${index + 1}`, completionCriteria: `Requirement ${index + 1}` }));
+  const curriculum = await Curriculum.create({
+    plan: fixture.plan._id, program: program._id, version: 4, name: "Published", status: "PUBLISHED",
+    publishedAt: new Date("2026-01-01T00:00:00.000Z"),
+    modules: [{ name: "Existing module", order: 1, steps: oldSteps }],
+  });
+  const existingModuleId = String(curriculum.modules[0]._id);
+  const existingStepIds = curriculum.modules[0].steps.map((step) => String(step._id));
+  const enrollment = fixture.studentA.planEnrollments[0];
+  enrollment.programs = [{ program: program._id, curriculumVersion: curriculum._id }];
+  await fixture.studentA.save();
+  const progress = await StudentCurriculumStepProgress.create({
+    student: fixture.studentA._id, enrollment: enrollment._id, plan: fixture.plan._id,
+    program: program._id, curriculum: curriculum._id, stepId: existingStepIds[0],
+    status: "COMPLETED", completedAt: new Date("2026-03-01T00:00:00.000Z"),
+  });
+
+  const startDate = nextWeekday(1);
+  const batch = await Batch.create({ name: "Curriculum append batch", code: "APPEND-01", plan: fixture.plan._id, branch: fixture.branchA._id, capacity: 20, status: "ACTIVE", startDate });
+  const weeklySchedule = Array.from({ length: 7 }, (_, dayOfWeek) => ({
+    dayOfWeek,
+    isClosed: dayOfWeek !== 1,
+    slots: dayOfWeek === 1 ? [{ batchId: batch._id, sessionTypeId: program._id, sessionName: batch.name, room: "Dojo 1", startTime: "06:00", endTime: "07:00" }] : [],
+  }));
+  await BranchSchedule.create({ branch: fixture.branchA._id, weeklySchedule });
+
+  const append = (title) => request(app).post(`/api/curricula/versions/${curriculum._id}/modules`)
+    .set("Cookie", makeCookie(fixture.userA)).set("Origin", origin)
+    .send({ module: { name: title, order: 999, steps: [{ title: `${title} step`, completionCriteria: "Complete the new work" }] } });
+  const results = await Promise.all([append("Next module A"), append("Next module B")]);
+  assert.deepEqual(results.map((response) => response.status).sort(), [200, 409]);
+
+  const stored = await Curriculum.findById(curriculum._id).lean();
+  assert.equal(String(stored._id), String(curriculum._id));
+  assert.equal(stored.version, 4);
+  assert.equal(stored.status, "PUBLISHED");
+  assert.equal(stored.modules.length, 2, "only one concurrent append fits the final capacity slot");
+  assert.equal(String(stored.modules[0]._id), existingModuleId);
+  assert.deepEqual(stored.modules[0].steps.map((step) => String(step._id)), existingStepIds);
+  assert.deepEqual(stored.modules[0].steps.map((step) => step.completionCriteria), oldSteps.map((step) => step.completionCriteria));
+  const retainedProgress = await StudentCurriculumStepProgress.findById(progress._id).lean();
+  assert.equal(retainedProgress.status, "COMPLETED");
+  assert.equal(retainedProgress.stepId, existingStepIds[0]);
+
+  const auditCount = await FinanceAudit.countDocuments({ action: "CURRICULUM_PUBLISHED_MODULE_ADDED", entityId: curriculum._id });
+  assert.equal(auditCount, 1, "the successful append has exactly one committed audit record");
+  const updatedBatch = await Batch.findById(batch._id).lean();
+  const expectedEndDate = new Date(`${startDate}T12:00:00`);
+  expectedEndDate.setDate(expectedEndDate.getDate() + 63);
+  const expectedKey = `${expectedEndDate.getFullYear()}-${String(expectedEndDate.getMonth() + 1).padStart(2, "0")}-${String(expectedEndDate.getDate()).padStart(2, "0")}`;
+  assert.equal(updatedBatch.calculatedEndDate, expectedKey, "the Batch completion date includes the newly appended learning step");
+  assert.equal(updatedBatch.capacityIssue, "");
+
+  const noAccess = await createUser({ role: "NO_ACCESS", email: "curriculum-append-denied@example.test" });
+  const denied = await request(app).post(`/api/curricula/versions/${curriculum._id}/modules`)
+    .set("Cookie", makeCookie(noAccess)).set("Origin", origin)
+    .send({ module: { name: "Forbidden", steps: [{ title: "Forbidden step" }] } });
+  assert.equal(denied.status, 403);
+});
+
+test("saving a Curriculum draft validates rewards without requiring a transaction session", async () => {
+  const program = await TrainingSessionType.create({ name: "Draft Save Test", normalizedName: "draft save test", slug: "draft-save-test" });
+  fixture.plan.programs = [{ program: program._id, curriculum: [] }];
+  await fixture.plan.save();
+  const draft = await Curriculum.create({ plan: fixture.plan._id, program: program._id, version: 1, name: "Draft Save", status: "DRAFT", modules: [] });
+
+  const response = await request(app).put(`/api/curricula/versions/${draft._id}`)
+    .set("Cookie", makeCookie(fixture.userA)).set("Origin", origin)
+    .send({ name: "Draft Save", modules: [{ name: "Basics", order: 1, steps: [{ title: "Etiquette", isMilestone: false, rewards: [] }] }] });
+
+  assert.equal(response.status, 200, JSON.stringify(response.body));
+  assert.equal(response.body.curriculum.modules[0].steps[0].title, "Etiquette");
+  assert.equal(await FinanceAudit.countDocuments({ action: "CURRICULUM_DRAFT_UPDATED", entityId: draft._id }), 1);
+});
+
+test("activating a configured three-day Batch exposes bounded occurrences in both calendars", async () => {
+  const Room = require("../../src/models/Room");
+  const program = await TrainingSessionType.create({ name: "Three Day Calendar", normalizedName: "three day calendar", slug: "three-day-calendar" });
+  fixture.plan.duration = 1;
+  fixture.plan.durationUnit = "MONTHS";
+  fixture.plan.classesPerWeek = 3;
+  fixture.plan.programs = [{ program: program._id }];
+  await fixture.plan.save();
+  await Curriculum.create({
+    plan: fixture.plan._id, program: program._id, version: 1, name: "Three step Curriculum", status: "PUBLISHED", publishedAt: new Date(),
+    modules: [{ name: "Fundamentals", order: 1, steps: [{ title: "Step one" }, { title: "Step two" }, { title: "Step three" }] }],
+  });
+  const room = await Room.create({ branch: fixture.branchA._id, name: "Calendar Dojo", isActive: true });
+  const monday = nextWeekday(1, 7);
+  const start = new Date(`${monday}T12:00:00`);
+  start.setDate(start.getDate() - 2);
+  const startDate = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, "0")}-${String(start.getDate()).padStart(2, "0")}`;
+  const batch = await Batch.create({ name: "Three day Batch", code: "THREEDAY-01", plan: fixture.plan._id, branch: fixture.branchA._id, capacity: 20, status: "DRAFT", startDate });
+  const weeklySchedule = Array.from({ length: 7 }, (_, dayOfWeek) => ({
+    dayOfWeek, isClosed: ![1, 2, 3].includes(dayOfWeek),
+    slots: [1, 2, 3].includes(dayOfWeek) ? [{ batchId: batch._id, sessionTypeId: program._id, roomId: room._id, room: room.name, sessionName: batch.name, startTime: "06:00", endTime: "07:00", isActive: true }] : [],
+  }));
+  await BranchSchedule.create({ branch: fixture.branchA._id, weeklySchedule });
+
+  const cookie = makeCookie(fixture.userA);
+  const startKey = `${monday}`;
+  const tuesday = new Date(`${monday}T12:00:00`);
+  tuesday.setDate(tuesday.getDate() + 1);
+  const tuesdayKey = `${tuesday.getFullYear()}-${String(tuesday.getMonth() + 1).padStart(2, "0")}-${String(tuesday.getDate()).padStart(2, "0")}`;
+  const wednesday = new Date(`${monday}T12:00:00`);
+  wednesday.setDate(wednesday.getDate() + 2);
+  const endKey = `${wednesday.getFullYear()}-${String(wednesday.getMonth() + 1).padStart(2, "0")}-${String(wednesday.getDate()).padStart(2, "0")}`;
+  const monthBeforeActivation = await request(app).get(`/api/branch-schedules/${fixture.branchA._id}/calendar?year=${start.getFullYear()}&month=${start.getMonth() + 1}`).set("Cookie", cookie);
+  assert.equal(monthBeforeActivation.status, 200, JSON.stringify(monthBeforeActivation.body));
+  const mondayBeforeActivation = monthBeforeActivation.body.days.find((day) => day.date === startKey);
+  assert.equal(mondayBeforeActivation.reason, "BATCH_NOT_ACTIVE");
+  const academyBeforeActivation = await request(app).get(`/api/calendar?start=${startKey}&end=${endKey}&types=CLASS`).set("Cookie", cookie);
+  assert.equal(academyBeforeActivation.status, 200, JSON.stringify(academyBeforeActivation.body));
+  assert.equal(academyBeforeActivation.body.events.filter((event) => String(event.metadata?.batchId) === String(batch._id)).length, 0);
+
+  const activated = await request(app).patch(`/api/batches/${batch._id}`).set("Cookie", cookie).set("Origin", origin).send({ status: "ACTIVE" });
+  assert.equal(activated.status, 200, JSON.stringify(activated.body));
+  assert.ok(activated.body.batch.calculatedEndDate >= endKey);
+  const scheduledSessionCount = await Session.countDocuments({ batch: batch._id });
+  assert.equal(scheduledSessionCount, 3);
+
+  const admissionPreview = await request(app).get(`/api/students/admission-preview?branchId=${fixture.branchA._id}&planId=${fixture.plan._id}&batchId=${batch._id}&joinDate=${startDate}`).set("Cookie", cookie);
+  assert.equal(admissionPreview.status, 200, JSON.stringify(admissionPreview.body));
+  assert.equal(admissionPreview.body.requiredLearningSteps, 3);
+  assert.equal(admissionPreview.body.curricula.length, 1);
+  assert.equal(admissionPreview.body.curricula[0].programName, "Three Day Calendar");
+  assert.deepEqual(admissionPreview.body.steps.map((step) => step.date), [startKey, tuesdayKey, endKey]);
+
+  const invalidBatchId = await request(app).get(`/api/students/admission-preview?branchId=${fixture.branchA._id}&planId=${fixture.plan._id}&batchId=not-an-object-id&joinDate=${startDate}`).set("Cookie", cookie);
+  assert.equal(invalidBatchId.status, 400);
+  assert.match(invalidBatchId.body.message, /valid Batch/);
+
+  const academy = await request(app).get(`/api/calendar?start=${startKey}&end=${endKey}&types=CLASS`).set("Cookie", cookie);
+  assert.equal(academy.status, 200, JSON.stringify(academy.body));
+  const batchEvents = academy.body.events.filter((event) => String(event.metadata?.batchId) === String(batch._id));
+  assert.deepEqual(batchEvents.map((event) => event.start.date).sort(), [startKey, tuesdayKey, endKey].sort());
+  assert.equal(new Set(batchEvents.map((event) => event.id)).size, 3);
+
+  const monthAfterActivation = await request(app).get(`/api/branch-schedules/${fixture.branchA._id}/calendar?year=${start.getFullYear()}&month=${start.getMonth() + 1}`).set("Cookie", cookie);
+  assert.equal(monthAfterActivation.status, 200, JSON.stringify(monthAfterActivation.body));
+  const activeDays = monthAfterActivation.body.days.filter((day) => day.slots.some((slot) => String(slot.batchId?._id || slot.batchId) === String(batch._id)));
+  assert.deepEqual(activeDays.map((day) => day.date).sort(), [startKey, tuesdayKey, endKey].sort());
+
+  await request(app).get(`/api/calendar?start=${startKey}&end=${endKey}&types=CLASS`).set("Cookie", cookie);
+  await request(app).get(`/api/branch-schedules/${fixture.branchA._id}/calendar?year=${start.getFullYear()}&month=${start.getMonth() + 1}`).set("Cookie", cookie);
+  assert.equal(await Session.countDocuments({ batch: batch._id }), scheduledSessionCount, "calendar reads do not create duplicate Session records");
 });

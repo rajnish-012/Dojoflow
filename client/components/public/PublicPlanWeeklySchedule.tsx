@@ -29,6 +29,7 @@ type Slot = {
   startTime: string;
   endTime: string;
   isActive?: boolean;
+  batchId?: string | null;
 };
 type WeeklyDay = { dayOfWeek: number; isClosed: boolean; slots: Slot[] };
 type Branch = { _id: string; name: string; address?: string };
@@ -38,6 +39,8 @@ type ScheduleRecord = {
   hasSchedule: boolean;
 };
 export type WeeklySessionChoice = {
+  scheduleSlotId?: string;
+  batchId?: string | null;
   dayOfWeek: number;
   dayName: string;
   sessionName: string;
@@ -175,31 +178,39 @@ export default function PublicPlanWeeklySchedule({
     );
   }
 
+  function isSameChoice(item: WeeklySessionChoice, dayOfWeek: number, slot: Slot) {
+    return item.dayOfWeek === dayOfWeek &&
+      item.sessionTypeId === String(slot.sessionTypeId) &&
+      item.startTime === slot.startTime &&
+      item.endTime === slot.endTime &&
+      item.sessionName === (slot.sessionName || "Training Session");
+  }
+
   function toggleSlot(dayOfWeek: number, slot: Slot) {
     if (!selectedBranch) return;
     const typeId = String(slot.sessionTypeId || "");
-    const existing = value.find((item) => item.dayOfWeek === dayOfWeek);
     const selected = isSelected(dayOfWeek, slot);
     if (selected) {
       onChange(
         { id: selectedBranch.branch._id, name: selectedBranch.branch.name },
-        value.filter((item) => item.dayOfWeek !== dayOfWeek),
+        value.filter((item) => !isSameChoice(item, dayOfWeek, slot)),
       );
       return;
     }
-    if (!existing && value.length >= selectionLimit) return;
+    if (value.length >= selectionLimit) return;
     const limit = programWeeklyLimits[typeId];
     const programCount = value.filter(
       (item) => item.sessionTypeId === typeId,
     ).length;
     if (
       limit != null &&
-      programCount >= limit &&
-      existing?.sessionTypeId !== typeId
+      programCount >= limit
     )
       return;
     const type = types.find((item) => item._id === typeId);
     const choice: WeeklySessionChoice = {
+      scheduleSlotId: slot._id,
+      batchId: slot.batchId || null,
       dayOfWeek,
       dayName: DAY_NAMES[dayOfWeek],
       sessionName: slot.sessionName || "Training Session",
@@ -211,9 +222,10 @@ export default function PublicPlanWeeklySchedule({
     };
     onChange(
       { id: selectedBranch.branch._id, name: selectedBranch.branch.name },
-      [...value.filter((item) => item.dayOfWeek !== dayOfWeek), choice].sort(
+      [...value, choice].sort(
         (a, b) =>
-          WEEK_ORDER.indexOf(a.dayOfWeek) - WEEK_ORDER.indexOf(b.dayOfWeek),
+          WEEK_ORDER.indexOf(a.dayOfWeek) - WEEK_ORDER.indexOf(b.dayOfWeek) ||
+          a.startTime.localeCompare(b.startTime),
       ),
     );
   }
@@ -315,9 +327,6 @@ export default function PublicPlanWeeklySchedule({
                       </th>
                       {WEEK_ORDER.map((day) => {
                         const slots = slotsAt(day, row);
-                        const dayChoice = value.find(
-                          (item) => item.dayOfWeek === day,
-                        );
                         return (
                           <td
                             key={day}
@@ -338,13 +347,10 @@ export default function PublicPlanWeeklySchedule({
                                   ).length;
                                   const exceedsProgramLimit =
                                     programLimit != null &&
-                                    programCount >= programLimit &&
-                                    dayChoice?.sessionTypeId !==
-                                      String(slot.sessionTypeId);
+                                    programCount >= programLimit;
                                   const disabled =
                                     !chosen &&
-                                    ((!dayChoice &&
-                                      value.length >= selectionLimit) ||
+                                    ((value.length >= selectionLimit) ||
                                       exceedsProgramLimit);
                                   return (
                                     <button
@@ -383,8 +389,8 @@ export default function PublicPlanWeeklySchedule({
           )}
           <p className="flex items-start gap-2 text-xs leading-5 text-(--ink-faint)">
             <CalendarDays size={14} className="mt-0.5 shrink-0" />
-            Choose one available session on each of {selectionLimit} different
-            days. These recurring weekly choices are preferences, not
+            Choose {selectionLimit} available recurring sessions. Multiple
+            sessions may be on the same day when the schedule allows it. These choices are preferences, not
             reservations.
           </p>
         </>

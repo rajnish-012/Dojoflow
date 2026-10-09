@@ -9,6 +9,9 @@ import "@fontsource-variable/plus-jakarta-sans";
 export const metadata: Metadata = {
   title: "Academy Portal",
   description: "Academy management portal.",
+  icons: {
+    icon: "/icon.svg",
+  },
 };
 
 const themeScript = `

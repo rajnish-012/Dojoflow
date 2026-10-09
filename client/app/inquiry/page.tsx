@@ -13,7 +13,7 @@ import { getPublicTrainingSessionTypes, type TrainingSessionTypeRecord } from "@
 
 const API_URL = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api").replace(/\/+$/, "");
 type PlanProgram = { program: string | { _id: string; name: string; isActive?: boolean }; weeklyLimit?: number | null };
-type Plan = { _id: string; name: string; price: number; duration: number; durationUnit: "MONTHS" | "DAYS"; classesPerWeek: number; startingBelt: string; isActive: boolean; programs: PlanProgram[] };
+type Plan = { _id: string; name: string; duration: number; durationUnit: "MONTHS" | "DAYS"; classesPerWeek: number; startingBelt: string; isActive: boolean; programs: PlanProgram[] };
 type BranchPreference = { id: string; name: string } | null;
 
 function getProgramId(item: PlanProgram) {
@@ -28,18 +28,16 @@ function SelectionSummary({
   plan,
   branchName,
   sessions,
-  currency,
 }: {
   programs: string[];
   plan: Plan;
   branchName: string;
   sessions: WeeklySessionChoice[];
-  currency: string;
 }) {
   const durationLabel = `${plan.duration} ${plan.durationUnit === "DAYS" ? "days" : plan.duration === 1 ? "month" : "months"}`;
   return <div className="mt-5 rounded-2xl border border-(--line) bg-(--surface) p-4 sm:p-5">
     <div className="flex flex-wrap items-center justify-between gap-3 border-b border-(--line) pb-4">
-      <div><p className="text-xs font-bold uppercase tracking-widest text-(--ink-faint)">Your selection</p><h3 className="mt-1 text-lg font-bold">{plan.name}</h3><p className="text-sm font-semibold text-(--accent)">{new Intl.NumberFormat("en-IN", { style: "currency", currency: currency || "INR", maximumFractionDigits: 0 }).format(Number(plan.price || 0))} / {durationLabel}</p></div>
+      <div><p className="text-xs font-bold uppercase tracking-widest text-(--ink-faint)">Your selection</p><h3 className="mt-1 text-lg font-bold">{plan.name}</h3><p className="text-sm text-(--ink-muted)">{durationLabel}</p><p className="mt-1 text-xs text-(--ink-muted)">Final pricing depends on branch, billing frequency, and enrollment start date. The academy will confirm it before admission.</p></div>
       <div className="text-right text-xs text-(--ink-muted)"><p>{plan.classesPerWeek} classes per week</p><p className="mt-1">Starting belt: {plan.startingBelt || "Beginner"}</p></div>
     </div>
     <dl className="grid gap-3 border-b border-(--line) py-4 sm:grid-cols-2"><div><dt className="text-[10px] font-bold uppercase tracking-widest text-(--ink-faint)">Program{programs.length === 1 ? "" : "s"}</dt><dd className="mt-1 text-sm font-semibold">{programs.join(", ")}</dd></div><div><dt className="text-[10px] font-bold uppercase tracking-widest text-(--ink-faint)">Branch</dt><dd className="mt-1 text-sm font-semibold">{branchName}</dd></div></dl>
@@ -189,7 +187,8 @@ export default function InquiryPage() {
           {categoryPlans.length ? <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             {categoryPlans.map((plan) => <Card key={plan._id} className={`flex h-full flex-col p-5 transition ${selectedPlan?._id === plan._id ? "border-(--accent) ring-2 ring-(--accent)/20" : ""}`}>
               <div className="flex items-start justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-widest text-(--accent)">Training plan</p><h3 className="mt-2 text-xl font-bold">{plan.name}</h3></div><span className="rounded-xl bg-(--accent-soft) p-2 text-(--accent)"><Dumbbell size={20}/></span></div>
-              <p className="mt-4 text-2xl font-bold">{new Intl.NumberFormat("en-IN", { style: "currency", currency: settings.currency || "INR", maximumFractionDigits: 0 }).format(Number(plan.price || 0))}<span className="ml-1 text-sm font-medium text-(--ink-muted)">/ {plan.duration} {plan.durationUnit === "DAYS" ? "days" : plan.duration === 1 ? "month" : "months"}</span></p>
+              <p className="mt-4 text-sm font-semibold">{plan.duration} {plan.durationUnit === "DAYS" ? "days" : plan.duration === 1 ? "month" : "months"}</p>
+              <p className="mt-1 text-xs leading-5 text-(--ink-muted)">Final pricing depends on branch, billing frequency, and enrollment start date. The academy will confirm it before admission.</p>
               <div className="mt-4 flex flex-wrap gap-2 text-xs"><span className="rounded-full border border-(--line) px-3 py-1.5">{plan.classesPerWeek} classes / week</span><span className="rounded-full border border-(--line) px-3 py-1.5">Starting {plan.startingBelt || "Beginner"}</span></div>
               <p className="mt-4 text-sm text-(--ink-muted)">Includes: {plan.programs?.map(getProgramName).join(", ") || "No programs assigned"}</p>
               <Button type="button" variant={selectedPlan?._id === plan._id ? "secondary" : "outline"} className="mt-5 w-full" onClick={() => choosePlan(plan)}>{selectedPlan?._id === plan._id ? "Plan selected" : "Choose this plan"}<ArrowRight size={16}/></Button>
@@ -199,7 +198,7 @@ export default function InquiryPage() {
 
         {step === 3 && selectedPlan && <section className="mt-9" aria-labelledby="schedule-heading">
           <Card className="p-5 sm:p-6">
-            <div className="mb-5 flex flex-wrap items-end justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-widest text-(--accent)">Step 3</p><h2 id="schedule-heading" className="mt-1 text-xl font-bold">Choose {selectedPlan.classesPerWeek} weekly training days and sessions</h2><p className="mt-1 text-sm text-(--ink-muted)">Select one matching session on each of {selectedPlan.classesPerWeek} different days.</p></div><Button type="button" variant="outline" onClick={goBackToPlans}>Change plan</Button></div>
+            <div className="mb-5 flex flex-wrap items-end justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-widest text-(--accent)">Step 3</p><h2 id="schedule-heading" className="mt-1 text-xl font-bold">Choose {selectedPlan.classesPerWeek} weekly training sessions</h2><p className="mt-1 text-sm text-(--ink-muted)">Select exactly {selectedPlan.classesPerWeek} available recurring sessions. Multiple sessions may be on the same day.</p></div><Button type="button" variant="outline" onClick={goBackToPlans}>Change plan</Button></div>
             <PublicPlanWeeklySchedule planProgramIds={selectedProgramIds} programWeeklyLimits={programWeeklyLimits} selectionLimit={selectedPlan.classesPerWeek} value={weeklySessions} onChange={(selectedBranch, choices) => { setBranch(selectedBranch); setWeeklySessions(choices); }} />
             <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between"><p className={`text-sm font-semibold ${weeklySessions.length === selectedPlan.classesPerWeek ? "text-emerald-700" : "text-(--ink-muted)"}`}>{weeklySessions.length === selectedPlan.classesPerWeek ? `✓ Selected ${weeklySessions.length} of ${selectedPlan.classesPerWeek} classes` : `Select ${selectedPlan.classesPerWeek - weeklySessions.length} more ${selectedPlan.classesPerWeek - weeklySessions.length === 1 ? "class" : "classes"}`}</p><Button type="button" disabled={!branch || weeklySessions.length !== selectedPlan.classesPerWeek} onClick={continueToForm}>Review selection<ArrowRight size={16}/></Button></div>
           </Card>
@@ -209,7 +208,7 @@ export default function InquiryPage() {
           <Card className="mx-auto max-w-3xl p-5 sm:p-8">
             <button type="button" onClick={() => setStep(3)} className="mb-5 inline-flex items-center gap-2 text-sm font-semibold text-(--ink-muted) hover:text-(--accent)"><ArrowLeft size={16}/>Change schedule</button>
             <p className="text-xs font-bold uppercase tracking-widest text-(--accent)">Step 4</p><h2 id="confirm-heading" className="mt-1 text-2xl font-bold">Confirm your selection</h2><p className="mt-1 text-sm text-(--ink-muted)">Review your chosen program, plan, branch, and weekly sessions.</p>
-            <SelectionSummary programs={selectedPrograms.map((item) => item.name)} plan={selectedPlan} branchName={branch?.name || ""} sessions={weeklySessions} currency={settings.currency}/>
+            <SelectionSummary programs={selectedPrograms.map((item) => item.name)} plan={selectedPlan} branchName={branch?.name || ""} sessions={weeklySessions}/>
             <Button className="mt-6 w-full" onClick={continueToInquiryForm}>Continue to inquiry form<ArrowRight size={16}/></Button>
           </Card>
         </section>}
@@ -219,7 +218,7 @@ export default function InquiryPage() {
               <button type="button" onClick={() => setStep(4)} className="mb-5 inline-flex items-center gap-2 text-sm font-semibold text-(--ink-muted) hover:text-(--accent)"><ArrowLeft size={16}/>Change selection</button>
               <div className="mb-5"><p className="text-xs font-bold uppercase tracking-widest text-(--accent)">Step 5</p><h2 className="mt-1 text-2xl font-bold">Send your inquiry</h2><p className="mt-1 text-sm text-(--ink-muted)">Share your details and our team will contact you soon.</p></div>
               {error && <p role="alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</p>}
-              <SelectionSummary programs={selectedPrograms.map((item) => item.name)} plan={selectedPlan} branchName={branch?.name || ""} sessions={weeklySessions} currency={settings.currency}/>
+              <SelectionSummary programs={selectedPrograms.map((item) => item.name)} plan={selectedPlan} branchName={branch?.name || ""} sessions={weeklySessions}/>
               <form onSubmit={submitInquiry} className="space-y-4">
                 <div className="grid gap-4 sm:grid-cols-2"><label className="text-sm font-semibold">Full name *<input required minLength={2} value={form.fullName} onChange={(event) => setForm({ ...form, fullName: event.target.value })} autoComplete="name" className="mt-2 w-full rounded-xl border border-(--line) bg-(--input-bg) px-4 py-3 font-normal outline-none focus:border-(--accent)" placeholder="Your name"/></label>
                   <label className="text-sm font-semibold">Email address *<input required type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} autoComplete="email" className="mt-2 w-full rounded-xl border border-(--line) bg-(--input-bg) px-4 py-3 font-normal outline-none focus:border-(--accent)" placeholder="you@example.com"/></label></div>

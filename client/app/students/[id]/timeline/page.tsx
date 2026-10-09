@@ -269,10 +269,17 @@ export default function StudentTimelinePage() {
                   </span>
 
                   <span>
-                    Joined{" "}
+                    Joining Date{" "}
                     {formatDate(
                       student.joinDate
                     )}
+                  </span>
+
+                  <span className="text-[var(--line-strong)]">â€¢</span>
+
+                  <span>
+                    First Attended Class{" "}
+                    {student.firstAttendedClassDate ? formatDate(student.firstAttendedClassDate) : "Not attended yet"}
                   </span>
                 </div>
               </div>
@@ -351,7 +358,7 @@ export default function StudentTimelinePage() {
         <SummaryCard
           title="Milestones"
           value={summary.totalMilestones}
-          subtitle="Belt milestones in plan"
+          subtitle="Enrollment achievements in Curriculum"
           icon={
             <Target size={20} />
           }
@@ -361,12 +368,12 @@ export default function StudentTimelinePage() {
           title="Next Milestone"
           value={
             summary.nextMilestone
-              ? `Day ${summary.nextMilestone.day}`
+              ? summary.nextMilestone.belt || summary.nextMilestone.skill
               : "Complete"
           }
           subtitle={
-            summary.nextMilestone
-              ? summary.nextMilestone.belt
+              summary.nextMilestone
+              ? (summary.nextMilestone.status || "Awaiting curriculum approval").replaceAll("_", " ")
               : "No upcoming milestone"
           }
           icon={
@@ -457,7 +464,7 @@ export default function StudentTimelinePage() {
                     text-[var(--text-muted)]
                   "
                 >
-                  Expected date
+                  Progress status
                 </p>
 
                 <p
@@ -468,10 +475,7 @@ export default function StudentTimelinePage() {
                     text-[var(--text-primary)]
                   "
                 >
-                  {formatDate(
-                    summary.nextMilestone.date ||
-                      undefined
-                  )}
+                  {(summary.nextMilestone.status || "Awaiting approval").replaceAll("_", " ")}
                 </p>
               </div>
             </div>

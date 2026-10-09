@@ -1,6 +1,8 @@
 const mongoose = require("mongoose");
 const Student = require("../models/Student");
 const Plan = require("../models/Plan");
+const Batch = require("../models/Batch");
+const { reserveBatchSeat } = require("../services/batchEnrollment.service");
 const Branch = require("../models/Branch");
 const Invoice = require("../models/Invoice");
 const { isBranchScoped } = require("../utils/access");
@@ -18,9 +20,13 @@ const {
   getMembershipStatus,
   RENEWAL_REMINDERS,
 } = require("../services/enrollmentLifecycle.service");
-const { createInvoice } = require("./finance.controller");
 const auditService = require("../services/audit.service");
 const { AUDIT_ACTIONS } = require("../config/auditActions");
+const { sendStudentEmail } = require("../services/studentEmail.service");
+const { selectEnrollmentFeeTerm } = require("../services/enrollmentFeeTerm.service");
+const { createEnrollmentInvoice } = require("../services/enrollmentInvoice.service");
+const { sendInvoiceIssuedEmail } = require("../services/financeEmail.service");
+const { getPublishedCurriculumByProgram } = require("../services/curriculumVersion.service");
 
 const idIsValid = (value) => mongoose.Types.ObjectId.isValid(value);
 const branchOf = (user) => user?.branch?._id || user?.branch || null;
@@ -37,45 +43,15 @@ const addDuration = (start, plan) => {
   else end.setMonth(end.getMonth() + Number(plan.duration));
   return end;
 };
-function snapshot(plan, branchId) {
-  const override = (plan.branchFeeOverrides || []).find(
-    (item) => String(item.branch) === String(branchId),
-  );
-  const terms = override || plan;
+async function trainingSnapshot(plan) {
+  const curriculumVersions = await getPublishedCurriculumByProgram(plan._id, (plan.programs || []).map((item) => item.program));
   return {
-    feePlan: plan._id,
-    branch: branchId,
-    program:
-      plan.programs?.[0]?.program?._id || plan.programs?.[0]?.program || null,
     classesPerWeek: Number(plan.classesPerWeek || 0),
     startingBelt: plan.startingBelt || "White",
-    billingSnapshot: {
-      feeName: terms.feeName || plan.name,
-      active: terms.active !== false && plan.feeActive !== false,
-      amount: Number(terms.amount ?? plan.price ?? 0),
-      billingFrequency:
-        terms.billingFrequency || plan.billingFrequency || "ONE_TIME",
-      registrationFee: Number(
-        terms.registrationFee ?? plan.registrationFee ?? 0,
-      ),
-      taxRate: Number(terms.taxRate ?? plan.taxRate ?? 0),
-      discountRules: (terms.discountRules || plan.discountRules || []).map(
-        (rule) => ({
-          _id: rule._id,
-          name: rule.name,
-          type: rule.type,
-          amount: Number(rule.amount || 0),
-          active: rule.active !== false,
-          effectiveFrom: rule.effectiveFrom || null,
-          effectiveUntil: rule.effectiveUntil || null,
-        }),
-      ),
-      effectiveFrom: terms.effectiveFrom || plan.effectiveFrom || null,
-      effectiveUntil: terms.effectiveUntil || plan.effectiveUntil || null,
-    },
     programs: (plan.programs || []).map((item) => ({
       program: item.program?._id || item.program,
       weeklyLimit: item.weeklyLimit ?? null,
+      curriculumVersion: curriculumVersions.get(String(item.program?._id || item.program)) || null,
       curriculum: (item.curriculum?.length
         ? item.curriculum
         : plan.curriculum || []
@@ -106,7 +82,7 @@ function decorate(student, enrollment, asOf = new Date()) {
       email: student.email,
       branch: student.branch,
     },
-    planName: enrollment.plan?.name || student.plan?.name || "Training plan",
+    planName: enrollment.plan?.name || student.plan?.name || enrollment.billingSnapshot?.planName || "Training plan",
     branchName: enrollment.branch?.name || student.branch?.name || "Branch",
   };
 }
@@ -256,14 +232,16 @@ async function createEnrollment(req, res, isRenewal = false) {
   const {
     plan: planId,
     branch: branchInput,
+    batch: batchInput,
+    feeTerm: feeTermId,
     startDate: dateInput,
     enrollmentSource,
     createInvoice: shouldInvoice,
   } = req.body || {};
   if (
     !idIsValid(req.params.studentId) ||
-    (planId && !idIsValid(planId)) ||
-    (branchInput && !idIsValid(branchInput))
+    !idIsValid(planId) ||
+    !idIsValid(branchInput)
   )
     return res
       .status(400)
@@ -322,6 +300,11 @@ async function createEnrollment(req, res, isRenewal = false) {
         error.status = 403;
         throw error;
       }
+      if (!idIsValid(feeTermId)) {
+        const error = new Error("Select a valid Fee Term for this enrollment.");
+        error.status = 400;
+        throw error;
+      }
       const branch = await Branch.findById(branchId).session(session);
       if (!branch || branch.isActive === false) {
         const error = new Error("Selected branch is unavailable");
@@ -367,23 +350,23 @@ async function createEnrollment(req, res, isRenewal = false) {
         error.status = 400;
         throw error;
       }
-      if (plan.feeBranch && String(plan.feeBranch) !== String(branchId)) {
-        const error = new Error(
-          "Selected fee plan is not available to this branch",
-        );
-        error.status = 400;
-        throw error;
+      const activeBatches = await Batch.find({ plan: plan._id, branch: branch._id, status: "ACTIVE" }).select("_id").session(session);
+      let selectedBatchId = batchInput || (prior && String(prior.plan) === String(plan._id) && String(prior.branch) === String(branch._id) ? prior.batch : null);
+      if (!selectedBatchId && activeBatches.length === 1) selectedBatchId = activeBatches[0]._id;
+      if (activeBatches.length && !selectedBatchId) {
+        const error = new Error("Select a Batch for this Plan and Branch."); error.status = 400; throw error;
       }
-      const override = (plan.branchFeeOverrides || []).find(
-        (item) => String(item.branch) === String(branchId),
-      );
-      if (plan.feeActive === false || override?.active === false) {
-        const error = new Error(
-          "Selected fee plan is inactive for this branch",
-        );
-        error.status = 400;
-        throw error;
+      if (selectedBatchId && !activeBatches.some((item) => String(item._id) === String(selectedBatchId))) {
+        const error = new Error("Choose an active Batch under the selected Plan and Branch."); error.status = 400; throw error;
       }
+      if (selectedBatchId) await reserveBatchSeat({ batchId: selectedBatchId, planId: plan._id, branchId: branch._id, studentId: student._id, startDate, session });
+      const selectedTerms = await selectEnrollmentFeeTerm({
+        feeTermId,
+        plan,
+        branch,
+        startDate,
+        session,
+      });
       const newEnrollmentId = new mongoose.Types.ObjectId();
       if (prior) {
         const currentEnd = prior.endDate ? new Date(prior.endDate) : null;
@@ -401,8 +384,9 @@ async function createEnrollment(req, res, isRenewal = false) {
       const enrollment = {
         _id: newEnrollmentId,
         plan: plan._id,
-        feePlan: plan._id,
+        feeTerm: selectedTerms.term._id,
         branch: branch._id,
+        batch: selectedBatchId || null,
         program:
           plan.programs?.[0]?.program?._id ||
           plan.programs?.[0]?.program ||
@@ -413,7 +397,8 @@ async function createEnrollment(req, res, isRenewal = false) {
         statusHistory: [{ from: null, to: "ACTIVE", changedBy: req.user._id, note: isRenewal ? "Membership renewal" : "New enrollment" }],
         enrollmentSource: rawSource,
         createdBy: req.user._id,
-        ...snapshot(plan, branch._id),
+        ...await trainingSnapshot(plan),
+        billingSnapshot: selectedTerms.billingSnapshot,
       };
       student.planEnrollments.push(enrollment);
       student.plan = plan._id;
@@ -421,11 +406,27 @@ async function createEnrollment(req, res, isRenewal = false) {
       student.status = "ACTIVE";
       await student.save({ session });
       await auditService.record({ req, session, action: AUDIT_ACTIONS.ENROLLMENT_CHANGED, entityType: "ENROLLMENT", entityId: newEnrollmentId, branchId: branch._id, before: priorSnapshot, after: { status: "ACTIVE", planId: plan._id, branchId: branch._id, startDate, endDate: addDuration(startDate, plan), renewal: isRenewal } });
+      let invoice = null;
+      if (shouldInvoice) {
+        const enrollmentRecord = student.planEnrollments.id(newEnrollmentId);
+        invoice = await createEnrollmentInvoice({
+          req,
+          student,
+          enrollment: enrollmentRecord,
+          plan,
+          terms: selectedTerms.billingSnapshot,
+          branch,
+          dueDate: `${academyDateKey(startDate)}T12:00:00.000Z`,
+          session,
+          notes: isRenewal ? "Membership renewal" : "New enrollment",
+        });
+      }
       result = {
         studentId: student._id,
         enrollmentId: newEnrollmentId,
         enrollment: student.planEnrollments.id(newEnrollmentId).toObject(),
         branchId: branch._id,
+        invoice,
       };
     });
   } catch (error) {
@@ -444,40 +445,8 @@ async function createEnrollment(req, res, isRenewal = false) {
   }
   await session.endSession();
 
-  let invoice = null;
-  let invoiceError = null;
-  if (shouldInvoice) {
-    const invoiceDate = academyDateKey(startDate);
-    const fakeResponse = {
-      status(code) {
-        this.statusCode = code;
-        return this;
-      },
-      json(payload) {
-        this.payload = payload;
-        return this;
-      },
-    };
-    await createInvoice(
-      {
-        user: req.user,
-        body: {
-          studentId: String(result.studentId),
-          enrollmentId: String(result.enrollmentId),
-          dueDate: `${invoiceDate}T12:00:00.000Z`,
-          periodStart: `${invoiceDate}T00:00:00.000Z`,
-          status: "ISSUED",
-          notes: isRenewal ? "Membership renewal" : "New enrollment",
-        },
-      },
-      fakeResponse,
-    );
-    invoice = fakeResponse.payload?.invoice || null;
-    invoiceError = invoice
-      ? null
-      : fakeResponse.payload?.message ||
-        "Enrollment saved; invoice could not be created. Retry from Finance.";
-  }
+  const invoice = result.invoice || null;
+  if (invoice) await sendInvoiceIssuedEmail(invoice).catch(() => {});
 
   if (isRenewal) await safelyNotify({
     type: "MEMBERSHIP_RENEWAL_COMPLETED",
@@ -491,6 +460,7 @@ async function createEnrollment(req, res, isRenewal = false) {
     actionUrl: "/memberships",
     eventKey: `membership:${result.enrollmentId}:renewed`,
   });
+  if (isRenewal) await sendStudentEmail({ studentId: result.studentId, eventKey: `membership:${result.enrollmentId}:renewed`, category: "MEMBERSHIP_RENEWED", subject: "Your membership has been renewed", text: ["Your membership renewal is complete.", "", "Sign in to your student dashboard to review your membership details."].join("\n") }).catch(() => {});
   const responseStudent = await Student.findById(result.studentId)
     .populate("branch", "name")
     .populate("plan", "name")
@@ -503,7 +473,7 @@ async function createEnrollment(req, res, isRenewal = false) {
       success: true,
       enrollment: decorate(responseStudent, saved),
       invoice,
-      invoiceError,
+      invoiceError: null,
     });
 }
 

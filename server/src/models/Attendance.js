@@ -15,6 +15,8 @@ const attendanceSchema = new mongoose.Schema(
     },
 
     enrollment: { type: mongoose.Schema.Types.ObjectId, default: null },
+    session: { type: mongoose.Schema.Types.ObjectId, ref: "Session", default: null, index: true },
+    batch: { type: mongoose.Schema.Types.ObjectId, ref: "Batch", default: null, index: true },
     plan: { type: mongoose.Schema.Types.ObjectId, ref: "Plan", default: null },
 
     sessionTypeId: {

@@ -2,13 +2,25 @@ const mongoose = require("mongoose");
 
 const Branch = require("../models/Branch");
 const BranchSchedule = require("../models/BranchSchedule");
+const BranchDateSchedule = require("../models/BranchDateSchedule");
+const Room = require("../models/Room");
+const Session = require("../models/Session");
+const Attendance = require("../models/Attendance");
 const TrainingSessionType = require("../models/TrainingSessionType");
+const Batch = require("../models/Batch");
 const Student = require("../models/Student");
 const User = require("../models/User");
 const CoachAvailability = require("../models/CoachAvailability");
+const auditService = require("../services/audit.service");
+const { AUDIT_ACTIONS } = require("../config/auditActions");
+const { reconcileFutureSessionsForBranch, resolveSessionForSlot } = require("../services/session.service");
+const { findRecurringConflict } = require("../services/schedulingConflict.service");
+const { acquireScheduleResourceLocks } = require("../services/scheduleResourceLock.service");
 
 const {
   getBranchMonthAvailability,
+  formatDate,
+  parseCalendarDate,
 } = require("../services/branchSchedule.service");
 
 /* =========================================================
@@ -303,6 +315,66 @@ function normalizeWeeklySchedule(weeklySchedule) {
   });
 }
 
+async function listRooms(req, res) {
+  const { branchId } = req.query;
+  if (!isValidObjectId(branchId)) return res.status(400).json({ success: false, message: "A valid Branch is required." });
+  if (!userCanReadBranch(req, new mongoose.Types.ObjectId(branchId))) return res.status(403).json({ success: false, message: "You do not have access to this Branch's rooms." });
+  const rooms = await Room.find({ branch: branchId }).sort({ isActive: -1, name: 1 }).lean();
+  return res.json({ success: true, rooms });
+}
+
+async function createRoom(req, res) {
+  const { branchId, name } = req.body || {};
+  if (!isValidObjectId(branchId) || !String(name || "").trim() || String(name).trim().length > 80) return res.status(400).json({ success: false, message: "Choose a Branch and provide a room name up to 80 characters." });
+  if (!userCanWriteBranch(req, new mongoose.Types.ObjectId(branchId))) return res.status(403).json({ success: false, message: "You do not have permission to manage rooms for this Branch." });
+  try {
+    const branch = await Branch.findById(branchId).select("isActive").lean();
+    if (!branch || branch.isActive === false) return res.status(400).json({ success: false, message: "Rooms can only be added to an active Branch." });
+    const room = await Room.create({ branch: branchId, name: String(name).trim(), createdBy: req.user._id, updatedBy: req.user._id });
+    return res.status(201).json({ success: true, room });
+  } catch (error) {
+    if (error?.code === 11000) return res.status(409).json({ success: false, message: "A room with this name already exists at this Branch." });
+    return res.status(500).json({ success: false, message: "Unable to create room." });
+  }
+}
+
+async function setRoomStatus(req, res) {
+  const { id } = req.params;
+  const { isActive } = req.body || {};
+  if (!isValidObjectId(id) || typeof isActive !== "boolean") return res.status(400).json({ success: false, message: "A valid room and active status are required." });
+  const room = await Room.findById(id);
+  if (!room) return res.status(404).json({ success: false, message: "Room not found." });
+  if (!userCanWriteBranch(req, room.branch)) return res.status(403).json({ success: false, message: "You do not have permission to manage this Branch's rooms." });
+  if (isActive && !(await Branch.exists({ _id: room.branch, isActive: true }))) return res.status(409).json({ success: false, message: "Activate this Branch before activating its rooms." });
+  const lockDays = Array.from({ length: 7 }, (_, dayOfWeek) => ({ dayOfWeek, slots: [{ roomId: room._id, isActive: true }] }));
+  let release;
+  try {
+    release = await acquireScheduleResourceLocks({ branchId: room.branch, scheduleDays: lockDays });
+    if (!isActive) {
+      const schedule = await BranchSchedule.findOne({ branch: room.branch }).select("weeklySchedule").lean();
+      const assigned = (schedule?.weeklySchedule || []).some((day) => !day.isClosed && (day.slots || []).some((slot) => slot.isActive !== false && String(slot.roomId || "") === String(room._id)));
+      if (assigned) return res.status(409).json({ success: false, message: "This room is assigned to an active recurring slot. Reassign those slots before deactivating it." });
+      const datedSchedules = await BranchDateSchedule.find({ branch: room.branch, date: { $gte: formatDate(new Date()) }, isClosed: false }).select("slots").lean();
+      const datedAssigned = datedSchedules.some((item) => (item.slots || []).some((slot) => slot.isActive !== false && String(slot.roomId || "") === String(room._id)));
+      if (datedAssigned) return res.status(409).json({ success: false, message: "This room is assigned to a future dated session. Reassign that session before deactivating the room." });
+    }
+    room.isActive = isActive;
+    room.updatedBy = req.user._id;
+    await room.save();
+    return res.json({ success: true, room });
+  } catch (error) {
+    return res.status(error?.status || 500).json({ success: false, message: error.message || "Unable to update room status." });
+  } finally {
+    if (release) await release();
+  }
+}
+
+function resolvedBatchId(slot, existingSlot) {
+  return slot && Object.prototype.hasOwnProperty.call(slot, "batchId")
+    ? slot.batchId || null
+    : existingSlot?.batchId || null;
+}
+
 /* =========================================================
    SCHEDULE VALIDATION
 ========================================================= */
@@ -350,43 +422,71 @@ async function validateSchedulePayload(body, existingSchedule, branchId, allowCa
     for (const slot of day.slots || []) existingSlots.set(String(slot._id), slot);
   }
   const submittedIds = [];
+  const submittedBatchIds = [];
+  const submittedRoomIds = [];
   const assignedCoachIds = [];
   for (const day of weeklySchedule) for (const slot of (day.isClosed ? [] : day.slots || [])) {
-    if (slot?.sessionTypeId != null) {
-      if (!mongoose.Types.ObjectId.isValid(slot.sessionTypeId)) return { valid: false, message: "Invalid training session type reference." };
-      submittedIds.push(String(slot.sessionTypeId));
-    } else if (!existingSlots.has(String(slot?._id || ""))) {
-      return { valid: false, message: "Select a training session type for every new session." };
-  }
+    const existingSlot = existingSlots.get(String(slot?._id || ""));
+    const batchId = resolvedBatchId(slot, existingSlot);
+    if (slot?.sessionTypeId != null) submittedIds.push(String(slot.sessionTypeId));
+    else if (!batchId && !existingSlot?.sessionTypeId) return { valid: false, message: "Select a training session type for every new session." };
+    if (batchId) {
+      if (!mongoose.Types.ObjectId.isValid(batchId)) return { valid: false, message: "Invalid Batch reference." };
+      submittedBatchIds.push(String(batchId));
+    }
+    const roomId = slot?.roomId !== undefined ? slot.roomId : existingSlot?.roomId;
+    if (roomId) {
+      if (!mongoose.Types.ObjectId.isValid(roomId)) return { valid: false, message: "Invalid room reference." };
+      submittedRoomIds.push(String(roomId));
+    }
     const coachId = slot?.coach || existingSlots.get(String(slot?._id || ""))?.coach;
     if (coachId) {
       if (!mongoose.Types.ObjectId.isValid(coachId)) return { valid: false, message: "Invalid coach assignment." };
       assignedCoachIds.push(String(coachId));
     }
   }
+  const uniqueBatchIds = [...new Set(submittedBatchIds)];
+  const batchDocs = await Batch.find({ branch: branchId, $or: [{ _id: { $in: uniqueBatchIds } }, { status: "ACTIVE" }] }).populate("plan", "classesPerWeek programs isActive").lean();
+  const batchesById = new Map(batchDocs.map((batch) => [String(batch._id), batch]));
+  if (uniqueBatchIds.some((id) => !batchesById.has(id))) return { valid: false, message: "A selected Batch does not belong to this branch." };
+  const batchDefaultRoomIds = [];
+  for (const day of weeklySchedule) {
+    if (day.isClosed) continue;
+    for (const slot of day.slots || []) {
+      if (slot.roomId || !slot.batchId) continue;
+      const roomId = String(batchesById.get(String(slot.batchId))?.roomId || "");
+      if (roomId) batchDefaultRoomIds.push(roomId);
+    }
+  }
+  const roomIdsToValidate = [...new Set([...submittedRoomIds, ...batchDefaultRoomIds])];
+  const activeRooms = roomIdsToValidate.length ? await Room.find({ _id: { $in: roomIdsToValidate }, branch: branchId, isActive: true }).select("_id name").lean() : [];
+  const activeRoomIds = new Set(activeRooms.map((room) => String(room._id)));
+  if (activeRoomIds.size !== roomIdsToValidate.length) return { valid: false, message: "Choose active rooms belonging to this Branch." };
+  for (const day of weeklySchedule) for (const slot of (day.isClosed ? [] : day.slots || [])) {
+    const existingSlot = existingSlots.get(String(slot?._id || ""));
+    const batchId = resolvedBatchId(slot, existingSlot);
+    if (!slot.sessionTypeId && !existingSlot?.sessionTypeId && batchId) {
+      const programs = batchesById.get(String(batchId))?.plan?.programs || [];
+      if (programs.length === 1) slot.sessionTypeId = String(programs[0].program?._id || programs[0].program);
+      else return { valid: false, message: `Choose a Program in the schedule row for this Batch; its Plan contains ${programs.length} Programs and the curriculum cannot be inferred safely.` };
+    }
+    const programId = slot.sessionTypeId || existingSlot?.sessionTypeId;
+    if (programId) {
+      if (!mongoose.Types.ObjectId.isValid(programId)) return { valid: false, message: "Invalid training session type reference." };
+      submittedIds.push(String(programId));
+    }
+  }
   const typeDocs = submittedIds.length ? await TrainingSessionType.find({ _id: { $in: [...new Set(submittedIds)] } }).select("_id isActive").lean() : [];
   const typesById = new Map(typeDocs.map((type) => [String(type._id), type]));
   if (typesById.size !== new Set(submittedIds).size) return { valid: false, message: "One or more selected training session types no longer exist." };
+  const batchOccurrences = new Map();
 
   for (const day of weeklySchedule) {
     const daySlots = Array.isArray(day.slots) ? day.slots : [];
     for (const slot of daySlots) {
       const id = slot?.sessionTypeId == null ? "" : String(slot.sessionTypeId);
-      if (id && typesById.get(id)?.isActive === false && String(existingSlots.get(String(slot?._id))?.sessionTypeId || "") !== id) return { valid: false, message: "Inactive training session types cannot be assigned to new sessions." };
-    }
-
-    // Closed days may retain slots for future reactivation, but active slots
-    // must still never conflict with one another.
-    const collisionSlots = daySlots.filter((slot) => slot?.isActive !== false && TIME_PATTERN.test(String(slot?.startTime || "")) && TIME_PATTERN.test(String(slot?.endTime || "")));
-    for (let index = 0; index < collisionSlots.length; index += 1) for (let otherIndex = index + 1; otherIndex < collisionSlots.length; otherIndex += 1) {
-      const first = collisionSlots[index], second = collisionSlots[otherIndex];
-      const firstStart = timeToMinutes(first.startTime), firstEnd = timeToMinutes(first.endTime);
-      const secondStart = timeToMinutes(second.startTime), secondEnd = timeToMinutes(second.endTime);
-      if (secondStart < firstEnd && secondEnd > firstStart) {
-        const existing = secondStart >= firstStart ? first : second;
-        const requested = existing === first ? second : first;
-        return { valid: false, message: `${DAY_NAMES[day.dayOfWeek]} already has a session scheduled from ${formatTimeForDisplay(existing.startTime)} to ${formatTimeForDisplay(existing.endTime)}. The requested time ${formatTimeForDisplay(requested.startTime)} to ${formatTimeForDisplay(requested.endTime)} overlaps with it.` };
-      }
+      const batchId = resolvedBatchId(slot, existingSlots.get(String(slot?._id || "")));
+      if (id && typesById.get(id)?.isActive === false && (batchId || String(existingSlots.get(String(slot?._id))?.sessionTypeId || "") !== id)) return { valid: false, message: "Inactive training session types cannot be assigned to Batch sessions." };
     }
 
     if (day.isClosed) {
@@ -413,6 +513,18 @@ async function validateSchedulePayload(body, existingSchedule, branchId, allowCa
 
       const endTime = String(slot?.endTime || "").trim();
       const existingSlot = existingSlots.get(String(slot?._id || ""));
+      const batchId = resolvedBatchId(slot, existingSlot);
+      const selectedRoomId = slot?.roomId !== undefined ? slot.roomId || (batchId ? batchesById.get(String(batchId))?.roomId : null) : existingSlot?.roomId || (batchId ? batchesById.get(String(batchId))?.roomId : null);
+      if (batchId) {
+        const batch = batchesById.get(String(batchId));
+        if (!batch || !batch.plan || batch.plan.isActive === false || batch.status === "INACTIVE") return { valid: false, message: "The selected Batch or its Plan is inactive." };
+        const programId = String(slot?.sessionTypeId || existingSlot?.sessionTypeId || "");
+        if (!programId || !(batch.plan.programs || []).some((item) => String(item.program?._id || item.program) === programId)) return { valid: false, message: "Every Batch occurrence must use a Program included in its Plan." };
+        if (!selectedRoomId) return { valid: false, message: `Assign an active Branch room to ${batch.name} before saving its recurring session.` };
+        if (!activeRoomIds.has(String(selectedRoomId))) return { valid: false, message: `The room assigned to ${batch.name} is inactive or belongs to another Branch.` };
+        if (!batchOccurrences.has(String(batchId))) batchOccurrences.set(String(batchId), []);
+        if (slot?.isActive !== false && !day.isClosed) batchOccurrences.get(String(batchId)).push(String(slot?._id || ""));
+      }
       const rawCapacity = slot?.capacity === undefined ? existingSlot?.capacity : slot.capacity;
       const capacity = rawCapacity === "" || rawCapacity == null ? null : Number(rawCapacity);
       if (capacity !== null && (!Number.isInteger(capacity) || capacity < 1 || capacity > 1000)) return { valid: false, message: "Session capacity must be a whole number between 1 and 1000." };
@@ -479,6 +591,9 @@ async function validateSchedulePayload(body, existingSchedule, branchId, allowCa
             ? { sessionTypeId: existingSlots.get(String(slot?._id)).sessionTypeId }
             : {}),
         ...(slot?.sessionType ? { sessionType: String(slot.sessionType).trim() } : {}),
+        batchId,
+        room: String(slot?.room ?? existingSlot?.room ?? "").trim(),
+        roomId: selectedRoomId || null,
         startTime,
         endTime,
         isActive: slot?.isActive !== false,
@@ -487,34 +602,74 @@ async function validateSchedulePayload(body, existingSchedule, branchId, allowCa
       });
     }
 
-    /*
-     * Sort before checking overlaps.
-     */
-    const activeSlots = normalizedSlots.filter((slot) => slot.isActive);
-    for (let index = 0; index < activeSlots.length; index += 1) for (let otherIndex = index + 1; otherIndex < activeSlots.length; otherIndex += 1) {
-      const first = activeSlots[index], second = activeSlots[otherIndex];
-      const firstStart = timeToMinutes(first.startTime), firstEnd = timeToMinutes(first.endTime);
-      const secondStart = timeToMinutes(second.startTime), secondEnd = timeToMinutes(second.endTime);
-      if (secondStart < firstEnd && secondEnd > firstStart) {
-        const existing = secondStart >= firstStart ? first : second;
-        const requested = existing === first ? second : first;
-        return { valid: false, message: `${DAY_NAMES[day.dayOfWeek]} already has a session scheduled from ${formatTimeForDisplay(existing.startTime)} to ${formatTimeForDisplay(existing.endTime)}. The requested time ${formatTimeForDisplay(requested.startTime)} to ${formatTimeForDisplay(requested.endTime)} overlaps with it.` };
-      }
-    }
     day.slots = normalizedSlots;
   }
 
-  if (assignedCoachIds.length) {
-    const coachIds = [...new Set(assignedCoachIds)];
+  for (const [batchId, slots] of batchOccurrences) {
+    const batch = batchesById.get(batchId);
+    const required = Number(batch.plan.classesPerWeek);
+    if (batch.status === "ACTIVE" && (!Number.isInteger(required) || slots.length !== required)) return { valid: false, message: `${batch.name} must have exactly ${required} active weekly occurrences before its schedule can be saved.` };
+    const persistedSlotIds = slots.filter(Boolean);
+    if (new Set(persistedSlotIds).size !== persistedSlotIds.length) return { valid: false, message: `${batch.name} cannot use the same schedule slot more than once.` };
+  }
+  for (const batch of batchDocs.filter((item) => item.status === "ACTIVE")) {
+    const required = Number(batch.plan?.classesPerWeek);
+    const configured = batchOccurrences.get(String(batch._id)) || [];
+    if (!Number.isInteger(required) || configured.length !== required) return { valid: false, message: `${batch.name} must retain exactly ${required} active weekly occurrences. Pause the Batch before removing its schedule.` };
+  }
+
+  const batchCoachById = new Map(batchDocs.map((item) => [String(item._id), String(item.coach || "")]));
+  const proposedResources = weeklySchedule.flatMap((day) => (day.isClosed ? [] : (day.slots || [])
+    .filter((slot) => slot.isActive !== false)
+    .map((slot) => ({ branchId: String(branchId), slotId: String(slot._id || ""), dayOfWeek: day.dayOfWeek, dayName: DAY_NAMES[day.dayOfWeek], startTime: slot.startTime, endTime: slot.endTime, active: true, batchId: slot.batchId, roomId: slot.roomId, roomName: activeRooms.find((room) => String(room._id) === String(slot.roomId))?.name, coachId: String(slot.coach || batchCoachById.get(String(slot.batchId || "")) || "") }))));
+  const currentCoachIds = [...new Set(proposedResources.map((item) => item.coachId).filter(Boolean))];
+  if (currentCoachIds.length) {
+    const coaches = await User.find({ _id: { $in: currentCoachIds }, role: "COACH", branch: branchId, isActive: true }).select("_id name").lean();
+    if (coaches.length !== currentCoachIds.length) return { valid: false, message: "Every assigned coach must be active and belong to this Branch." };
+    const foreignSchedules = await BranchSchedule.find({ branch: { $ne: branchId } }).select("branch weeklySchedule").lean();
+    const foreignOverrides = await BranchDateSchedule.find({ branch: { $ne: branchId }, date: { $gte: formatDate(new Date()) }, isClosed: false }).select("branch date slots").lean();
+    const foreignBatchIds = [...new Set([
+      ...foreignSchedules.flatMap((schedule) => (schedule.weeklySchedule || []).flatMap((day) => (day.slots || []).map((slot) => String(slot.batchId || "")).filter(Boolean))),
+      ...foreignOverrides.flatMap((override) => (override.slots || []).map((slot) => String(slot.batchId || "")).filter(Boolean)),
+    ])];
+    const foreignBatches = foreignBatchIds.length ? await Batch.find({ _id: { $in: foreignBatchIds } }).select("_id coach").lean() : [];
+    const foreignCoachByBatch = new Map(foreignBatches.map((batch) => [String(batch._id), String(batch.coach || "")]));
+    const foreignResources = [];
+    for (const schedule of foreignSchedules) {
+      for (const day of schedule.weeklySchedule || []) {
+        if (day.isClosed) continue;
+        for (const slot of day.slots || []) {
+          if (slot.isActive === false) continue;
+          foreignResources.push({ branchId: String(schedule.branch), slotId: String(slot._id || ""), dayOfWeek: day.dayOfWeek, dayName: DAY_NAMES[day.dayOfWeek], startTime: slot.startTime, endTime: slot.endTime, active: true, batchId: slot.batchId, roomId: slot.roomId, coachId: String(slot.coach || foreignCoachByBatch.get(String(slot.batchId || "")) || "") });
+        }
+      }
+    }
+    for (const override of foreignOverrides) {
+      const overrideDay = new Date(`${override.date}T12:00:00`).getDay();
+      for (const slot of override.slots || []) {
+        if (slot.isActive === false) continue;
+        foreignResources.push({ branchId: String(override.branch), slotId: String(slot._id || ""), dayOfWeek: overrideDay, dayName: DAY_NAMES[overrideDay], startTime: slot.startTime, endTime: slot.endTime, active: true, batchId: slot.batchId, roomId: slot.roomId, coachId: String(slot.coach || foreignCoachByBatch.get(String(slot.batchId || "")) || "") });
+      }
+    }
+    const conflict = findRecurringConflict({ proposed: proposedResources, existing: [...proposedResources, ...foreignResources] });
+    if (conflict) return { valid: false, message: conflict };
+  } else {
+    const conflict = findRecurringConflict({ proposed: proposedResources, existing: proposedResources });
+    if (conflict) return { valid: false, message: conflict };
+  }
+
+  if (currentCoachIds.length) {
+    const coachIds = currentCoachIds;
     const coaches = await User.find({ _id: { $in: coachIds }, role: "COACH", branch: branchId, isActive: true }).select("_id name").lean();
     const coachById = new Map(coaches.map((coach) => [String(coach._id), coach]));
     if (coachById.size !== coachIds.length) return { valid: false, message: "Choose active coaches assigned to this branch." };
     const availabilityRecords = await CoachAvailability.find({ coach: { $in: coachIds }, branch: branchId }).lean();
     const availabilityByCoach = new Map(availabilityRecords.map((item) => [String(item.coach), item]));
     for (const day of weeklySchedule) for (const slot of day.slots || []) {
-      if (!slot.coach || slot.isActive === false || day.isClosed) continue;
-      const coachName = coachById.get(String(slot.coach))?.name || "The coach";
-      const availability = availabilityByCoach.get(String(slot.coach));
+      const coachId = String(slot.coach || batchCoachById.get(String(slot.batchId || "")) || "");
+      if (!coachId || slot.isActive === false || day.isClosed) continue;
+      const coachName = coachById.get(coachId)?.name || "The coach";
+      const availability = availabilityByCoach.get(coachId);
       if (availability) {
         const hours = (availability.workingHours || []).filter((item) => item.dayOfWeek === day.dayOfWeek);
         if (hours.length && !hours.some((item) => item.startTime <= slot.startTime && item.endTime >= slot.endTime)) return { valid: false, message: `${coachName} is not available for ${DAY_NAMES[day.dayOfWeek]} ${slot.startTime}–${slot.endTime}.` };
@@ -530,12 +685,6 @@ async function validateSchedulePayload(body, existingSchedule, branchId, allowCa
         const dateUnavailable = (availability.unavailableSlots || []).some((item) => item.date && new Date(item.date).getDay() === day.dayOfWeek && item.startTime < slot.endTime && item.endTime > slot.startTime);
         if (dateUnavailable) return { valid: false, message: `${coachName} has a dated unavailable time during this class.` };
       }
-    }
-    const otherSchedules = await BranchSchedule.find({ branch: { $ne: branchId }, "weeklySchedule.slots.coach": { $in: coachIds } }).select("weeklySchedule").lean();
-    for (const day of weeklySchedule) for (const slot of day.slots || []) {
-      if (!slot.coach || slot.isActive === false || day.isClosed) continue;
-      const clash = otherSchedules.some((schedule) => (schedule.weeklySchedule || []).some((otherDay) => otherDay.dayOfWeek === day.dayOfWeek && !otherDay.isClosed && (otherDay.slots || []).some((other) => String(other.coach || "") === String(slot.coach) && other.isActive !== false && other.startTime < slot.endTime && other.endTime > slot.startTime)));
-      if (clash) return { valid: false, message: `${coachById.get(String(slot.coach))?.name || "This coach"} already has a conflicting session at another branch on ${DAY_NAMES[day.dayOfWeek]}.` };
     }
   }
 
@@ -766,7 +915,7 @@ const getPublicBranchMonthCalendar = async (req, res) => {
         (day) => day.isClosed === true && day.isHoliday === false,
       ).length,
 
-      noTrainingDays: days.filter((day) => day.reason === "NO_ACTIVE_SLOTS")
+      noTrainingDays: days.filter((day) => ["NO_ACTIVE_SLOTS", "BATCH_OUTSIDE_DATE_RANGE", "BATCH_NOT_ACTIVE"].includes(day.reason))
         .length,
 
       noScheduleDays: days.filter(
@@ -1007,7 +1156,7 @@ const getBranchMonthCalendar = async (req, res) => {
         (day) => day.isClosed === true && day.isHoliday === false,
       ).length,
 
-      noTrainingDays: days.filter((day) => day.reason === "NO_ACTIVE_SLOTS")
+      noTrainingDays: days.filter((day) => ["NO_ACTIVE_SLOTS", "BATCH_OUTSIDE_DATE_RANGE"].includes(day.reason))
         .length,
 
       noScheduleDays: days.filter(
@@ -1084,6 +1233,7 @@ const getBranchSchedule = async (req, res) => {
     })
       .populate("updatedBy", "name email role")
       .populate("weeklySchedule.slots.coach", "_id name")
+      .populate("weeklySchedule.slots.roomId", "_id name isActive")
       .lean();
 
     /*
@@ -1127,6 +1277,7 @@ const getBranchSchedule = async (req, res) => {
 ========================================================= */
 
 const upsertBranchSchedule = async (req, res) => {
+  let releaseResourceLocks = null;
   try {
     const { branchId } = req.params;
 
@@ -1161,6 +1312,7 @@ const upsertBranchSchedule = async (req, res) => {
     }
 
     const existingSchedule = await BranchSchedule.findOne({ branch: branchId }).lean();
+    releaseResourceLocks = await acquireScheduleResourceLocks({ branchId, scheduleDays: req.body?.weeklySchedule || [], existingDays: existingSchedule?.weeklySchedule || [] });
     const allowCapacityOverride = req.user.role === "SUPER_ADMIN" || (req.user.permissions || []).includes("branch_schedule.capacity.override");
     const validation = await validateSchedulePayload(req.body, existingSchedule, branchId, allowCapacityOverride);
 
@@ -1173,10 +1325,28 @@ const upsertBranchSchedule = async (req, res) => {
 
     const { openingTime, closingTime, weeklySchedule } = validation;
 
+    if (existingSchedule) {
+      const oldSlots = new Map();
+      const newSlots = new Map();
+      for (const day of existingSchedule.weeklySchedule || []) for (const slot of day.slots || []) oldSlots.set(String(slot._id), { slot, dayOfWeek: day.dayOfWeek });
+      for (const day of weeklySchedule || []) for (const slot of day.slots || []) newSlots.set(String(slot._id), { slot, dayOfWeek: day.dayOfWeek });
+      for (const [slotId, previous] of oldSlots) {
+        const next = newSlots.get(slotId);
+        const lifecycleChanged = !next || String(previous.slot.batchId || "") !== String(next.slot.batchId || "") || Number(previous.dayOfWeek) !== Number(next.dayOfWeek);
+        if (!lifecycleChanged) continue;
+        const hasSessionHistory = await Session.exists({ branch: branchId, scheduleSlotId: slotId });
+        const hasAttendanceHistory = await Attendance.exists({ branch: branchId, sessionSlotId: slotId });
+        if (hasSessionHistory || hasAttendanceHistory) {
+          return res.status(409).json({ success: false, message: `This recurring slot has dated Session or attendance history and cannot be removed, moved, or reassigned. Keep the slot for its history and create a separate recurring slot for the new assignment.` });
+        }
+      }
+    }
+
+    const scheduleQuery = existingSchedule
+      ? { branch: branchId, updatedAt: existingSchedule.updatedAt }
+      : { branch: branchId };
     const schedule = await BranchSchedule.findOneAndUpdate(
-      {
-        branch: branchId,
-      },
+      scheduleQuery,
       {
         $set: {
           openingTime,
@@ -1191,11 +1361,14 @@ const upsertBranchSchedule = async (req, res) => {
       },
       {
         returnDocument: "after",
-        upsert: true,
+        upsert: !existingSchedule,
         runValidators: true,
         setDefaultsOnInsert: true,
       },
     ).populate("updatedBy", "name email role");
+    if (!schedule) return res.status(409).json({ success: false, message: "The Branch schedule changed while you were editing it. Refresh and review the latest room and coach availability." });
+    try { await reconcileFutureSessionsForBranch(branch._id, schedule.toObject()); }
+    catch (syncError) { console.error("Future Batch Sessions could not be reconciled after schedule save", { name: syncError?.name || "Error" }); }
 
     return res.status(200).json({
       success: true,
@@ -1204,6 +1377,9 @@ const upsertBranchSchedule = async (req, res) => {
     });
   } catch (error) {
     console.error("Save branch schedule error:", error);
+
+    if (error?.status === 409) return res.status(409).json({ success: false, message: error.message });
+    if (error?.code === 11000) return res.status(409).json({ success: false, message: "The Branch schedule changed during this save. Refresh and try again." });
 
     if (error?.name === "ValidationError") {
       return res.status(400).json({
@@ -1219,6 +1395,11 @@ const upsertBranchSchedule = async (req, res) => {
       success: false,
       message: "Failed to save branch training schedule.",
     });
+  } finally {
+    if (releaseResourceLocks) {
+      try { await releaseResourceLocks(); }
+      catch (error) { console.error("Unable to release schedule resource locks", { name: error?.name || "Error" }); }
+    }
   }
 };
 
@@ -1277,6 +1458,9 @@ const deleteBranchSchedule = async (req, res) => {
       });
     }
 
+    if (await Session.exists({ branch: branchId }) || await Attendance.exists({ branch: branchId, sessionSlotId: { $ne: null } })) return res.status(409).json({ success: false, message: "This Branch has dated Session or attendance history. Disable or update individual recurring slots instead of deleting the schedule." });
+    if (await Batch.exists({ branch: branchId, status: "ACTIVE" })) return res.status(409).json({ success: false, message: "Pause active Batches before resetting the Branch schedule." });
+
     const deleted = await BranchSchedule.findOneAndDelete({
       branch: branchId,
     });
@@ -1302,6 +1486,58 @@ const deleteBranchSchedule = async (req, res) => {
   }
 };
 
+const setTrainingSessionStatus = async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const { status, reason = "", occurrence } = req.body || {};
+    if ((!isValidObjectId(sessionId) && !occurrence) || !["CLOSED", "SCHEDULED"].includes(status)) return res.status(400).json({ success: false, message: "Choose a valid Session occurrence and status (CLOSED or SCHEDULED)." });
+    if (status === "CLOSED" && !String(reason).trim()) return res.status(400).json({ success: false, message: "A reason is required when closing a Session." });
+    let current = isValidObjectId(sessionId) ? await Session.findById(sessionId).lean() : null;
+    if (!current && occurrence) {
+      const { branchId, date, slotId, batchId } = occurrence;
+      if (!isValidObjectId(branchId) || !isValidObjectId(slotId) || !isValidObjectId(batchId) || !/^\d{4}-\d{2}-\d{2}$/.test(date || "") || !parseCalendarDate(date)) return res.status(400).json({ success: false, message: "The scheduled occurrence details are invalid." });
+      if (!userCanWriteBranch(req, branchId)) return res.status(403).json({ success: false, message: "You do not have permission to manage this Branch Session." });
+      const datedOverride = await BranchDateSchedule.findOne({ branch: branchId, date }).lean();
+      let slot = datedOverride ? (!datedOverride.isClosed ? (datedOverride.slots || []).find((item) => String(item._id) === String(slotId)) : null) : null;
+      if (!datedOverride) {
+        const schedule = await BranchSchedule.findOne({ branch: branchId }).lean();
+        const weekday = parseCalendarDate(date).getDay();
+        slot = (schedule?.weeklySchedule || []).find((item) => Number(item.dayOfWeek) === weekday && !item.isClosed)?.slots?.find((item) => String(item._id) === String(slotId));
+      }
+      if (!slot || String(slot.batchId || "") !== String(batchId)) return res.status(404).json({ success: false, message: "This scheduled Batch occurrence is no longer available. Refresh the calendar." });
+      current = await Session.findOne({ batch: batchId, date, scheduleSlotId: slotId }).lean();
+      if (!current) current = await resolveSessionForSlot({ branchId, date, slot });
+      if (!current) return res.status(409).json({ success: false, message: "This occurrence is unavailable because its Batch dates, schedule, or resources are no longer valid." });
+      current = current.toObject ? current.toObject() : current;
+    }
+    if (!current) return res.status(404).json({ success: false, message: "Session not found." });
+    if (!userCanWriteBranch(req, current.branch)) return res.status(403).json({ success: false, message: "You do not have permission to manage this Branch Session." });
+    if (current.status === status) {
+      await require("../services/batchCompletion.service").recalculateBatchCompletionsForBranch(current.branch);
+      const batch = await Batch.findById(current.batch).select("calculatedEndDate capacityIssue").lean();
+      return res.json({ success: true, session: current, batch, message: "Session status was already current; Batch completion was reconciled." });
+    }
+    if (status === "CLOSED" && current.date < formatDate(new Date())) return res.status(409).json({ success: false, message: "Historical Sessions cannot be closed; preserve their Session and attendance history." });
+    if (status === "CLOSED" && await Attendance.exists({ session: current._id })) return res.status(409).json({ success: false, message: "This Session has attendance history and cannot be closed. Correct its attendance through the attendance workflow." });
+    if (["COMPLETED", "CANCELLED"].includes(current.status)) return res.status(409).json({ success: false, message: "Completed or cancelled Sessions cannot be closed or reopened." });
+    if ((status === "CLOSED" && current.status !== "SCHEDULED") || (status === "SCHEDULED" && current.status !== "CLOSED")) return res.status(409).json({ success: false, message: "The Session status changed. Refresh and try again." });
+    const next = await Session.findOneAndUpdate(
+      { _id: current._id, status: current.status },
+      { $set: status === "CLOSED" ? { status, closureReason: String(reason).trim().slice(0, 500), closedAt: new Date(), closedBy: req.user._id } : { status, closureReason: "", closedAt: null, closedBy: null } },
+      { new: true, runValidators: true },
+    ).lean();
+    if (!next) return res.status(409).json({ success: false, message: "The Session status changed. Refresh and try again." });
+    const action = status === "CLOSED" ? AUDIT_ACTIONS.SESSION_CLOSED : AUDIT_ACTIONS.SESSION_REOPENED;
+    await auditService.record({ req, action, entityType: "SESSION", entityId: current._id, branchId: current.branch, before: { status: current.status, closureReason: current.closureReason || "" }, after: { status: next.status, closureReason: next.closureReason || "" } });
+    await require("../services/batchCompletion.service").recalculateBatchCompletionsForBranch(current.branch);
+    const batch = await Batch.findById(current.batch).select("calculatedEndDate capacityIssue").lean();
+    return res.json({ success: true, session: next, batch, message: batch?.capacityIssue || (status === "CLOSED" ? "Session closed. Batch completion was recalculated." : "Session reopened. Batch completion was recalculated.") });
+  } catch (error) {
+    console.error("Update training Session status failed", { name: error?.name || "Error" });
+    return res.status(500).json({ success: false, message: "Session status was not fully processed. Refresh the Batch schedule and retry recalculation." });
+  }
+};
+
 /* =========================================================
    EXPORTS
 ========================================================= */
@@ -1312,6 +1548,10 @@ module.exports = {
   getBranchSchedules,
   getBranchMonthCalendar,
   getBranchSchedule,
+  listRooms,
+  createRoom,
+  setRoomStatus,
+  setTrainingSessionStatus,
   upsertBranchSchedule,
   deleteBranchSchedule,
   formatTimeForDisplay,

@@ -130,7 +130,7 @@ const createInquiry = async (req, res) => {
         if (!branchId || !Number.isInteger(requiredCount) || preferredWeeklySessions.length !== requiredCount) {
           return res.status(400).json({ message: `Choose a branch and exactly ${requiredCount} weekly sessions for this plan.` });
         }
-        const chosenDays = new Set();
+        const chosenOccurrences = new Set();
         const programCounts = new Map();
         const programWeeklyLimits = new Map((planDoc.programs || []).map((item) => [String(item.program?._id || item.program), item.weeklyLimit == null ? null : Number(item.weeklyLimit)]));
         const weeklySchedule = await getBranchSchedule(branchId);
@@ -138,20 +138,22 @@ const createInquiry = async (req, res) => {
         for (const selected of preferredWeeklySessions) {
           const dayOfWeek = Number(selected?.dayOfWeek);
           const sessionTypeId = String(selected?.sessionTypeId || "");
-          if (!Number.isInteger(dayOfWeek) || dayOfWeek < 0 || dayOfWeek > 6 || chosenDays.has(dayOfWeek)) {
-            return res.status(400).json({ message: "Select one session on each of the required number of different days." });
+          if (!Number.isInteger(dayOfWeek) || dayOfWeek < 0 || dayOfWeek > 6) {
+            return res.status(400).json({ message: "Select valid weekly session days." });
           }
           if (!mongoose.isValidObjectId(sessionTypeId) || !includedProgramIds.includes(sessionTypeId)) {
             return res.status(400).json({ message: "Every selected weekly session must belong to a program in the plan." });
           }
           const day = (weeklySchedule.weeklySchedule || []).find((item) => Number(item.dayOfWeek) === dayOfWeek);
           const slot = !day || day.isClosed ? null : (day.slots || []).find((item) =>
-            item && item.isActive !== false && String(item.sessionTypeId || "") === sessionTypeId &&
+            item && item.isActive !== false && (!selected?.scheduleSlotId || String(item._id) === String(selected.scheduleSlotId)) && String(item.sessionTypeId || "") === sessionTypeId &&
             String(item.startTime) === String(selected.startTime || "") &&
             String(item.endTime) === String(selected.endTime || "") &&
             String(item.sessionName || "Training Session") === String(selected.sessionName || "Training Session"),
           );
           if (!slot) return res.status(400).json({ message: `${DAY_NAMES[dayOfWeek]} session is no longer in this branch's weekly schedule. Refresh and choose again.` });
+          const occurrenceKey = `${dayOfWeek}:${slot._id}`;
+          if (chosenOccurrences.has(occurrenceKey)) return res.status(400).json({ message: "A weekly session occurrence cannot be selected more than once." });
           const type = await TrainingSessionType.findOne({ _id: sessionTypeId, isActive: true }).select("name");
           if (!type) return res.status(400).json({ message: "A selected session program is no longer active." });
           const nextProgramCount = (programCounts.get(sessionTypeId) || 0) + 1;
@@ -160,10 +162,12 @@ const createInquiry = async (req, res) => {
             return res.status(400).json({ message: `${type.name} exceeds this plan's weekly class limit.` });
           }
           programCounts.set(sessionTypeId, nextProgramCount);
-          chosenDays.add(dayOfWeek);
+          chosenOccurrences.add(occurrenceKey);
           savedWeeklySessions.push({
             dayOfWeek,
             dayName: DAY_NAMES[dayOfWeek],
+            scheduleSlotId: slot._id || null,
+            batchId: slot.batchId || null,
             sessionName: slot.sessionName || "Training Session",
             sessionTypeId: type._id,
             sessionTypeName: type.name,
@@ -249,7 +253,7 @@ const createInquiry = async (req, res) => {
       entityType: "INQUIRY",
       entityId: inquiry._id,
       eventKey: `inquiry:${inquiry._id}:received`,
-      actionUrl: "/inquiries",
+      actionUrl: "/crm",
     });
 
     // The inquiry is already saved. A mail provider outage must not make the

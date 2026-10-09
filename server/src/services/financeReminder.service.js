@@ -1,6 +1,7 @@
 const Invoice = require("../models/Invoice");
 const Student = require("../models/Student");
 const { safelyNotify, createNotification } = require("./notification.service");
+const { sendFinanceReminderEmail } = require("./financeEmail.service");
 const { academyDateKey, academyDayStart, isPastDue } = require("../utils/financeDates");
 
 async function refreshFinanceReminders(now = new Date()) {
@@ -29,6 +30,7 @@ async function refreshFinanceReminders(now = new Date()) {
       severity: overdue ? "WARNING" : "INFO", branch: invoice.branch, student: invoice.student, entityType: "FINANCE", entityId: invoice._id,
       actionUrl: "/student-dashboard", eventKey: `${staffEvent}:student`,
     }).catch(() => {});
+    await sendFinanceReminderEmail({ invoice, overdue, eventKey: staffEvent }).catch(() => {});
   }
   return invoices.length;
 }

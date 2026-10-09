@@ -1,7 +1,7 @@
 "use client";
 import { confirmAction, toast } from "@/lib/toast";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -121,6 +121,7 @@ export default function ModulesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
   const [reloadKey, setReloadKey] = useState(0);
 
   // Roles come from the database (Roles page).
@@ -185,7 +186,7 @@ export default function ModulesPage() {
     return () => {
       cancelled = true;
     };
-  }, [reloadKey]);
+  }, []);
 
   const sorted = useMemo(
     () =>
@@ -205,9 +206,9 @@ export default function ModulesPage() {
       ["dashboard", "student-dashboard"].includes(item.key),
     );
     const groupedKeys = new Set(topLevel.map((item) => item.key));
-    const sections: { id: string; label: string; items: ManagedModule[] }[] = [
+    const sections: { id: string; label: string; items: ManagedModule[]; sectionOrder: number }[] = [
       ...(topLevel.length
-        ? [{ id: "top-level", label: "Top-level links", items: topLevel }]
+        ? [{ id: "top-level", label: "Top-level links", items: topLevel, sectionOrder: 0 }]
         : []),
       ...NAVIGATION_GROUPS.flatMap((group) => {
         const items = sidebarModules.filter(
@@ -215,7 +216,7 @@ export default function ModulesPage() {
         );
         items.forEach((item) => groupedKeys.add(item.key));
         return items.length
-          ? [{ id: group.id, label: group.label, items }]
+          ? [{ id: group.id, label: group.label, items, sectionOrder: Number.isFinite(items.find((item) => Number.isFinite(item.sectionOrder))?.sectionOrder) ? Number(items.find((item) => Number.isFinite(item.sectionOrder))?.sectionOrder) : (NAVIGATION_GROUPS.findIndex((candidate) => candidate.id === group.id) + 1) * 10 }]
           : [];
       }),
     ];
@@ -236,14 +237,16 @@ export default function ModulesPage() {
           id,
           label: getNavigationSectionLabel(items[0]),
           items,
+          sectionOrder: Number.isFinite(items.find((item) => Number.isFinite(item.sectionOrder))?.sectionOrder) ? Number(items.find((item) => Number.isFinite(item.sectionOrder))?.sectionOrder) : 1000 + sections.length,
         });
       }
     });
     const ungrouped = sidebarModules.filter((item) => !groupedKeys.has(item.key));
     if (ungrouped.length) {
-      sections.push({ id: "ungrouped", label: "Other links", items: ungrouped });
+      const savedOrder = ungrouped.find((item) => Number.isFinite(item.sectionOrder))?.sectionOrder;
+      sections.push({ id: "ungrouped", label: "Other links", items: ungrouped, sectionOrder: Number.isFinite(savedOrder) ? Number(savedOrder) : 10000 });
     }
-    return sections;
+    return sections.sort((a, b) => a.sectionOrder - b.sectionOrder);
   }, [sidebarModules]);
   const orderedSidebarModules = useMemo(
     () => sidebarSections.flatMap((section) => section.items),
@@ -256,9 +259,16 @@ export default function ModulesPage() {
   );
   const visibleModulesCount = visibleModuleIds.size;
 
-  const refresh = () => {
-    setReloadKey((count) => count + 1);
-    notifyNavigationChanged();
+  const beginAction = () => {
+    if (busyRef.current) return false;
+    busyRef.current = true;
+    setBusy(true);
+    return true;
+  };
+
+  const endAction = () => {
+    busyRef.current = false;
+    setBusy(false);
   };
 
   /* -------------------------------------------------------
@@ -317,7 +327,7 @@ export default function ModulesPage() {
   };
 
   const handleSave = async () => {
-    if (!canManageModules) return;
+    if (!canManageModules || busyRef.current) return;
     setFormError("");
 
     if (!form.label.trim()) {
@@ -342,11 +352,10 @@ export default function ModulesPage() {
       return;
     }
 
+    if (!beginAction()) return;
     try {
-      setBusy(true);
-
       if (form.id) {
-        await updateModule(form.id, {
+        const saved = await updateModule(form.id, {
           label: form.label,
           href: form.isSystem ? undefined : form.href,
           icon: form.icon,
@@ -354,10 +363,11 @@ export default function ModulesPage() {
           group: sidebarSection,
           allowedRoles: form.allowedRoles,
         });
+        setModules((current) => current.map((item) => item._id === saved._id ? saved : item));
 
         toast.success("Module updated successfully.");
       } else {
-        await createModule({
+        const saved = await createModule({
           key: moduleKey,
           label: form.label,
           href: form.href,
@@ -366,27 +376,30 @@ export default function ModulesPage() {
           group: sidebarSection,
           allowedRoles: form.allowedRoles,
         });
+        setModules((current) => [...current, saved]);
 
         toast.success("Module created successfully.");
       }
 
       setModalOpen(false);
-      refresh();
+      notifyNavigationChanged();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to save module.");
+      const message = err instanceof Error ? err.message : "Failed to save module.";
+      setFormError(message);
+      toast.error(message);
     } finally {
-      setBusy(false);
+      endAction();
     }
   };
 
   const handleToggleActive = async (item: ManagedModule) => {
-    if (!canManageModules) return;
+    if (!canManageModules || busyRef.current) return;
     try {
-      setBusy(true);
-
-      await updateModule(item._id, {
+      if (!beginAction()) return;
+      const saved = await updateModule(item._id, {
         isActive: !item.isActive,
       });
+      setModules((current) => current.map((module) => module._id === saved._id ? saved : module));
 
       toast.success(
         item.isActive
@@ -394,31 +407,31 @@ export default function ModulesPage() {
           : `${item.label} is now visible`,
       );
 
-      refresh();
+      notifyNavigationChanged();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to update module.");
     } finally {
-      setBusy(false);
+      endAction();
     }
   };
 
   const handleDelete = async (item: ManagedModule) => {
-    if (!canManageModules) return;
+    if (!canManageModules || busyRef.current) return;
     if (!(await confirmAction({ title: "Delete module?", message: `Delete the "${item.label}" module? This only removes it from the sidebar list.`, confirmLabel: "Delete module", destructive: true }))) {
       return;
     }
 
+    if (!beginAction()) return;
     try {
-      setBusy(true);
-
       await deleteModule(item._id);
+      setModules((current) => current.filter((module) => module._id !== item._id));
 
       toast.success("Module deleted successfully.");
-      refresh();
+      notifyNavigationChanged();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to delete module.");
     } finally {
-      setBusy(false);
+      endAction();
     }
   };
 
@@ -427,7 +440,7 @@ export default function ModulesPage() {
     index: number,
     direction: -1 | 1,
   ) => {
-    if (!canManageModules) return;
+    if (!canManageModules || busyRef.current) return;
     const target = index + direction;
 
     if (target < 0 || target >= sectionItems.length) return;
@@ -441,16 +454,52 @@ export default function ModulesPage() {
     }));
 
     try {
-      setBusy(true);
+      if (!beginAction()) return;
+      await reorderModules({ items });
 
-      await reorderModules(items);
+      const orderById = new Map(items.map(({ id, order }) => [id, order]));
+      setModules((current) => current.map((item) => {
+        const order = orderById.get(item._id);
+        return order === undefined ? item : { ...item, order };
+      }));
 
       toast.success("Navigation order saved.");
-      refresh();
+      notifyNavigationChanged();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to reorder modules.");
     } finally {
-      setBusy(false);
+      endAction();
+    }
+  };
+
+  const handleMoveSection = async (index: number, direction: -1 | 1) => {
+    if (!canManageModules || busyRef.current) return;
+    const target = index + direction;
+    if (target < 0 || target >= sidebarSections.length) return;
+
+    const next = [...sidebarSections];
+    [next[index], next[target]] = [next[target], next[index]];
+    const sections = next.map((section, position) => ({ id: section.id, order: (position + 1) * 10 }));
+
+    try {
+      if (!beginAction()) return;
+      const result = await reorderModules({ sections });
+      const authoritativeOrders = new Map<string, number>(
+        (Array.isArray(result?.sections) ? result.sections : sections).map((section: { id: string; sectionOrder?: number; order?: number }) => [section.id, Number(section.sectionOrder ?? section.order)]),
+      );
+      setModules((current) => current.map((item) => {
+        const id = ["dashboard", "student-dashboard"].includes(item.key)
+          ? "top-level"
+          : getNavigationGroupId(item) || "ungrouped";
+        const sectionOrder = authoritativeOrders.get(id);
+        return sectionOrder === undefined ? item : { ...item, sectionOrder };
+      }));
+      notifyNavigationChanged();
+      toast.success("Sidebar section order saved.");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to reorder sections.");
+    } finally {
+      endAction();
     }
   };
 
@@ -533,7 +582,7 @@ export default function ModulesPage() {
                 </thead>
 
                 <tbody className="divide-y divide-(--line)">
-                  {sidebarSections.flatMap((section) => {
+                  {sidebarSections.flatMap((section, sectionIndex) => {
                     const visibleSectionItems = section.items.filter((item) => visibleModuleIds.has(item._id));
                     if (!visibleSectionItems.length) return [];
                     const SectionIcon =
@@ -543,6 +592,22 @@ export default function ModulesPage() {
                       <tr key={`section-${section.id}`} className="bg-(--surface)">
                         <td colSpan={6} className="px-6 py-3.5">
                           <div className="flex items-center gap-2.5">
+                            {canManageModules && (
+                              <div className="flex items-center gap-1 rounded-lg border border-(--line) bg-(--card) p-1" aria-label={`Reorder ${section.label} section`}>
+                                <IconButton
+                                  label={`Move ${section.label} section up`}
+                                  title="Move section up"
+                                  disabled={busy || sectionIndex === 0}
+                                  onClick={() => void handleMoveSection(sectionIndex, -1)}
+                                ><ArrowUp size={14} /></IconButton>
+                                <IconButton
+                                  label={`Move ${section.label} section down`}
+                                  title="Move section down"
+                                  disabled={busy || sectionIndex === sidebarSections.length - 1}
+                                  onClick={() => void handleMoveSection(sectionIndex, 1)}
+                                ><ArrowDown size={14} /></IconButton>
+                              </div>
+                            )}
                             <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-(--accent-soft) text-(--accent)">
                               <SectionIcon size={16} />
                             </span>

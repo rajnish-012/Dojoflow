@@ -618,7 +618,7 @@ function PromotionTableRow({
               text-(--ink-muted)
             "
           >
-            Day {item.milestone.day}
+            {item.milestone.skill || "Curriculum milestone"}
             {item.milestone.skill ? ` · ${item.milestone.skill}` : ""}
           </p>
         </div>
@@ -829,7 +829,7 @@ function PromotionMobileCard({
 
         <MobileDetail label="Training" value={`Day ${item.trainingDay}`} />
 
-        <MobileDetail label="Milestone" value={`Day ${item.milestone.day}`} />
+        <MobileDetail label="Milestone" value={item.milestone.skill || "Curriculum milestone"} />
 
         <MobileDetail label="Plan" value={item.plan.name} />
 

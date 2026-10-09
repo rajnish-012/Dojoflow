@@ -36,6 +36,8 @@ import {
   getPlans,
   updateStudent,
 } from "@/lib/api";
+import EnrollmentFeeTermSelect from "@/components/finance/EnrollmentFeeTermSelect";
+import { findCurrentStudentEnrollment, hasFrozenBillingSnapshot, type StudentPlanEnrollment } from "@/lib/enrollmentApi";
 
 import { useCan } from "@/lib/permissions";
 
@@ -43,6 +45,7 @@ import {
   Badge,
   Button,
   Card,
+  CopyButton,
   EmptyState,
   ErrorState,
   Input,
@@ -53,6 +56,8 @@ import {
 } from "@/components/ui";
 import InternationalPhoneInput, { isValidPhoneNumber } from "@/components/ui/InternationalPhoneInput";
 import StudentFinancePanel from "@/components/finance/StudentFinancePanel";
+import { useAcademyBrand } from "@/components/settings/AcademyBrandProvider";
+import { formatCurrency } from "@/lib/currency";
 
 type Student = {
   _id: string;
@@ -68,13 +73,13 @@ type Student = {
   } | null;
 
   plan?: {
-    _id: string;
-    name: string;
-    price: number;
+  _id: string;
+  name: string;
     duration: number;
     durationUnit: string;
     classesPerWeek: number;
   } | null;
+  planEnrollments?: StudentPlanEnrollment[];
 
   currentBelt: string;
   status: "ACTIVE" | "INACTIVE" | "COMPLETED";
@@ -152,7 +157,6 @@ type PerformanceRecord = {
 type PlanOption = {
   _id: string;
   name: string;
-  price: number;
 };
 
 type EditForm = {
@@ -161,6 +165,7 @@ type EditForm = {
   phone: string;
   email: string;
   plan: string;
+  feeTerm: string;
   currentBelt: string;
   status: Student["status"];
   password: string;
@@ -173,6 +178,7 @@ const initialEditForm: EditForm = {
   phone: "",
   email: "",
   plan: "",
+  feeTerm: "",
   currentBelt: "",
   status: "ACTIVE",
   password: "",
@@ -355,11 +361,13 @@ function DetailItem({
   label,
   value,
   description,
+  copyValue,
 }: {
   icon: ReactNode;
   label: string;
   value: string;
   description?: string;
+  copyValue?: string;
 }) {
   return (
     <div
@@ -381,7 +389,7 @@ function DetailItem({
         {icon}
       </div>
 
-      <div className="min-w-0">
+      <div className="min-w-0 flex-1">
         <p
           className="
             text-[10px] font-black
@@ -392,15 +400,7 @@ function DetailItem({
           {label}
         </p>
 
-        <p
-          className="
-            mt-1 break-words text-sm
-            font-semibold
-            text-(--foreground-soft)
-          "
-        >
-          {value}
-        </p>
+        <div className="mt-1 flex items-start gap-1.5"><p className="break-words text-sm font-semibold text-(--foreground-soft)">{value}</p>{copyValue && <CopyButton value={copyValue} label={label} />}</div>
 
         {description && (
           <p
@@ -634,6 +634,7 @@ function FormField({
 }
 
 export default function StudentDetailsPage() {
+  const { settings: academySettings, initialized: academySettingsInitialized } = useAcademyBrand();
   const canEditStudent = useCan("student.update");
   const params = useParams();
   const router = useRouter();
@@ -641,6 +642,14 @@ export default function StudentDetailsPage() {
   const studentId = String(params.id || "");
 
   const [student, setStudent] = useState<Student | null>(null);
+  const currentEnrollment = useMemo(
+    () => findCurrentStudentEnrollment(student?.planEnrollments),
+    [student?.planEnrollments],
+  );
+  const currentBillingSnapshot = currentEnrollment?.billingSnapshot;
+  const billingCurrency = currentBillingSnapshot?.currency || academySettings.currency;
+  const formatBillingAmount = (amount: number | undefined) => !billingCurrency && !academySettingsInitialized ? "Loading currency…" : formatCurrency(amount, billingCurrency);
+  const hasCurrentAgreement = hasFrozenBillingSnapshot(currentBillingSnapshot);
 
   const [progress, setProgress] = useState<Progress | null>(null);
 
@@ -741,6 +750,7 @@ export default function StudentDetailsPage() {
       phone: student.phone || "",
       email: student.email || "",
       plan: student.plan?._id || "",
+      feeTerm: "",
       currentBelt: student.currentBelt || "White",
       status: student.status || "ACTIVE",
       password: "",
@@ -777,6 +787,7 @@ export default function StudentDetailsPage() {
     setEditForm((current) => ({
       ...current,
       [name]: value,
+      ...(name === "plan" ? { feeTerm: "" } : {}),
     }));
   };
 
@@ -793,6 +804,11 @@ export default function StudentDetailsPage() {
     ) {
       setEditError("Please fill all required fields.");
 
+      return;
+    }
+
+    if (editForm.plan !== student?.plan?._id && !editForm.feeTerm) {
+      setEditError("Select an effective Fee Term for the new training plan.");
       return;
     }
 
@@ -822,6 +838,7 @@ export default function StudentDetailsPage() {
         phone: editForm.phone.trim(),
         email: editForm.email.trim() || undefined,
         plan: editForm.plan,
+        feeTerm: editForm.feeTerm || undefined,
         currentBelt: editForm.currentBelt,
         status: editForm.status,
         password: editForm.password.trim() || undefined,
@@ -966,7 +983,7 @@ export default function StudentDetailsPage() {
     >
       <div
         className="
-          mx-auto max-w-[1500px]
+          mx-auto w-full min-w-0 max-w-[1500px]
           space-y-6
         "
       >
@@ -1033,12 +1050,13 @@ export default function StudentDetailsPage() {
                 <div className="min-w-0">
                   <div
                     className="
-                      flex flex-wrap
+                      flex min-w-0 flex-wrap
                       items-center gap-2.5
                     "
                   >
                     <h1
                       className="
+                        min-w-0 break-words
                         text-2xl font-black
                         tracking-tight
                         text-(--foreground)
@@ -1055,50 +1073,55 @@ export default function StudentDetailsPage() {
 
                   <div
                     className="
-                      mt-2 flex flex-wrap
-                      items-center
-                      gap-x-3 gap-y-1
+                      mt-2 flex min-w-0 flex-col
+                      items-start gap-y-1
                       text-sm
                       text-(--ink-muted)
+                      sm:flex-row sm:flex-wrap sm:items-center
+                      sm:gap-x-3 sm:gap-y-1
                     "
                   >
                     <span>Age {student.age}</span>
 
-                    <span>•</span>
-
-                    <span>{student.currentBelt} Belt</span>
+                    <span className="hidden sm:inline">•</span>
+                    <span className="w-full min-w-0 whitespace-normal break-words sm:w-auto">
+                      {student.currentBelt} Belt
+                    </span>
 
                     {student.branch?.name && (
                       <>
-                        <span>•</span>
-
-                        <span>{student.branch.name}</span>
+                        <span className="hidden sm:inline">•</span>
+                        <span className="w-full min-w-0 whitespace-normal break-words sm:w-auto">
+                          {student.branch.name}
+                        </span>
                       </>
                     )}
                   </div>
 
                   <p
                     className="
-                      mt-2 flex items-center
+                      mt-2 flex min-w-0 flex-wrap items-center
                       gap-1.5 text-xs
                       text-(--ink-faint)
                     "
                   >
-                    <CalendarCheck size={14} />
-                    Joined {formatDate(student.joinDate)}
+                    <CalendarCheck className="shrink-0" size={14} />
+                    <span className="min-w-0 break-words">
+                      Joining Date {formatDate(student.joinDate)}
+                    </span>
                   </p>
                 </div>
               </div>
 
               <div
                 className="
-                  flex flex-col gap-3
-                  sm:flex-row
+                  flex min-w-0 flex-col gap-3
+                  sm:flex-row sm:flex-wrap
                 "
               >
                 <div
                   className="
-                    flex items-center gap-3
+                    flex min-w-0 items-center gap-3
                     rounded-xl
                     border border-(--line)
                     bg-(--surface)
@@ -1117,7 +1140,7 @@ export default function StudentDetailsPage() {
                     <Award size={19} />
                   </div>
 
-                  <div>
+                  <div className="min-w-0">
                     <p
                       className="
                         text-[9px] font-black
@@ -1131,7 +1154,7 @@ export default function StudentDetailsPage() {
 
                     <p
                       className="
-                        mt-0.5 text-sm font-bold
+                        mt-0.5 break-words text-sm font-bold
                         text-(--foreground)
                       "
                     >
@@ -1258,7 +1281,7 @@ export default function StudentDetailsPage() {
                 >
                   View every curriculum day, attendance result,
                   completed makeup and upcoming belt milestone
-                  from the student's joining date.
+                  from the student&apos;s enrolled training sessions.
                 </p>
               </div>
             </div>
@@ -1294,12 +1317,14 @@ export default function StudentDetailsPage() {
                 icon={<Phone size={16} />}
                 label="Phone Number"
                 value={student.phone}
+                copyValue={student.phone}
               />
 
               <DetailItem
                 icon={<Mail size={16} />}
                 label="Email Address"
                 value={student.email || "No email added"}
+                copyValue={student.email}
               />
 
               <DetailItem
@@ -1313,6 +1338,12 @@ export default function StudentDetailsPage() {
                 icon={<CalendarCheck size={16} />}
                 label="Joining Date"
                 value={formatDate(student.joinDate)}
+              />
+
+              <DetailItem
+                icon={<CalendarCheck size={16} />}
+                label="First Attended Class"
+                value={currentEnrollment?.firstAttendedClassDate ? formatDate(currentEnrollment.firstAttendedClassDate) : "Not attended yet"}
               />
             </div>
           </Card>
@@ -1376,8 +1407,12 @@ export default function StudentDetailsPage() {
                     "
                   >
                     <PlanMetric
-                      label="Price"
-                      value={`₹${student.plan.price}`}
+                      label={hasCurrentAgreement ? "Agreed amount" : "Billing agreement"}
+                      value={
+                        hasCurrentAgreement
+                          ? `${formatBillingAmount(currentBillingSnapshot?.amount)}${currentBillingSnapshot?.billingFrequency ? ` / ${currentBillingSnapshot.billingFrequency.toLowerCase().replaceAll("_", " ")}` : ""}`
+                          : "Unavailable"
+                      }
                     />
 
                     <PlanMetric
@@ -1385,6 +1420,15 @@ export default function StudentDetailsPage() {
                       value={`${student.plan.duration} ${student.plan.durationUnit.toLowerCase()}`}
                     />
                   </div>
+                  {hasFrozenBillingSnapshot(currentBillingSnapshot) ? (
+                    <p className="mt-3 text-xs text-(--sidebar-muted)">
+                      Registration: {formatBillingAmount(currentBillingSnapshot?.registrationFee || 0)} · Tax: {currentBillingSnapshot?.taxRate || 0}%
+                    </p>
+                  ) : (
+                    <p className="mt-3 text-xs text-(--sidebar-muted)">
+                      No complete FeeTerm billing agreement is saved for this enrollment.
+                    </p>
+                  )}
                 </div>
 
                 <div
@@ -1568,15 +1612,15 @@ export default function StudentDetailsPage() {
               <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                 {student.guardians.map((guardian, index) => (
                   <div key={guardian._id || `${guardian.name}-${index}`} className="rounded-xl border border-(--line) bg-(--surface) p-4">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="font-bold text-(--foreground)">{guardian.name}</p>
+                    <div className="flex min-w-0 items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="break-words font-bold text-(--foreground)">{guardian.name}</p>
                         <p className="mt-1 text-xs text-(--ink-muted)">{guardian.relationship.charAt(0) + guardian.relationship.slice(1).toLowerCase()}</p>
                       </div>
                       {guardian.emergencyContact && <Badge variant="warning">Emergency</Badge>}
                     </div>
-                    {guardian.phone && <p className="mt-3 text-sm text-(--foreground-soft)">{guardian.phone}</p>}
-                    {guardian.email && <p className="mt-1 break-all text-sm text-(--ink-muted)">{guardian.email}</p>}
+                    {guardian.phone && <p className="mt-3 flex items-center gap-1.5 break-words text-sm text-(--foreground-soft)"><span>{guardian.phone}</span><CopyButton value={guardian.phone} label={`${guardian.name}'s phone number`} /></p>}
+                    {guardian.email && <p className="mt-1 flex items-center gap-1.5 break-all text-sm text-(--ink-muted)"><span>{guardian.email}</span><CopyButton value={guardian.email} label={`${guardian.name}'s email address`} /></p>}
                     <p className="mt-3 text-xs text-(--ink-muted)">{guardian.pickupAuthorized ? "Authorized for pickup" : "Pickup not authorized"}</p>
                   </div>
                 ))}
@@ -1719,11 +1763,11 @@ export default function StudentDetailsPage() {
         {/* Attendance + Belt */}
         <div
           className="
-            grid gap-5
+            grid min-w-0 gap-5
             xl:grid-cols-2
           "
         >
-          <Card padding="lg">
+          <Card padding="lg" className="min-w-0">
             <SectionHeading
               eyebrow="Class Records"
               title="Attendance Summary"
@@ -1937,11 +1981,11 @@ export default function StudentDetailsPage() {
         {/* Attendance / Performance History */}
         <div
           className="
-            grid gap-5
+            grid min-w-0 gap-5
             xl:grid-cols-2
           "
         >
-          <Card padding="lg">
+          <Card padding="lg" className="min-w-0">
             <SectionHeading
               eyebrow="Recent Records"
               title="Attendance Records"
@@ -1954,7 +1998,7 @@ export default function StudentDetailsPage() {
             {attendance.length ? (
               <div
                 className="
-                  mt-5 max-h-[390px]
+                  mt-5 min-w-0 max-h-[390px]
                   space-y-2.5
                   overflow-y-auto pr-1
                 "
@@ -1967,14 +2011,15 @@ export default function StudentDetailsPage() {
                     <div
                       key={record._id}
                       className="
-                          flex items-center
-                          justify-between gap-3
+                          flex min-w-0 flex-col gap-2
                           rounded-xl
                           border border-(--line)
                           bg-(--surface)
                           p-3.5
                           transition-colors
                           hover:bg-(--hover-bg)
+                          sm:flex-row sm:items-center
+                          sm:justify-between sm:gap-3
                         "
                     >
                       <div
@@ -2006,7 +2051,7 @@ export default function StudentDetailsPage() {
                         <div className="min-w-0">
                           <p
                             className="
-                                truncate text-sm
+                                break-words text-sm
                                 font-bold
                                 text-(--foreground-soft)
                               "
@@ -2024,9 +2069,9 @@ export default function StudentDetailsPage() {
                             {formatDate(record.date)}
                           </p>
                           {(record.sessionName || record.sessionStartTime || record.sessionEndTime) && (
-                            <p className="mt-1 flex items-center gap-1 text-xs font-medium text-(--accent)">
-                              <Clock3 size={12} />
-                              <span>
+                            <p className="mt-1 flex min-w-0 items-start gap-1 text-xs font-medium text-(--accent)">
+                              <Clock3 className="mt-0.5 shrink-0" size={12} />
+                              <span className="min-w-0 break-words">
                                 {record.sessionName || "Training session"}
                                 {(record.sessionStartTime || record.sessionEndTime) && ` · ${formatTime(record.sessionStartTime)} – ${formatTime(record.sessionEndTime)}`}
                               </span>
@@ -2037,7 +2082,8 @@ export default function StudentDetailsPage() {
 
                       <div
                         className="
-                            shrink-0 text-right
+                            min-w-0 text-left
+                            sm:shrink-0 sm:text-right
                           "
                       >
                         <p
@@ -2081,7 +2127,7 @@ export default function StudentDetailsPage() {
             )}
           </Card>
 
-          <Card padding="lg">
+          <Card padding="lg" className="min-w-0">
             <SectionHeading
               eyebrow="Evaluation History"
               title="Performance Records"
@@ -2094,7 +2140,7 @@ export default function StudentDetailsPage() {
             {performance.length ? (
               <div
                 className="
-                  mt-5 max-h-[390px]
+                  mt-5 min-w-0 max-h-[390px]
                   space-y-2.5
                   overflow-y-auto pr-1
                 "
@@ -2103,6 +2149,7 @@ export default function StudentDetailsPage() {
                   <div
                     key={record._id}
                     className="
+                        min-w-0
                         rounded-xl
                         border border-(--line)
                         bg-(--surface)
@@ -2111,14 +2158,15 @@ export default function StudentDetailsPage() {
                   >
                     <div
                       className="
-                          flex items-center
-                          justify-between gap-3
+                          flex flex-col gap-2
+                          sm:flex-row sm:items-center
+                          sm:justify-between sm:gap-3
                         "
                     >
-                      <div>
+                      <div className="min-w-0">
                         <p
                           className="
-                              text-sm font-bold
+                              break-words text-sm font-bold
                               text-(--foreground-soft)
                             "
                         >
@@ -2137,7 +2185,7 @@ export default function StudentDetailsPage() {
 
                       <div
                         className="
-                            rounded-lg
+                          w-fit shrink-0 rounded-lg
                             bg-(--accent-soft)
                             px-3 py-1.5
                             text-sm font-black
@@ -2155,7 +2203,7 @@ export default function StudentDetailsPage() {
                             mt-3 rounded-lg
                             border border-(--line)
                             bg-(--card)
-                            p-3 text-sm
+                            break-words p-3 text-sm
                             leading-5
                             text-(--ink-muted)
                           "
@@ -2293,11 +2341,24 @@ export default function StudentDetailsPage() {
 
                 {plans.map((plan) => (
                   <option key={plan._id} value={plan._id}>
-                    {plan.name} — ₹{plan.price}
+                    {plan.name}
                   </option>
                 ))}
               </Select>
             </FormField>
+
+            {editForm.plan !== student?.plan?._id && (
+              <div className="sm:col-span-2">
+                <EnrollmentFeeTermSelect
+                  planId={editForm.plan}
+                  branchId={student?.branch?._id || ""}
+                  startDate={new Date().toISOString().slice(0, 10)}
+                  value={editForm.feeTerm}
+                  currency={academySettings.currency}
+                  onChange={(feeTerm) => setEditForm((current) => ({ ...current, feeTerm }))}
+                />
+              </div>
+            )}
 
             <FormField label="Current belt" htmlFor="edit-belt">
               <Select

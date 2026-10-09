@@ -22,6 +22,7 @@ type DataFiltersProps = {
   panelClassName?: string;
   contentClassName?: string;
   headerClassName?: string;
+  responsiveToolbar?: boolean;
 };
 
 /**
@@ -38,6 +39,7 @@ export default function DataFilters({
   panelClassName = "",
   contentClassName = "grid gap-4 sm:grid-cols-2",
   headerClassName = "mb-4",
+  responsiveToolbar = false,
 }: DataFiltersProps) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLDivElement>(null);
@@ -84,7 +86,7 @@ export default function DataFilters({
       window.removeEventListener("resize", updatePosition);
       window.removeEventListener("scroll", updatePosition, true);
     };
-  }, [open]);
+  }, [open, panelWidth]);
 
   const panel = open && typeof document !== "undefined" ? createPortal(
     <div
@@ -117,13 +119,25 @@ export default function DataFilters({
   ) : null;
 
   return (
-    <div ref={triggerRef} className="relative shrink-0">
+    <div
+      ref={triggerRef}
+      className={
+        responsiveToolbar
+          ? "relative w-full min-w-0 lg:w-auto lg:shrink-0"
+          : "relative shrink-0"
+      }
+    >
       <Button
         type="button"
         variant="outline"
         onClick={() => setOpen((current) => !current)}
         aria-expanded={open}
         aria-haspopup="dialog"
+        className={
+          responsiveToolbar
+            ? "h-11 min-h-11 w-full whitespace-nowrap px-3 lg:h-10 lg:min-h-0 lg:w-auto lg:px-4"
+            : ""
+        }
       >
         {triggerIcon ?? <SlidersHorizontal size={16} aria-hidden="true" />}
         {label}{activeCount ? ` (${activeCount})` : ""}

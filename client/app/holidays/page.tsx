@@ -770,7 +770,7 @@ export default function HolidaysPage() {
           title="Holidays"
           description="Manage academy holidays and branch-specific non-training days."
           actions={
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <Button
                 type="button"
                 variant="outline"

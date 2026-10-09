@@ -4,6 +4,7 @@ const {
   getStudents,
   getStudentById,
   getMyStudentProfile,
+  getAdmissionPreview,
   createStudent,
   updateStudent,
   deleteStudent,
@@ -18,6 +19,8 @@ const authorize = require("../middleware/role.middleware");
 const { authorizePermission } = require("../middleware/permission.middleware");
 
 const router = express.Router();
+
+router.get("/admission-preview", protect, authorizePermission("student.create"), getAdmissionPreview);
 
 // ==============================
 // STUDENT'S OWN PROFILE

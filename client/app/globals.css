@@ -1323,6 +1323,18 @@ a {
 
   /* ---- Modal ---- */
 
+  .df-modal-panel {
+    max-height: calc(100vh - 32px);
+    max-height: calc(100dvh - 32px);
+  }
+
+  @media (min-width: 640px) {
+    .df-modal-panel {
+      max-height: calc(100vh - 48px);
+      max-height: calc(100dvh - 48px);
+    }
+  }
+
   .df-modal-backdrop {
     position: fixed;
     inset: 0;
@@ -1856,10 +1868,21 @@ html.dark hr {
 }
 
 @media (max-width: 767px) {
+  button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
   .df-page {
     min-height: calc(100vh - 64px);
-    padding: 20px 14px;
+    min-width: 0;
+    padding: 20px 0;
+    padding-inline: clamp(12px, 4vw, 16px);
     gap: 18px;
+  }
+
+  .df-page > * {
+    min-width: 0;
   }
 
   .df-page-header {
@@ -1891,6 +1914,12 @@ html.dark hr {
     max-height: calc(100vh - 24px);
     border-radius: var(--radius-xl);
   }
+
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="button"]):not([type="submit"]),
+  select,
+  textarea {
+    font-size: 16px;
+  }
 }
 
 /* =========================================================
@@ -1920,12 +1949,18 @@ html.dark hr {
   transition: margin-left 300ms var(--ease-premium);
 }
 
+.df-sidebar-viewport {
+  height: 100vh;
+  height: 100dvh;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
 .df-shell-expanded,
 .df-shell-collapsed {
   margin-left: 0;
 }
 
-@media (min-width: 768px) {
+@media (min-width: 1024px) {
   .df-shell-expanded {
     margin-left: 288px;
   }

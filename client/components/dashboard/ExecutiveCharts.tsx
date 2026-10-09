@@ -43,9 +43,9 @@ export function ExecutiveLineChart({
   const points = rows.map((row, index) => `${x(index)},${y(row.value)}`).join(" ");
   const area = `${left},${height - bottom} ${points} ${x(rows.length - 1)},${height - bottom}`;
   return (
-    <div className="w-full min-w-0" role="img" aria-label={`${valueLabel} trend chart`}>
+    <div className="w-full min-w-0 overflow-x-auto pb-1" role="img" aria-label={`${valueLabel} trend chart`}>
       <div className="mb-2 flex items-center justify-between text-xs text-(--ink-muted)"><span>{valueLabel}</span><span>{rows.length} periods</span></div>
-      <svg viewBox={`0 0 ${width} ${height}`} className="block h-auto max-h-[210px] w-full" preserveAspectRatio="none">
+      <svg viewBox={`0 0 ${width} ${height}`} className="block h-auto max-h-[210px] min-w-[560px] w-full 2xl:min-w-0" preserveAspectRatio="none">
         {[0, 1, 2, 3].map((line) => {
           const yy = top + line * ((height - top - bottom) / 3);
           return <g key={line}><line x1={left} x2={width - right} y1={yy} y2={yy} stroke="var(--line)" strokeDasharray="3 5" /><text x={left - 8} y={yy + 4} textAnchor="end" fill="var(--ink-faint)" fontSize="11">{format(max * (1 - line / 3))}</text></g>;

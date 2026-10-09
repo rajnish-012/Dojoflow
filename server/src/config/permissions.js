@@ -30,6 +30,8 @@ const PERMISSIONS = Object.freeze({
   // Curriculum
   CURRICULUM_VIEW: "curriculum.view",
   CURRICULUM_MANAGE: "curriculum.manage",
+  CURRICULUM_PROGRESS_VIEW: "curriculum.progress.view",
+  CURRICULUM_REWARD_MANAGE: "curriculum.reward.manage",
 
   // Attendance
   ATTENDANCE_VIEW: "attendance.view",
@@ -62,9 +64,28 @@ const PERMISSIONS = Object.freeze({
   PROMOTION_VIEW: "promotion.view",
   PROMOTION_MANAGE: "promotion.manage",
 
+  // Grading and certificates
+  GRADING_VIEW: "grading.view",
+  GRADING_CREATE: "grading.create",
+  GRADING_UPDATE: "grading.update",
+  GRADING_EVALUATE: "grading.evaluate",
+  GRADING_FINALIZE: "grading.finalize",
+  GRADING_PUBLISH: "grading.publish",
+  GRADING_CANCEL: "grading.cancel",
+  CERTIFICATE_VIEW: "certificate.view",
+  CERTIFICATE_GENERATE: "certificate.generate",
+  CERTIFICATE_DOWNLOAD: "certificate.download",
+  STUDENT_GRADING_VIEW: "student.grading.view",
+
   // Reports
   REPORT_VIEW: "report.view",
   REPORT_EXPORT: "report.export",
+
+  // Unified academy calendar and generic academy events
+  CALENDAR_VIEW: "calendar.view",
+  EVENT_VIEW: "event.view",
+  EVENT_MANAGE: "event.manage",
+  EVENT_REGISTER: "event.register",
 
   // Financial records. Student permission is limited to their linked profile.
   FINANCE_VIEW: "finance.view",
@@ -73,6 +94,19 @@ const PERMISSIONS = Object.freeze({
   FINANCE_REFUND: "finance.refund",
   FINANCE_REPORT: "finance.report",
   STUDENT_FINANCE_VIEW: "student.finance.view",
+
+  // Branch inventory and merchandise
+  INVENTORY_VIEW: "inventory.view",
+  INVENTORY_CREATE: "inventory.create",
+  INVENTORY_UPDATE: "inventory.update",
+  INVENTORY_ADJUST: "inventory.adjust",
+  INVENTORY_TRANSFER: "inventory.transfer",
+  INVENTORY_PURCHASE: "inventory.purchase",
+  INVENTORY_SALE: "inventory.sale",
+  INVENTORY_RETURN: "inventory.return",
+  INVENTORY_DAMAGE: "inventory.damage",
+  INVENTORY_REPORT: "inventory.report",
+  INVENTORY_MANAGE: "inventory.manage",
 
   // Inquiries
   INQUIRY_VIEW: "inquiry.view",
@@ -140,6 +174,8 @@ const PERMISSION_MODULE_KEYS = Object.freeze({
   "plan.manage": "plans",
   "curriculum.view": "curriculum",
   "curriculum.manage": "curriculum",
+  "curriculum.progress.view": "curriculum",
+  "curriculum.reward.manage": "curriculum",
   "attendance.view": "attendance",
   "attendance.manage": "attendance",
   "attendance.correct": "attendance",
@@ -159,14 +195,39 @@ const PERMISSION_MODULE_KEYS = Object.freeze({
   "makeup.manage": "makeups",
   "promotion.view": "promotions",
   "promotion.manage": "promotions",
+  "grading.view": "grading",
+  "grading.create": "grading",
+  "grading.update": "grading",
+  "grading.evaluate": "grading",
+  "grading.finalize": "grading",
+  "grading.publish": "grading",
+  "grading.cancel": "grading",
+  "certificate.view": "grading",
+  "certificate.generate": "grading",
+  "certificate.download": "grading",
   "report.view": "reports",
   "report.export": "reports",
+  "calendar.view": "calendar",
+  "event.view": "calendar",
+  "event.manage": "calendar",
+  "event.register": "calendar",
   "finance.view": "fees",
   "finance.manage": "fees",
   "finance.collect": "fees",
   "finance.refund": "fees",
   "finance.report": "fees",
   "student.finance.view": "student-dashboard",
+  "inventory.view": "inventory",
+  "inventory.create": "inventory",
+  "inventory.update": "inventory",
+  "inventory.adjust": "inventory",
+  "inventory.transfer": "inventory",
+  "inventory.purchase": "inventory",
+  "inventory.sale": "inventory",
+  "inventory.return": "inventory",
+  "inventory.damage": "inventory",
+  "inventory.report": "inventory",
+  "inventory.manage": "inventory",
   "inquiry.view": "inquiries",
   "inquiry.update": "inquiries",
   "notification.view": "notifications",
@@ -226,6 +287,7 @@ const DEFAULT_ROLE_PERMISSIONS = Object.freeze({
 
     PERMISSIONS.CURRICULUM_VIEW,
     PERMISSIONS.CURRICULUM_MANAGE,
+    PERMISSIONS.CURRICULUM_REWARD_MANAGE,
 
     PERMISSIONS.ATTENDANCE_VIEW,
     PERMISSIONS.ATTENDANCE_MANAGE,
@@ -247,9 +309,24 @@ const DEFAULT_ROLE_PERMISSIONS = Object.freeze({
 
     PERMISSIONS.PROMOTION_VIEW,
     PERMISSIONS.PROMOTION_MANAGE,
+    PERMISSIONS.GRADING_VIEW,
+    PERMISSIONS.GRADING_CREATE,
+    PERMISSIONS.GRADING_UPDATE,
+    PERMISSIONS.GRADING_EVALUATE,
+    PERMISSIONS.GRADING_FINALIZE,
+    PERMISSIONS.GRADING_PUBLISH,
+    PERMISSIONS.GRADING_CANCEL,
+    PERMISSIONS.CERTIFICATE_VIEW,
+    PERMISSIONS.CERTIFICATE_GENERATE,
+    PERMISSIONS.CERTIFICATE_DOWNLOAD,
 
     PERMISSIONS.REPORT_VIEW,
     PERMISSIONS.REPORT_EXPORT,
+
+    PERMISSIONS.CALENDAR_VIEW,
+    PERMISSIONS.EVENT_VIEW,
+    PERMISSIONS.EVENT_MANAGE,
+    PERMISSIONS.EVENT_REGISTER,
 
     PERMISSIONS.FINANCE_VIEW,
     PERMISSIONS.FINANCE_MANAGE,
@@ -297,14 +374,21 @@ const DEFAULT_ROLE_PERMISSIONS = Object.freeze({
 
     PERMISSIONS.PROMOTION_VIEW,
     PERMISSIONS.PROMOTION_MANAGE,
+    PERMISSIONS.GRADING_VIEW,
+    PERMISSIONS.GRADING_UPDATE,
+    PERMISSIONS.GRADING_EVALUATE,
+    PERMISSIONS.GRADING_FINALIZE,
 
     PERMISSIONS.REPORT_VIEW,
+
+    PERMISSIONS.CALENDAR_VIEW,
+    PERMISSIONS.EVENT_VIEW,
 
     PERMISSIONS.NOTIFICATION_VIEW,
 
   ],
 
-  STUDENT: [PERMISSIONS.STUDENT_FINANCE_VIEW],
+  STUDENT: [PERMISSIONS.STUDENT_FINANCE_VIEW, PERMISSIONS.STUDENT_GRADING_VIEW, PERMISSIONS.CURRICULUM_PROGRESS_VIEW],
 });
 
 module.exports = {

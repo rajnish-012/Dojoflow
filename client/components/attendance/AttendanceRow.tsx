@@ -89,6 +89,8 @@ export type DailyAttendanceRow = {
     slots: {
       _id?: string;
       sessionTypeId?: string;
+      batchId?: string | { _id: string; name?: string } | null;
+      batchName?: string;
       sessionName?: string;
       startTime: string;
       endTime: string;
@@ -105,6 +107,9 @@ export type DailyAttendanceRow = {
       curriculumAvailable?: boolean;
       curriculumComplete?: boolean;
       capacity?: number | null;
+      datedSessionId?: string | null;
+      plannedCurriculumVersion?: { _id: string; name: string; version: number } | null;
+      plannedCurriculum?: { _id: string; moduleId: string; moduleName: string; title: string; description?: string; completionCriteria?: string }[];
       currentEnrollment?: number;
       availableSeats?: number | null;
     }[];

@@ -17,18 +17,24 @@ import {
   X,
 } from "lucide-react";
 
-import { getStudents, getBranches, getPlans, createStudent } from "@/lib/api";
+import { getStudents, getBranches, getPlans, createStudent, getAdmissionPreview, type AdmissionPreviewApi } from "@/lib/api";
 import InternationalPhoneInput, {
   isValidPhoneNumber,
 } from "@/components/ui/InternationalPhoneInput";
+import EnrollmentFeeTermSelect from "@/components/finance/EnrollmentFeeTermSelect";
+import { recordPayment } from "@/lib/financeApi";
+import { getBatches, type BatchRecord } from "@/lib/batchApi";
+import { useAcademyBrand } from "@/components/settings/AcademyBrandProvider";
+import { DEFAULT_CURRENCY } from "@/lib/currency";
 
-import { useCan } from "@/lib/permissions";
+import { PERMISSIONS, useCan } from "@/lib/permissions";
 
 import {
   Badge,
   Button,
   Card,
   DataTableSection,
+  DataTableToolbar,
   DataFilters,
   DataSort,
   EmptyState,
@@ -77,28 +83,19 @@ type CurriculumItem = {
   skill: string;
 };
 
-type MilestoneItem = {
-  day: number;
-  belt: string;
-  skill: string;
-  description: string;
-};
-
 type Plan = {
   _id: string;
   name: string;
   isActive?: boolean;
-  price: number;
   duration: number;
   durationUnit: "MONTHS" | "DAYS";
   classesPerWeek?: number;
   startingBelt?: string;
   curriculum?: CurriculumItem[];
   programs?: {
-    program?: { _id?: string; name?: string } | string;
+    program?: { _id?: string; name?: string; isActive?: boolean } | string;
     curriculum?: CurriculumItem[];
   }[];
-  milestones?: MilestoneItem[];
 };
 
 type FormData = {
@@ -107,10 +104,11 @@ type FormData = {
   phone: string;
   email: string;
   loginEmail: string;
-  loginPassword: string;
   branch: string;
   plan: string;
   joinDate: string;
+  feeTerm: string;
+  batch: string;
 };
 
 type FieldErrors = {
@@ -144,25 +142,39 @@ function getTodayDate() {
   return `${year}-${month}-${day}`;
 }
 
+function dateOffset(days: number) {
+  const date = new Date();
+  date.setDate(date.getDate() + days);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
 const initialForm: FormData = {
   name: "",
   age: "",
   phone: "",
   email: "",
   loginEmail: "",
-  loginPassword: "",
   branch: "",
   plan: "",
   joinDate: getTodayDate(),
+  feeTerm: "",
+  batch: "",
 };
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function StudentsPage() {
+  const { settings: academySettings, initialized: academySettingsInitialized } = useAcademyBrand();
   const canCreateStudent = useCan("student.create");
+  const canManageFinance = useCan(PERMISSIONS.FINANCE_MANAGE);
+  const canCollectFinance = useCan(PERMISSIONS.FINANCE_COLLECT);
   const [students, setStudents] = useState<Student[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [plans, setPlans] = useState<Plan[]>([]);
+  const [batches, setBatches] = useState<BatchRecord[]>([]);
+  const [admissionPreview, setAdmissionPreview] = useState<AdmissionPreviewApi | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState("");
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -186,11 +198,34 @@ export default function StudentsPage() {
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState("");
+  const [invoiceDueDate, setInvoiceDueDate] = useState(dateOffset(7));
+  const [paymentTiming, setPaymentTiming] = useState<"PAY_LATER" | "PAY_NOW">("PAY_LATER");
+  const [paymentAmount, setPaymentAmount] = useState("");
+  const [selectedFeeCurrency, setSelectedFeeCurrency] = useState(academySettings.currency);
+  const paymentCurrencyLabel = selectedFeeCurrency || academySettings.currency || (academySettingsInitialized ? DEFAULT_CURRENCY : "Loading currency…");
+  const [paymentMethod, setPaymentMethod] = useState("CASH");
+  const [paymentReference, setPaymentReference] = useState("");
 
   const selectedPlan = useMemo(
     () => plans.find((plan) => plan._id === form.plan) || null,
     [plans, form.plan],
   );
+
+  useEffect(() => {
+    if (!showModal || !form.branch || !form.plan || !form.joinDate) return;
+    let current = true;
+    void Promise.resolve().then(() => {
+      if (!current) return null;
+      setPreviewLoading(true);
+      setPreviewError("");
+      setAdmissionPreview(null);
+      return getAdmissionPreview({ branchId: form.branch, planId: form.plan, batchId: form.batch, joinDate: form.joinDate });
+    })
+      .then((preview) => { if (current) setAdmissionPreview(preview); })
+      .catch((reason) => { if (current) setPreviewError(reason instanceof Error ? reason.message : "Unable to calculate the admission timeline."); })
+      .finally(() => { if (current) setPreviewLoading(false); });
+    return () => { current = false; };
+  }, [showModal, form.branch, form.plan, form.batch, form.joinDate]);
 
   const loadStudents = useCallback(
     async (page = 1, limit = pagination.limit) => {
@@ -242,9 +277,10 @@ export default function StudentsPage() {
 
   const loadFormData = async () => {
     try {
-      const [branchData, planData] = await Promise.all([
+      const [branchData, planData, batchData] = await Promise.all([
         getBranches(),
         getPlans(),
+        getBatches().catch(() => []),
       ]);
 
       setBranches(
@@ -255,6 +291,14 @@ export default function StudentsPage() {
       setPlans(
         (planData.plans || []).filter((plan: Plan) => plan.isActive !== false),
       );
+      setBatches(batchData);
+      if (!(branchData.branches || []).some((branch) => branch.isActive !== false)) {
+        setFormError(
+          "No active branches are configured. Create or activate a branch before adding a student.",
+        );
+      } else {
+        setFormError("");
+      }
     } catch (error) {
       console.error(error);
       setFormError("Failed to load branches or plans.");
@@ -270,13 +314,24 @@ export default function StudentsPage() {
   }, [loadStudents, search]);
 
   useEffect(() => {
+    // Initial form options are loaded from existing API clients.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadFormData();
   }, []);
 
   const openModal = async () => {
     setForm(initialForm);
+    setSelectedFeeCurrency(academySettings.currency);
+    setAdmissionPreview(null);
+    setPreviewError("");
+    setPreviewLoading(false);
     setFormError("");
     setFieldErrors({});
+    setInvoiceDueDate(dateOffset(7));
+    setPaymentTiming("PAY_LATER");
+    setPaymentAmount("");
+    setPaymentMethod("CASH");
+    setPaymentReference("");
     setShowModal(true);
 
     await loadFormData();
@@ -287,18 +342,33 @@ export default function StudentsPage() {
 
     setShowModal(false);
     setForm(initialForm);
+    setSelectedFeeCurrency(academySettings.currency);
+    setAdmissionPreview(null);
+    setPreviewError("");
+    setPreviewLoading(false);
     setFormError("");
     setFieldErrors({});
+    setPaymentTiming("PAY_LATER");
+    setPaymentAmount("");
   };
 
   const handleChange = (
     event: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>,
   ) => {
     const { name, value } = event.target;
+    if (["branch", "plan", "joinDate", "batch"].includes(name)) {
+      setAdmissionPreview(null);
+      setPreviewError("");
+      setPreviewLoading(false);
+      setFormError("");
+      if (["branch", "plan", "joinDate"].includes(name)) setSelectedFeeCurrency(academySettings.currency);
+    }
 
     setForm((current) => ({
       ...current,
       [name]: value,
+      ...(["branch", "plan", "joinDate"].includes(name) ? { feeTerm: "" } : {}),
+      ...(["branch", "plan"].includes(name) ? { batch: "" } : {}),
     }));
   };
 
@@ -382,10 +452,10 @@ export default function StudentsPage() {
       !form.age ||
       !trimmedPhone ||
       !trimmedLoginEmail ||
-      !form.loginPassword ||
       !form.branch ||
-      !form.plan ||
-      !form.joinDate
+        !form.plan ||
+        !form.feeTerm ||
+        !form.joinDate
     ) {
       setFormError("Please fill all required fields.");
       return;
@@ -418,11 +488,6 @@ export default function StudentsPage() {
       return;
     }
 
-    if (form.loginPassword.length < 6) {
-      setFormError("Login password must be at least 6 characters.");
-      return;
-    }
-
     if (
       !OBJECT_ID_PATTERN.test(form.branch) ||
       !branches.some((branch) => branch._id === form.branch)
@@ -441,27 +506,60 @@ export default function StudentsPage() {
 
     const joinDate = form.joinDate.trim();
     if (!isValidDateKey(joinDate)) {
-      setFormError("Please enter a valid join date.");
+      setFormError("Please enter a valid joining date.");
       return;
     }
     if (joinDate > getTodayDate()) {
-      setFormError("Join date cannot be in the future.");
+      setFormError("Joining date cannot be in the future.");
+      return;
+    }
+
+    if (!selectedPlan?.programs?.length) {
+      setFormError("This Training Plan has no Programs. Add Programs to the Plan before admission.");
+      return;
+    }
+
+    if (!admissionPreview?.curricula?.length || !admissionPreview.requiredLearningSteps) {
+      setFormError(admissionPreview?.eligibilityError || previewError || "Published Curricula with required learning steps are required for every Program in the Plan.");
+      return;
+    }
+
+    if (admissionPreview.eligibilityError) {
+      setFormError(admissionPreview.eligibilityError);
+      return;
+    }
+
+    const activeBatches = batches.filter((batch) => String(typeof batch.branch === "string" ? batch.branch : batch.branch?._id) === form.branch && String(typeof batch.plan === "string" ? batch.plan : batch.plan?._id) === form.plan && batch.status === "ACTIVE" && (!batch.effectiveUntil || batch.effectiveUntil >= joinDate));
+    if (activeBatches.length && !activeBatches.some((batch) => batch._id === form.batch)) {
+      setFormError("Select an available Batch for this Plan and Branch.");
+      return;
+    }
+
+    if (paymentTiming === "PAY_NOW" && (!canCollectFinance || !Number.isFinite(Number(paymentAmount)) || Number(paymentAmount) <= 0)) {
+      setFormError("Enter a valid payment amount and make sure your role can collect payments.");
+      return;
+    }
+    if (canManageFinance && (!isValidDateKey(invoiceDueDate) || invoiceDueDate < joinDate)) {
+      setFormError("Invoice due date must be valid and on or after the enrollment start date.");
       return;
     }
 
     try {
       setSaving(true);
 
-      await createStudent({
+      const result = await createStudent({
         name: trimmedName,
         age: numericAge,
         phone: trimmedPhone,
         email: trimmedEmail,
         loginEmail: trimmedLoginEmail,
-        loginPassword: form.loginPassword,
         branch: form.branch,
         plan: form.plan,
+        feeTerm: form.feeTerm,
+        batch: form.batch || undefined,
         joinDate,
+        createInvoice: canManageFinance,
+        invoiceDueDate: canManageFinance ? invoiceDueDate : undefined,
       });
 
       setShowModal(false);
@@ -469,7 +567,25 @@ export default function StudentsPage() {
       setFieldErrors({});
 
       await loadStudents(1);
-      toast.success("Student created successfully.");
+      if (result.invoice && paymentTiming === "PAY_NOW" && canCollectFinance) {
+        try {
+          if (Number(paymentAmount) > result.invoice.balance) throw new Error("Payment cannot exceed the invoice balance.");
+          const payment = await recordPayment(result.invoice._id, {
+            amount: Number(paymentAmount),
+            method: paymentMethod,
+            referenceId: paymentReference.trim(),
+            notes: "Admission payment",
+          });
+          toast.success(`Payment recorded. Receipt ${payment.receipt.receiptNumber} is ready.`);
+          window.open(`/fees/receipts/${payment.receipt._id}`, "_blank", "noopener,noreferrer");
+        } catch (paymentError) {
+          toast.error(`Student and invoice ${result.invoice.invoiceNumber} were created, but payment was not recorded: ${paymentError instanceof Error ? paymentError.message : "Please collect payment later."}`);
+        }
+      } else if (result.invoice) {
+        toast.success(`Student and invoice ${result.invoice.invoiceNumber} created. Payment can be collected later.`);
+      } else {
+        toast.success(result.activationEmailSent === false ? "Student created. The activation email could not be sent." : "Student created and activation email sent. A finance manager must issue the initial invoice.");
+      }
     } catch (error) {
       console.error(error);
 
@@ -615,8 +731,8 @@ export default function StudentsPage() {
           description="View and manage every student in your academy."
           icon={<Users size={18} />}
           toolbar={
-            <div className="flex w-full flex-col gap-2 lg:w-auto lg:flex-row lg:items-start">
-              <div className="relative w-full lg:w-[340px]">
+            <DataTableToolbar>
+              <div data-toolbar-search className="relative w-full lg:w-[340px]">
                 <Search
                   size={17}
                   aria-hidden="true"
@@ -659,6 +775,7 @@ export default function StudentsPage() {
               <DataFilters
                 activeFilters={activeFilters}
                 onClearAll={clearStudentFilters}
+                responsiveToolbar
               >
                 <label className="grid gap-1.5 text-xs font-bold text-(--foreground-soft)">
                   Branch
@@ -715,7 +832,7 @@ export default function StudentsPage() {
                   </Select>
                 </label>
                 <label className="grid gap-1.5 text-xs font-bold text-(--foreground-soft)">
-                  Joined from
+                  Joining date from
                   <Input
                     type="date"
                     value={joinFrom}
@@ -723,7 +840,7 @@ export default function StudentsPage() {
                   />
                 </label>
                 <label className="grid gap-1.5 text-xs font-bold text-(--foreground-soft)">
-                  Joined to
+                  Joining date to
                   <Input
                     type="date"
                     value={joinTo}
@@ -739,11 +856,11 @@ export default function StudentsPage() {
                   { value: "createdAt-asc", label: "Oldest first" },
                   { value: "name-asc", label: "Name: A to Z" },
                   { value: "name-desc", label: "Name: Z to A" },
-                  { value: "joinDate-desc", label: "Join date: newest" },
-                  { value: "joinDate-asc", label: "Join date: oldest" },
+                  { value: "joinDate-desc", label: "Joining date: newest" },
+                  { value: "joinDate-asc", label: "Joining date: oldest" },
                 ]}
               />
-            </div>
+            </DataTableToolbar>
           }
         >
           <StudentsContent
@@ -774,9 +891,7 @@ export default function StudentsPage() {
         open={showModal}
         onClose={closeModal}
         title="Add student"
-        description="
-          Create a student profile and academy login account.
-        "
+        description="Create the student profile, enrollment agreement, and initial invoice."
         size="xl"
         footer={
           <>
@@ -900,24 +1015,9 @@ export default function StudentsPage() {
               />
             </FormField>
 
-            <FormField
-              label="Login password"
-              htmlFor="loginPassword"
-              required
-              hint="Minimum 6 characters"
-            >
-              <Input
-                id="loginPassword"
-                name="loginPassword"
-                type="password"
-                value={form.loginPassword}
-                onChange={handleChange}
-                placeholder="Create a password"
-                autoComplete="new-password"
-                minLength={6}
-                required
-              />
-            </FormField>
+            <p className="text-sm text-(--muted-foreground)">
+              The student will receive a secure email to set their own password.
+            </p>
           </StudentFormSection>
 
           <StudentFormSection title="Academy information">
@@ -959,7 +1059,19 @@ export default function StudentsPage() {
               </Select>
             </FormField>
 
-            <FormField label="Join date" htmlFor="joinDate" required>
+            {selectedPlan && <div className="rounded-xl border border-(--line) bg-(--surface-muted) p-3 text-sm sm:col-span-2">
+              <p className="font-semibold">Programs included in {selectedPlan.name}</p>
+              <p className="mt-1 text-(--ink-muted)">{selectedPlan.programs?.length ? selectedPlan.programs.map((item) => typeof item.program === "string" ? "Program" : item.program?.name || "Program").join(" · ") : "No Programs are configured. Update this Plan before admission."}</p>
+            </div>}
+
+            {batches.some((batch) => String(typeof batch.branch === "string" ? batch.branch : batch.branch?._id) === form.branch && String(typeof batch.plan === "string" ? batch.plan : batch.plan?._id) === form.plan && batch.status === "ACTIVE") && <FormField label="Batch" htmlFor="batch" required>
+              <Select id="batch" name="batch" value={form.batch} onChange={handleChange} required>
+                <option value="">Select Batch</option>
+                {batches.filter((batch) => String(typeof batch.branch === "string" ? batch.branch : batch.branch?._id) === form.branch && String(typeof batch.plan === "string" ? batch.plan : batch.plan?._id) === form.plan && batch.status === "ACTIVE" && (batch.availableSeats ?? batch.capacity) > 0).map((batch) => <option key={batch._id} value={batch._id}>{batch.name} · {batch.availableSeats ?? batch.capacity} seats available</option>)}
+              </Select>
+            </FormField>}
+
+          <FormField label="Joining date" htmlFor="joinDate" required>
               <Input
                 id="joinDate"
                 name="joinDate"
@@ -969,13 +1081,61 @@ export default function StudentsPage() {
                 onChange={handleChange}
                 required
               />
-            </FormField>
+          </FormField>
+
+          <div className="sm:col-span-2">
+            <EnrollmentFeeTermSelect
+              planId={form.plan}
+              branchId={form.branch}
+              startDate={form.joinDate}
+              value={form.feeTerm}
+              currency={academySettings.currency}
+              onChange={(feeTerm, currency) => { setSelectedFeeCurrency(currency || academySettings.currency); setForm((current) => ({ ...current, feeTerm })); }}
+            />
+          </div>
           </StudentFormSection>
+
+          {canManageFinance ? (
+            <StudentFormSection title="Initial invoice and payment">
+              <FormField label="Invoice due date" htmlFor="invoiceDueDate" required>
+                <Input id="invoiceDueDate" type="date" min={form.joinDate} value={invoiceDueDate} onChange={(event) => setInvoiceDueDate(event.target.value)} required />
+              </FormField>
+              <FormField label="Payment timing" htmlFor="paymentTiming" required>
+                <Select id="paymentTiming" value={paymentTiming} onChange={(event) => setPaymentTiming(event.target.value as "PAY_LATER" | "PAY_NOW")}>
+                  <option value="PAY_LATER">Pay later</option>
+                  {canCollectFinance && <option value="PAY_NOW">Pay now</option>}
+                </Select>
+              </FormField>
+              {paymentTiming === "PAY_NOW" && canCollectFinance && (
+                <>
+                  <FormField label={`Payment amount (${paymentCurrencyLabel})`} htmlFor="initialPaymentAmount" required>
+                    <Input id="initialPaymentAmount" type="number" min="0.01" step="0.01" value={paymentAmount} onChange={(event) => setPaymentAmount(event.target.value)} placeholder="Enter full or partial amount" required />
+                  </FormField>
+                  <FormField label="Payment method" htmlFor="initialPaymentMethod" required>
+                    <Select id="initialPaymentMethod" value={paymentMethod} onChange={(event) => setPaymentMethod(event.target.value)}>
+                      {["CASH", "UPI", "CARD", "BANK_TRANSFER", "ONLINE", "OTHER"].map((method) => <option key={method} value={method}>{method.replaceAll("_", " ")}</option>)}
+                    </Select>
+                  </FormField>
+                  <FormField label="Transaction / reference ID" htmlFor="initialPaymentReference">
+                    <Input id="initialPaymentReference" value={paymentReference} onChange={(event) => setPaymentReference(event.target.value)} maxLength={120} placeholder="Optional" />
+                  </FormField>
+                  <p className="text-sm text-(--muted-foreground)">A partial amount is allowed. The server will reject an amount above the invoice balance.</p>
+                </>
+              )}
+              {!canCollectFinance && <p className="text-sm text-(--muted-foreground)">Your role can issue the invoice. A finance collector can record payment later.</p>}
+            </StudentFormSection>
+          ) : (
+            <div className="rounded-xl border border-(--line) bg-(--surface-muted) p-4 text-sm text-(--muted-foreground)">
+              Your role can create the student enrollment, but a Finance Manager must issue its initial invoice.
+            </div>
+          )}
 
           {selectedPlan && form.joinDate && (
             <AdmissionTimelinePreview
               plan={selectedPlan}
-              joinDate={form.joinDate}
+              preview={admissionPreview}
+              loading={previewLoading}
+              error={previewError}
             />
           )}
         </form>
@@ -986,62 +1146,18 @@ export default function StudentsPage() {
 
 function AdmissionTimelinePreview({
   plan,
-  joinDate,
+  preview,
+  loading,
+  error,
 }: {
   plan: Plan;
-  joinDate: string;
+  preview: AdmissionPreviewApi | null;
+  loading: boolean;
+  error: string;
 }) {
-  const primaryProgram = plan.programs?.[0];
-  const programCurriculum = primaryProgram?.curriculum?.length
-    ? primaryProgram.curriculum
-    : plan.curriculum || [];
-  const curriculum = [...programCurriculum].sort(
-    (a, b) => Number(a.day) - Number(b.day),
-  );
+  const curricula = preview?.curricula || [];
+  const timeline = preview?.steps || [];
 
-  const milestones = [...(plan.milestones || [])].sort(
-    (a, b) => Number(a.day) - Number(b.day),
-  );
-
-  const milestoneMap = new Map(
-    milestones.map((item) => [Number(item.day), item]),
-  );
-
-  const previewDays = new Set<number>();
-
-  curriculum.slice(0, 8).forEach((item) => {
-    previewDays.add(Number(item.day));
-  });
-
-  milestones.forEach((item) => {
-    previewDays.add(Number(item.day));
-  });
-
-  const timeline = Array.from(previewDays)
-    .sort((a, b) => a - b)
-    .map((day) => ({
-      day,
-      curriculum: curriculum.find((item) => Number(item.day) === day),
-      milestone: milestoneMap.get(day),
-    }));
-
-  const formatTimelineDate = (day: number) => {
-    const baseDate = new Date(`${joinDate}T00:00:00`);
-
-    if (Number.isNaN(baseDate.getTime())) {
-      return "—";
-    }
-
-    baseDate.setDate(baseDate.getDate() + day - 1);
-
-    return baseDate.toLocaleDateString("en-IN", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    });
-  };
-
-  const firstMilestone = milestones[0] || null;
 
   return (
     <Card
@@ -1093,14 +1209,7 @@ function AdmissionTimelinePreview({
             >
               Training timeline
             </h3>
-            {primaryProgram && (
-              <p className="mt-1 text-sm text-(--ink-muted)">
-                {typeof primaryProgram.program === "object"
-                  ? primaryProgram.program.name
-                  : "Program"}{" "}
-                curriculum
-              </p>
-            )}
+            {curricula.length > 0 && <p className="mt-1 text-sm text-(--ink-muted)">{curricula.map((item) => item.programName).join(" · ")}</p>}
 
             <p
               className="
@@ -1108,8 +1217,7 @@ function AdmissionTimelinePreview({
                 text-(--ink-muted)
               "
             >
-              Dates are calculated from the selected join date using the
-              plan&apos;s curriculum and belt milestones.
+              Dates show upcoming eligible Sessions from the selected Batch schedule, independent of the student&apos;s join date.
             </p>
           </div>
         </div>
@@ -1138,26 +1246,38 @@ function AdmissionTimelinePreview({
               text-(--foreground)
             "
           >
-            {plan.startingBelt || "White"}
+            {preview?.startingBelt || plan.startingBelt || "White"}
           </p>
         </div>
       </div>
 
-      {timeline.length === 0 ? (
+      {loading ? <div className="p-6"><LoadingSpinner text="Calculating published Curriculum and Batch dates…" /></div> : error ? (
+        <div className="p-6"><ErrorState title="Admission preview unavailable" message={error} /></div>
+      ) : !curricula.length ? (
         <div className="p-6">
-          <p className="text-sm font-medium text-(--ink-muted)">
-            This plan has no curriculum or milestones configured yet.
+          <p className={preview?.eligibilityError ? "rounded-lg border border-(--danger)/30 bg-(--danger-soft) p-3 text-sm text-(--danger)" : "text-sm font-medium text-(--ink-muted)"}>
+            {preview?.eligibilityError || "Select an applicable published Curriculum before admitting a student."}
           </p>
         </div>
       ) : (
         <div className="p-5 sm:p-6">
+          <div className="mb-4 flex flex-wrap items-center gap-3 text-sm">
+            {curricula.map((curriculum) => <Badge key={curriculum.programId} variant="success">{curriculum.programName} · v{curriculum.version}</Badge>)}
+            <span className="text-(--ink-muted)">{curricula.map((curriculum) => curriculum.name).join(" · ")}</span>
+            <span className="font-semibold">{preview?.moduleCount || 0} modules · {preview?.requiredLearningSteps || 0} required learning steps</span>
+          </div>
+          {preview?.eligibilityError && <p className="mb-4 rounded-lg border border-(--danger)/30 bg-(--danger-soft) p-3 text-sm text-(--danger)">{preview.eligibilityError}</p>}
+          {!!preview?.programCapacity?.length && <div className="mb-4 grid gap-2 sm:grid-cols-2">
+            {preview.programCapacity.map((item) => <div key={item.programId} className={`rounded-lg border p-3 text-xs ${item.shortage ? "border-(--danger)/30 bg-(--danger-soft) text-(--danger)" : "border-(--line) bg-(--surface-muted) text-(--ink-muted)"}`}>
+              <span className="font-semibold text-(--foreground)">{item.programName}</span>: {item.eligibleOccurrences} eligible occurrence{item.eligibleOccurrences === 1 ? "" : "s"} · {item.assignedSteps}/{item.requiredSteps} steps dated{item.shortage ? ` · ${item.shortage} unavailable` : ""}
+            </div>)}
+          </div>}
+          <p className="mb-4 text-sm text-(--ink-muted)">{preview?.timelineMessage || "Select an eligible Batch to calculate upcoming training dates."}</p>
           <div className="space-y-3">
             {timeline.map((item) => {
-              const isMilestone = Boolean(item.milestone);
-
               return (
                 <div
-                  key={item.day}
+                  key={`${item.programId}:${item.stepId}`}
                   className="
                     flex items-start gap-3
                     rounded-xl
@@ -1171,14 +1291,10 @@ function AdmissionTimelinePreview({
                       mt-0.5 flex h-9 w-9 shrink-0
                       items-center justify-center
                       rounded-full text-xs font-black
-                      ${
-                        isMilestone
-                          ? "bg-(--accent-soft) text-(--accent)"
-                          : "bg-(--surface-muted) text-(--ink-muted)"
-                      }
+                      bg-(--surface-muted) text-(--ink-muted)
                     `}
                   >
-                    {item.day}
+                    {item.order}
                   </div>
 
                   <div className="min-w-0 flex-1">
@@ -1190,17 +1306,12 @@ function AdmissionTimelinePreview({
                       "
                     >
                       <div>
-                        <p className="text-sm font-bold text-(--foreground)">
-                          {item.curriculum?.title ||
-                            item.milestone?.belt ||
-                            `Training Day ${item.day}`}
-                        </p>
+                    <p className="text-sm font-bold text-(--foreground)">
+                      {item.title}
+                    </p>
+                    <p className="text-xs font-semibold text-(--accent)">{item.programName}</p>
 
-                        {item.curriculum?.skill && (
-                          <p className="mt-0.5 text-xs text-(--ink-muted)">
-                            {item.curriculum.skill}
-                          </p>
-                        )}
+                        {item.moduleName && <p className="mt-0.5 text-xs text-(--ink-muted)">{item.moduleName}</p>}
                       </div>
 
                       <span
@@ -1212,39 +1323,10 @@ function AdmissionTimelinePreview({
                         "
                       >
                         <CalendarDays size={13} />
-                        {formatTimelineDate(item.day)}
+                        <span className="text-right">{item.date ? new Date(`${item.date}T12:00:00`).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "Date unavailable"}{item.startTime ? ` · ${item.startTime}–${item.endTime}` : ""}{!item.date && item.unavailableReason && <span className="mt-1 block max-w-64 whitespace-normal font-normal text-(--danger)">{item.unavailableReason}</span>}</span>
                       </span>
                     </div>
 
-                    {item.curriculum?.description && (
-                      <p className="mt-2 text-xs leading-5 text-(--ink-muted)">
-                        {item.curriculum.description}
-                      </p>
-                    )}
-
-                    {isMilestone && item.milestone && (
-                      <div
-                        className="
-                          mt-3 inline-flex
-                          flex-wrap items-center gap-2
-                          rounded-lg
-                          bg-(--accent-soft)
-                          px-3 py-2
-                        "
-                      >
-                        <GraduationCap size={14} className="text-(--accent)" />
-
-                        <span className="text-xs font-bold text-(--accent)">
-                          {item.milestone.belt} Belt milestone
-                        </span>
-
-                        {item.milestone.skill && (
-                          <span className="text-xs text-(--ink-muted)">
-                            • {item.milestone.skill}
-                          </span>
-                        )}
-                      </div>
-                    )}
                   </div>
                 </div>
               );
@@ -1263,15 +1345,10 @@ function AdmissionTimelinePreview({
             "
           >
             <p className="text-xs font-medium text-(--ink-muted)">
-              Showing the first curriculum days and all configured belt
-              milestones.
+              Timeline follows the published learning-step order and the Batch&apos;s eligible occurrence dates.
             </p>
 
-            {firstMilestone && (
-              <p className="shrink-0 text-xs font-bold text-(--accent)">
-                First belt milestone: Day {firstMilestone.day}
-              </p>
-            )}
+
           </div>
         </div>
       )}
@@ -1400,7 +1477,7 @@ function StudentTable({ students }: { students: Student[] }) {
           <TableHeading>Plan / Branch</TableHeading>
           <TableHeading>Belt</TableHeading>
           <TableHeading>Status</TableHeading>
-          <TableHeading>Joined</TableHeading>
+          <TableHeading>Joining date</TableHeading>
           <TableHeading align="right">Action</TableHeading>
         </tr>
       </thead>
@@ -1644,7 +1721,7 @@ function StudentMobileList({
               text-xs text-(--ink-faint)
             "
             >
-              Joined {formatDate(student.joinDate)}
+              Joining date {formatDate(student.joinDate)}
             </span>
 
             <span

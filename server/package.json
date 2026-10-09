@@ -14,7 +14,7 @@
     "migrate:crm-indexes": "node scripts/migrateCrmIndexes.js",
     "backup:database": "node scripts/backupMongoDatabase.js",
     "test": "npm run test:unit && npm run test:integration",
-    "test:unit": "node --experimental-test-isolation=none --test tests/unit/securityConfig.test.js tests/unit/auditService.test.js",
+    "test:unit": "node --experimental-test-isolation=none --test tests/unit/securityConfig.test.js tests/unit/auditService.test.js tests/unit/apiCors.test.js tests/unit/calendarService.test.js tests/unit/sessionService.test.js tests/unit/batchScheduleService.test.js tests/unit/schedulingConflictService.test.js tests/unit/curriculumManagement.test.js tests/unit/curriculumCapacity.test.js tests/unit/branchAvailability.test.js tests/unit/batchCompletion.test.js tests/unit/admissionPreview.test.js tests/unit/programProgress.test.js tests/unit/enrollmentAttendance.test.js tests/unit/currency.test.js",
     "test:integration": "node --experimental-test-isolation=none --test tests/integration/api.integration.test.js",
     "test:coverage": "node --experimental-test-isolation=none --test --experimental-test-coverage tests/unit/securityConfig.test.js && node --experimental-test-isolation=none --test --experimental-test-coverage tests/integration/api.integration.test.js"
   },

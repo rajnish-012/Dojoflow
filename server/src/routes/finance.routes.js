@@ -8,11 +8,15 @@ router.use(protect);
 
 router.get("/dashboard", authorizePermission("finance.view"), controller.getFinanceDashboard);
 router.get("/reports", authorizePermission("finance.report"), controller.getFinanceReport);
-router.get("/plans", authorizePermission("finance.view"), controller.getFeePlans);
+router.get("/plan-options", authorizePermission("finance.view"), controller.getFeeTermPlanOptions);
 router.get("/branches", authorizePermission("finance.view"), controller.getFeeBranches);
+router.get("/fee-terms", authorizePermission("finance.view"), controller.listAllFeeTerms);
+router.get("/plans/:planId/fee-terms", authorizePermission("finance.view"), controller.listFeeTerms);
+router.post("/plans/:planId/fee-terms", authorizePermission("finance.manage"), controller.createFeeTerm);
+router.get("/fee-terms/available", authorizePermission("membership.manage"), controller.getAvailableFeeTerms);
+router.patch("/fee-terms/:feeTermId", authorizePermission("finance.manage"), controller.updateFeeTerm);
+router.post("/fee-terms/:feeTermId/supersede", authorizePermission("finance.manage"), controller.supersedeFeeTerm);
 router.get("/invoice-candidates", authorizePermission("finance.manage"), controller.getInvoiceCandidates);
-router.put("/plans/:planId", authorizePermission("finance.manage"), controller.updateFeePlan);
-router.put("/plans/:planId/branch-fees", authorizePermission("finance.manage"), controller.updateBranchFeePlan);
 router.get("/invoices", authorizePermission("finance.view"), controller.listInvoices);
 router.get("/payments", authorizePermission("finance.view"), controller.listPayments);
 router.post("/invoices", authorizePermission("finance.manage"), controller.createInvoice);

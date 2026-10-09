@@ -2,7 +2,6 @@
 import { confirmAction, toast } from "@/lib/toast";
 
 import {
-  Award,
   CalendarDays,
   Check,
   Clock3,
@@ -39,39 +38,11 @@ import { createPlan, deletePlan, getPlans, updatePlan } from "@/lib/api";
 
 import { PERMISSIONS, useCan } from "@/lib/permissions";
 import { getPublicTrainingSessionTypes, type TrainingSessionTypeRecord } from "@/lib/trainingSessionTypeApi";
-
-type CurriculumItem = {
-  day: number;
-  title: string;
-  description: string;
-  skill: string;
-};
-
-type MilestoneItem = {
-  day: number;
-  belt: string;
-  skill: string;
-  description: string;
-};
-
-type Plan = {
-  _id: string;
-  name: string;
-  price: number;
-  duration: number;
-  durationUnit: "MONTHS" | "DAYS";
-  classesPerWeek: number;
-  startingBelt: string;
-  progressReports: string;
-  milestones: MilestoneItem[];
-  curriculum: CurriculumItem[];
-  isActive: boolean;
-  programs?: { program: string | TrainingSessionTypeRecord; weeklyLimit?: number | null }[];
-};
+import { BELT_RANKS, BELT_STYLES } from "@/lib/beltRanks";
+import { theoreticalMaximumSessions } from "@/lib/planCapacity";
 
 type FormData = {
   name: string;
-  price: string;
   duration: string;
   durationUnit: "MONTHS" | "DAYS";
   classesPerWeek: string;
@@ -80,37 +51,26 @@ type FormData = {
   programs: string[];
 };
 
+type Plan = {
+  _id: string;
+  name: string;
+  duration: number;
+  durationUnit: "MONTHS" | "DAYS";
+  classesPerWeek: number;
+  startingBelt: string;
+  progressReports: string;
+  isActive: boolean;
+  programs?: { program: string | TrainingSessionTypeRecord; weeklyLimit?: number | null }[];
+};
+
 const EMPTY_FORM: FormData = {
   name: "",
-  price: "",
   duration: "",
   durationUnit: "MONTHS",
   classesPerWeek: "4",
   startingBelt: "White",
   progressReports: "Monthly",
   programs: [],
-};
-
-const BELTS = [
-  "White",
-  "Yellow",
-  "Orange",
-  "Green",
-  "Blue",
-  "Purple",
-  "Brown",
-  "Black",
-];
-
-const BELT_STYLES: Record<string, string> = {
-  White: "bg-(--hover-bg) text-(--foreground) border-(--line)",
-  Yellow: "bg-(--yellow-soft) text-(--yellow) border-(--yellow-soft)",
-  Orange: "bg-(--orange-soft) text-(--orange) border-(--orange-soft)",
-  Green: "bg-(--green-soft) text-(--green) border-(--green-soft)",
-  Blue: "bg-(--blue-soft) text-(--blue) border-(--blue-soft)",
-  Purple: "bg-purple-500/10 text-purple-400 border-purple-500/20",
-  Brown: "bg-amber-500/10 text-amber-500 border-amber-500/20",
-  Black: "bg-(--foreground) text-(--background) border-(--foreground)",
 };
 
 export default function PlansPage() {
@@ -129,12 +89,10 @@ export default function PlansPage() {
 
   const [form, setForm] = useState<FormData>(EMPTY_FORM);
 
-  const [milestones, setMilestones] = useState<MilestoneItem[]>([]);
   const [availablePrograms, setAvailablePrograms] = useState<TrainingSessionTypeRecord[]>([]);
 
   useEffect(() => {
     if (!canViewPlans) {
-      setLoading(false);
       return;
     }
 
@@ -170,7 +128,6 @@ export default function PlansPage() {
 
     setEditingPlan(null);
     setForm({ ...EMPTY_FORM, programs: [] });
-    setMilestones([]);
     setFormError("");
     setModalOpen(true);
   }
@@ -184,7 +141,6 @@ export default function PlansPage() {
 
     setForm({
       name: plan.name ?? "",
-      price: String(plan.price ?? ""),
       duration: String(plan.duration ?? ""),
       durationUnit: plan.durationUnit ?? "MONTHS",
       classesPerWeek: String(plan.classesPerWeek ?? 4),
@@ -192,15 +148,6 @@ export default function PlansPage() {
       progressReports: plan.progressReports ?? "Monthly",
       programs: (plan.programs ?? []).map((item) => typeof item.program === "string" ? item.program : item.program._id),
     });
-
-    setMilestones(
-      (plan.milestones ?? []).map((item) => ({
-        day: Number(item.day) || 1,
-        belt: item.belt ?? "",
-        skill: item.skill ?? "",
-        description: item.description ?? "",
-      })),
-    );
 
     setFormError("");
     setModalOpen(true);
@@ -227,79 +174,20 @@ export default function PlansPage() {
     }));
   }
 
-  function addMilestone() {
-    if (!canManagePlans) {
-      return;
-    }
-
-    setMilestones((previous) => [
-      ...previous,
-      {
-        day: previous.length
-          ? Math.max(...previous.map((item) => item.day)) + 1
-          : 1,
-        belt: "",
-        skill: "",
-        description: "",
-      },
-    ]);
-  }
-
-  function updateMilestone(
-    index: number,
-    field: keyof MilestoneItem,
-    value: string,
-  ) {
-    if (!canManagePlans) {
-      return;
-    }
-
-    setMilestones((previous) =>
-      previous.map((item, itemIndex) =>
-        itemIndex === index
-          ? {
-              ...item,
-              [field]: field === "day" ? Number(value) || 1 : value,
-            }
-          : item,
-      ),
-    );
-  }
-
-  function removeMilestone(index: number) {
-    if (!canManagePlans) {
-      return;
-    }
-
-    setMilestones((previous) =>
-      previous.filter((_, itemIndex) => itemIndex !== index),
-    );
-  }
-
   function validateForm() {
     if (!form.name.trim()) {
       return "Plan name is required.";
     }
 
-    if (!form.price || Number(form.price) < 0) {
-      return "Please enter a valid price.";
-    }
-
-    if (!form.duration || Number(form.duration) <= 0) {
+    if (!form.duration || !Number.isInteger(Number(form.duration)) || Number(form.duration) <= 0) {
       return "Please enter a valid duration.";
     }
 
-    if (!form.classesPerWeek || Number(form.classesPerWeek) <= 0) {
+    if (!form.classesPerWeek || !Number.isInteger(Number(form.classesPerWeek)) || Number(form.classesPerWeek) <= 0) {
       return "Please enter valid classes per week.";
     }
 
     if (form.programs.length === 0) return "Select at least one program for this plan.";
-
-    for (const item of milestones) {
-      if (!item.day || !item.belt.trim() || !item.skill.trim()) {
-        return "Every milestone must have a day, belt, and skill.";
-      }
-    }
 
     return "";
   }
@@ -334,22 +222,12 @@ export default function PlansPage() {
      */
     const payload = {
       name: form.name.trim(),
-      price: Number(form.price),
       duration: Number(form.duration),
       durationUnit: form.durationUnit,
       classesPerWeek: Number(form.classesPerWeek),
       programs: form.programs.map((program) => ({ program, weeklyLimit: null })),
       startingBelt: form.startingBelt.trim(),
       progressReports: form.progressReports.trim(),
-      milestones: milestones
-        .map((item) => ({
-          ...item,
-          belt: item.belt.trim(),
-          skill: item.skill.trim(),
-          description: item.description.trim(),
-        }))
-        .sort((a, b) => a.day - b.day),
-      curriculum: [],
     };
 
     try {
@@ -399,15 +277,7 @@ export default function PlansPage() {
 
   const activePlans = plans.filter((plan) => plan.isActive).length;
 
-  const curriculumDays = plans.reduce(
-    (total, plan) => total + (plan.curriculum?.length ?? 0),
-    0,
-  );
-
-  const milestoneCount = plans.reduce(
-    (total, plan) => total + (plan.milestones?.length ?? 0),
-    0,
-  );
+  const programAssignments = plans.reduce((total, plan) => total + (plan.programs?.length ?? 0), 0);
 
   if (!canViewPlans) {
     return (
@@ -425,7 +295,7 @@ export default function PlansPage() {
       <PageHeader
         eyebrow="Academy Management"
         title="Training Plans"
-        description="Create and manage structured training programs, pricing, schedules, and belt progression."
+        description="Create and manage training plans, included programs, and enrollment settings. Manage curriculum and belt progression in Curriculum. Configure prices through Fee Terms in Fees & Payments."
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <Button
@@ -434,20 +304,20 @@ export default function PlansPage() {
               onClick={() => void loadPlans()}
             >
               <RefreshCw size={17} className={loading ? "animate-spin" : ""} />
-              <span className="hidden sm:inline">Refresh</span>
+              Refresh
             </Button>
 
             {canManagePlans ? (
               <Button variant="primary" size="lg" onClick={openCreateModal}>
                 <Plus size={18} />
-                <span className="hidden sm:inline">Add Training Plan</span>
+                Add Training Plan
               </Button>
             ) : undefined}
           </div>
         }
       />
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         <SummaryCard
           title="Total Plans"
           value={plans.length}
@@ -463,18 +333,13 @@ export default function PlansPage() {
         />
 
         <SummaryCard
-          title="Curriculum Days"
-          value={curriculumDays}
-          subtitle="Across all plans"
-          icon={<CalendarDays size={19} />}
+          title="Program Assignments"
+          value={programAssignments}
+          subtitle="Programs across plans"
+          icon={<Dumbbell size={19} />}
         />
 
-        <SummaryCard
-          title="Milestones"
-          value={milestoneCount}
-          subtitle="Belt progression checkpoints"
-          icon={<Award size={19} />}
-        />
+
       </div>
 
       {error && (
@@ -509,7 +374,7 @@ export default function PlansPage() {
             title="No training plans yet"
             description={
               canManagePlans
-                ? "Create your first plan to organize classes, pricing, and belt progression."
+                ? "Create your first plan to organize classes, curriculum, and belt progression."
                 : "No training plans are currently available."
             }
             icon={<Layers3 size={22} />}
@@ -544,7 +409,7 @@ export default function PlansPage() {
           onClose={closeModal}
           size="xl"
           title={editingPlan ? "Edit Training Plan" : "Create Training Plan"}
-          description="Configure pricing, schedule, and belt progression for this training plan."
+          description="Configure plan structure and enrollment settings. Manage curriculum and belt progression in Curriculum. Manage pricing through Fee Terms in Fees & Payments."
           footer={
             <>
               <Button variant="outline" onClick={closeModal} disabled={saving}>
@@ -582,24 +447,6 @@ export default function PlansPage() {
                     onChange={handleFormChange}
                     placeholder="e.g. Beginner Karate"
                   />
-                </Field>
-
-                <Field label="Price" required>
-                  <div className="relative">
-                    <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-sm font-semibold text-(--ink-muted)">
-                      ₹
-                    </span>
-
-                    <Input
-                      name="price"
-                      type="number"
-                      min="0"
-                      value={form.price}
-                      onChange={handleFormChange}
-                      placeholder="4000"
-                      className="pl-8"
-                    />
-                  </div>
                 </Field>
 
                 <Field label="Duration" required>
@@ -641,7 +488,7 @@ export default function PlansPage() {
                     value={form.startingBelt}
                     onChange={handleFormChange}
                   >
-                    {BELTS.map((belt) => (
+                    {BELT_RANKS.map((belt) => (
                       <option key={belt} value={belt}>
                         {belt}
                       </option>
@@ -663,6 +510,7 @@ export default function PlansPage() {
                   </Select>
                 </Field>
               </div>
+              <p className="mt-4 rounded-lg bg-(--surface) p-3 text-sm text-(--ink-muted)">Theoretical curriculum capacity: <strong className="text-(--foreground)">{theoreticalMaximumSessions(Number(form.duration), form.durationUnit, Number(form.classesPerWeek))} sessions</strong>. Month-based Plans use a 52-week academic year; partial weeks round up.</p>
             </FormSection>
 
             <FormSection icon={<Dumbbell size={17} />} title="Included Programs" description="Students on this plan can attend sessions belonging to these programs. The weekly class allowance is shared across the selected programs.">
@@ -681,54 +529,7 @@ export default function PlansPage() {
               )}
             </FormSection>
 
-            <FormSection
-              icon={<Award size={17} />}
-              title="Belt Milestones"
-              description="Define achievement checkpoints students work toward."
-              action={
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={addMilestone}
-                >
-                  <Plus size={15} />
-                  Add Milestone
-                </Button>
-              }
-            >
-              {milestones.length === 0 ? (
-                <EmptyState
-                  title="No milestones"
-                  description="Add belt checkpoints to track student progression."
-                  icon={<Award size={21} />}
-                  className="py-9"
-                  action={
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      size="sm"
-                      onClick={addMilestone}
-                    >
-                      <Plus size={15} />
-                      Add First Milestone
-                    </Button>
-                  }
-                />
-              ) : (
-                <div className="space-y-3">
-                  {milestones.map((item, index) => (
-                    <MilestoneEditor
-                      key={`milestone-${index}`}
-                      item={item}
-                      index={index}
-                      onChange={updateMilestone}
-                      onRemove={removeMilestone}
-                    />
-                  ))}
-                </div>
-              )}
-            </FormSection>
+
 
             <div className="rounded-2xl border border-(--line) bg-(--surface) p-4">
               <div className="flex items-start gap-3">
@@ -742,11 +543,11 @@ export default function PlansPage() {
                   </p>
 
                   <p className="mt-1 text-xs leading-5 text-(--ink-muted)">
-                    Day-wise curriculum is protected by
+                    Curriculum, learning milestones, and belt progression are protected by
                     <span className="mx-1 font-bold text-(--foreground)">
                       curriculum.manage
                     </span>
-                    and is managed from the dedicated Curriculum page.
+                    and are managed from the dedicated Curriculum page.
                   </p>
 
                   {!canManageCurriculum && (
@@ -764,7 +565,6 @@ export default function PlansPage() {
     </div>
   );
 }
-
 function PlanCard({
   plan,
   availablePrograms,
@@ -778,9 +578,8 @@ function PlanCard({
   onEdit: () => void;
   onDelete: () => void;
 }) {
-  const curriculum = plan.curriculum ?? [];
-  const milestones = plan.milestones ?? [];
   const includedPrograms = (plan.programs ?? []).map((item) => typeof item.program === "string" ? availablePrograms.find((program) => program._id === item.program)?.name : item.program?.name).filter(Boolean);
+  const maximumSessions = theoreticalMaximumSessions(plan.duration, plan.durationUnit, plan.classesPerWeek);
 
   return (
     <Card padding="none" hoverable className="group overflow-hidden">
@@ -821,19 +620,19 @@ function PlanCard({
 
         <div className="mt-6 rounded-2xl border border-(--line) bg-(--surface) p-4">
           <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-(--ink-faint)">
-            Plan investment
+            Plan duration
           </p>
 
           <div className="mt-1 flex items-baseline gap-2">
             <span className="text-2xl font-extrabold tracking-tight text-(--foreground)">
-              ₹{Number(plan.price ?? 0).toLocaleString("en-IN")}
+              {plan.duration}
             </span>
 
             <span className="text-xs font-medium text-(--ink-muted)">
-              / {plan.duration}{" "}
               {plan.durationUnit === "MONTHS" ? "months" : "days"}
             </span>
           </div>
+          <p className="mt-3 text-xs text-(--ink-muted)">Theoretical maximum: <strong className="text-(--foreground)">{maximumSessions} sessions</strong></p>
         </div>
 
         <div className="mt-4 grid grid-cols-2 gap-2">
@@ -850,93 +649,16 @@ function PlanCard({
           />
 
           <PlanStat
-            icon={<Layers3 size={14} />}
-            label="Curriculum"
-            value={`${curriculum.length} days`}
+            icon={<Dumbbell size={14} />}
+            label="Programs"
+            value={String(includedPrograms.length)}
           />
 
-          <PlanStat
-            icon={<Award size={14} />}
-            label="Milestones"
-            value={String(milestones.length)}
-          />
         </div>
 
         <p className="mt-4 text-xs leading-5 text-(--ink-muted)"><span className="font-bold text-(--foreground-soft)">Programs:</span> {includedPrograms.join(", ") || "Not configured"}</p>
 
-        {curriculum.length > 0 && (
-          <div className="mt-4 rounded-2xl border border-(--line) bg-(--hover-bg) p-4">
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2">
-                <CalendarDays size={15} className="text-(--accent)" />
-
-                <span className="text-xs font-bold text-(--foreground)">
-                  Curriculum Preview
-                </span>
-              </div>
-
-              <span className="text-[10px] font-semibold text-(--ink-faint)">
-                {curriculum.length} total
-              </span>
-            </div>
-
-            <div className="mt-3 space-y-2">
-              {curriculum.slice(0, 3).map((item) => (
-                <div
-                  key={`${plan._id}-day-${item.day}`}
-                  className="flex items-start gap-2.5 rounded-xl border border-(--line) bg-(--card) p-2.5"
-                >
-                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-(--accent-soft) text-[10px] font-extrabold text-(--accent)">
-                    {item.day}
-                  </span>
-
-                  <div className="min-w-0">
-                    <p className="truncate text-xs font-bold text-(--foreground)">
-                      {item.title}
-                    </p>
-
-                    {item.skill && (
-                      <p className="mt-0.5 truncate text-[10px] text-(--ink-muted)">
-                        {item.skill}
-                      </p>
-                    )}
-                  </div>
-                </div>
-              ))}
-
-              {curriculum.length > 3 && (
-                <p className="pt-1 text-[10px] font-bold text-(--accent)">
-                  +{curriculum.length - 3} more curriculum days
-                </p>
-              )}
-            </div>
-          </div>
-        )}
-
-        {milestones.length > 0 && (
-          <div className="mt-4 flex items-center gap-2 overflow-hidden">
-            <Award size={14} className="shrink-0 text-(--gold)" />
-
-            <div className="flex min-w-0 flex-wrap gap-1.5">
-              {milestones.slice(0, 4).map((milestone, index) => (
-                <span
-                  key={`${plan._id}-milestone-${index}`}
-                  className={`rounded-full border px-2 py-1 text-[9px] font-bold ${
-                    BELT_STYLES[milestone.belt] ?? BELT_STYLES.White
-                  }`}
-                >
-                  Day {milestone.day} · {milestone.belt}
-                </span>
-              ))}
-
-              {milestones.length > 4 && (
-                <span className="rounded-full bg-(--hover-bg) px-2 py-1 text-[9px] font-bold text-(--ink-muted)">
-                  +{milestones.length - 4}
-                </span>
-              )}
-            </div>
-          </div>
-        )}
+        <p className="mt-4 rounded-lg bg-(--surface) p-3 text-xs text-(--ink-muted)">Curriculum, learning milestones, and belt progression are managed in Curriculum.</p>
 
         {canManage && (
           <div className="mt-5 flex gap-2 border-t border-(--line) pt-4">
@@ -1048,95 +770,6 @@ function Field({
       </label>
 
       {children}
-    </div>
-  );
-}
-
-function MilestoneEditor({
-  item,
-  index,
-  onChange,
-  onRemove,
-}: {
-  item: MilestoneItem;
-  index: number;
-  onChange: (index: number, field: keyof MilestoneItem, value: string) => void;
-  onRemove: (index: number) => void;
-}) {
-  return (
-    <div className="rounded-2xl border border-(--line) bg-(--surface) p-4">
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2.5">
-          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-(--gold-soft) text-(--gold)">
-            <Award size={15} />
-          </span>
-
-          <div>
-            <p className="text-xs font-extrabold text-(--foreground)">
-              Milestone {index + 1}
-            </p>
-
-            <p className="text-[10px] text-(--ink-faint)">
-              Belt progression checkpoint
-            </p>
-          </div>
-        </div>
-
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          aria-label={`Remove milestone ${index + 1}`}
-          onClick={() => onRemove(index)}
-          className="text-(--danger) hover:bg-(--danger-soft) hover:text-(--danger)"
-        >
-          <Trash2 size={15} />
-        </Button>
-      </div>
-
-      <div className="grid gap-3 md:grid-cols-2">
-        <Field label="Day" required>
-          <Input
-            type="number"
-            min="1"
-            value={item.day}
-            onChange={(event) => onChange(index, "day", event.target.value)}
-          />
-        </Field>
-
-        <Field label="Belt" required>
-          <Select
-            value={item.belt}
-            onChange={(event) => onChange(index, "belt", event.target.value)}
-          >
-            <option value="">Select belt</option>
-
-            {BELTS.map((belt) => (
-              <option key={belt} value={belt}>
-                {belt}
-              </option>
-            ))}
-          </Select>
-        </Field>
-
-        <Field label="Skill" required>
-          <Input
-            value={item.skill}
-            onChange={(event) => onChange(index, "skill", event.target.value)}
-            placeholder="e.g. Kicks & Blocking"
-          />
-        </Field>
-
-        <Field label="Description">
-          <Input
-            value={item.description}
-            onChange={(event) =>
-              onChange(index, "description", event.target.value)
-            }
-            placeholder="Milestone description"
-          />
-        </Field>
-      </div>
     </div>
   );
 }

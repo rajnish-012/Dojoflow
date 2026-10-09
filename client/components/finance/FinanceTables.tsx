@@ -5,7 +5,9 @@ import { Banknote, FileText, RotateCcw, Search } from "lucide-react";
 import {
   Badge,
   Button,
+  CopyButton,
   DataTableSection,
+  DataTableToolbar,
   DataFilters,
   DataSort,
   EmptyState,
@@ -32,7 +34,7 @@ function date(value: string) {
 }
 function SearchBox({ value, onChange, placeholder }: { value: string; onChange: (value: string) => void; placeholder: string }) {
   return (
-    <label className="relative w-full lg:w-[340px]">
+    <label data-toolbar-search className="relative w-full lg:w-[340px]">
       <Search size={17} aria-hidden="true" className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-(--ink-faint)" />
       <Input type="search" value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} aria-label={placeholder} className="h-11 pl-10" />
     </label>
@@ -78,6 +80,7 @@ function FilterSortControls({ filters }: { filters: FinanceFilters }) {
           filters.onStatus("");
           filters.onBranch("");
         }}
+        responsiveToolbar
       >
         <label className="grid gap-1.5 text-xs font-bold text-(--foreground-soft)">
           Status
@@ -160,14 +163,14 @@ export function InvoiceTable({
         description="Outstanding balances, due dates, and payment receipts."
         icon={<FileText size={18} />}
         toolbar={
-          <>
+          <DataTableToolbar>
             <SearchBox
               value={search}
               onChange={(value) => { setCurrentPage(1); onSearch(value); }}
               placeholder="Search invoices or students"
             />
             <FilterSortControls filters={tableFilters} />
-          </>
+          </DataTableToolbar>
         }
       >
       {!invoices.length ? (
@@ -193,7 +196,7 @@ export function InvoiceTable({
               {visibleInvoices.map((invoice) => (
                 <tr key={invoice._id} className="border-t border-(--line)">
                   <td className="px-6 py-5">
-                    <p className="font-semibold">{invoice.invoiceNumber}</p>
+                    <div className="flex items-center gap-1.5"><p className="font-semibold">{invoice.invoiceNumber}</p><CopyButton value={invoice.invoiceNumber} label="Invoice number" /></div>
                     <p className="mt-1 text-xs text-(--ink-muted)">
                       {invoice.items.map((item) => item.description).join(", ")}
                     </p>
@@ -314,14 +317,14 @@ export function PaymentTable({
         description="Every payment, refund, and correction is kept as a separate record."
         icon={<Banknote size={18} />}
         toolbar={
-          <>
+          <DataTableToolbar>
             <SearchBox
               value={search}
               onChange={(value) => { setCurrentPage(1); onSearch(value); }}
               placeholder="Search ledger"
             />
             <FilterSortControls filters={tableFilters} />
-          </>
+          </DataTableToolbar>
         }
       >
       {!payments.length ? (
@@ -361,9 +364,7 @@ export function PaymentTable({
                     </td>
                     <td className="px-6 py-5">
                       <p className="font-semibold">{student}</p>
-                      <p className="mt-1 text-xs text-(--ink-muted)">
-                        {invoice}
-                      </p>
+                      <div className="mt-1 flex items-center gap-1.5 text-xs text-(--ink-muted)"><p>{invoice}</p>{invoice && <CopyButton value={invoice} label="Invoice number" />}</div>
                     </td>
                     <td className="px-6 py-5">
                       <p className="font-semibold">
@@ -378,9 +379,7 @@ export function PaymentTable({
                     </td>
                     <td className="px-6 py-5">
                       <p>{payment.method.replaceAll("_", " ")}</p>
-                      <p className="mt-1 text-xs text-(--ink-muted)">
-                        {payment.referenceId || payment.reason || "—"}
-                      </p>
+                      <div className="mt-1 flex items-center gap-1.5 text-xs text-(--ink-muted)"><p>{payment.referenceId || payment.reason || "—"}</p>{payment.referenceId && <CopyButton value={payment.referenceId} label="Payment reference" />}</div>
                     </td>
                     <td className="px-6 py-5">
                       {typeof payment.receivedBy === "object"
@@ -404,6 +403,7 @@ export function PaymentTable({
                             Receipt
                           </Button>
                         )}
+                        {payment.receipt?.receiptNumber && <CopyButton value={payment.receipt.receiptNumber} label="Receipt number" />}
                         {original &&
                           canRefund &&
                           payment.remainingRefundable > 0 && (

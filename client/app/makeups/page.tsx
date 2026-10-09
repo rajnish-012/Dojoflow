@@ -22,6 +22,7 @@ import {
   Badge,
   Button,
   DataTableSection,
+  DataTableToolbar,
   DataFilters,
   DataSort,
   EmptyState,
@@ -1102,8 +1103,8 @@ export default function MakeupsPage() {
         />
 
         <DataTableSection className="mt-6" title="Missed classes" description="View and manage every makeup class in your academy." icon={<CalendarDays size={18} />} toolbar={
-            <div className="flex w-full flex-col gap-3 lg:w-auto lg:flex-row lg:items-center">
-              <div className="relative w-full lg:w-[340px]">
+            <DataTableToolbar>
+              <div data-toolbar-search className="relative w-full lg:w-[340px]">
                 <Search
                   size={17}
                   aria-hidden="true"
@@ -1148,7 +1149,7 @@ export default function MakeupsPage() {
                 )}
               </div>
 
-              <DataFilters activeFilters={activeFilters} onClearAll={clearFilters}>
+              <DataFilters activeFilters={activeFilters} onClearAll={clearFilters} responsiveToolbar>
                 <label className="grid gap-1.5 text-xs font-bold text-(--foreground-soft)">
                   Status
                   <Select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as FilterStatus)}>
@@ -1184,7 +1185,7 @@ export default function MakeupsPage() {
                   { value: "status-asc", label: "Status: A to Z" },
                 ]}
               />
-            </div>
+            </DataTableToolbar>
         }>
 
           {!loading && !error && (

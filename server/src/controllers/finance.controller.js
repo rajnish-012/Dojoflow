@@ -7,12 +7,19 @@ const FinanceSequence = require("../models/FinanceSequence");
 const Invoice = require("../models/Invoice");
 const Payment = require("../models/Payment");
 const Plan = require("../models/Plan");
+const FeeTerm = require("../models/FeeTerm");
 const TrainingSessionType = require("../models/TrainingSessionType");
 const Receipt = require("../models/Receipt");
 const Student = require("../models/Student");
 const { isBranchScoped } = require("../utils/access");
 const { FINANCE_TIME_ZONE, academyDateKey, academyDayStart, academyMonthStart, academyYearMonth, isPastDue } = require("../utils/financeDates");
 const { safelyNotify, createNotification } = require("../services/notification.service");
+const { sendInvoiceIssuedEmail, sendReceiptEmail, sendCorrectionEmail } = require("../services/financeEmail.service");
+const { completeOrderForInvoice, releaseOrderReservation, publishStockTransitions } = require("../services/inventory.service");
+const InventoryOrder = require("../models/InventoryOrder");
+const { AUDIT_ACTIONS } = require("../config/auditActions");
+const { validateBillingSnapshot } = require("../services/billingSnapshot.service");
+const { normalizeCurrency } = require("../utils/currency");
 
 const FREQUENCIES = new Set(["ONE_TIME", "MONTHLY", "QUARTERLY", "YEARLY"]);
 const METHODS = new Set(["CASH", "UPI", "CARD", "BANK_TRANSFER", "ONLINE", "OTHER"]);
@@ -84,9 +91,9 @@ function asAmount(value) {
 }
 
 async function audit(req, session, values) {
-  const { action, branch, student, invoice, payment, reason, before, after } = values;
-  const entityType = payment ? "PAYMENT" : invoice ? "INVOICE" : student ? "STUDENT" : "FEE_PLAN";
-  const entityId = payment || invoice || student || null;
+  const { action, branch, student, invoice, payment, feeTerm, reason, before, after } = values;
+const entityType = payment ? "PAYMENT" : invoice ? "INVOICE" : student ? "STUDENT" : feeTerm ? "FEE_TERM" : "FINANCE";
+  const entityId = payment || invoice || student || feeTerm || null;
   await auditService.record({ req, session, action, entityType, entityId, branchId: branch, before, after, metadata: reason ? { reason } : {}, legacy: { student: student || null, invoice: invoice || null, payment: payment || null, reason: reason || "" } });
 }
 
@@ -98,21 +105,413 @@ async function getInvoiceAccess(req, invoiceId, session) {
   return { invoice };
 }
 
-const getFeePlans = async (req, res) => {
+const FEE_TERM_STATUSES = new Set(["DRAFT", "ACTIVE", "RETIRED"]);
+async function configuredCurrency(session) {
+  const query = AcademySettings.findOne().select("currency");
+  if (session) query.session(session);
+  const settings = await query.lean();
+  const currency = normalizeCurrency(settings?.currency || "INR");
+  if (!currency) {
+    const error = new Error("Academy currency is unsupported. Choose a supported currency in Academy Branding before managing FeeTerms.");
+    error.status = 409;
+    throw error;
+  }
+  return currency;
+}
+const feeTermMutableFields = new Set([
+  "branch", "billingFrequency", "amount", "registrationFee", "taxRate",
+  "discountRules", "effectiveFrom", "effectiveUntil", "status", "reason",
+]);
+
+function dateInput(value, label, { required = false } = {}) {
+  if (value === undefined || value === null || value === "") {
+    if (required) return { error: `${label} is required` };
+    return { value: null };
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return { error: `${label} is invalid` };
+  date.setUTCHours(0, 0, 0, 0);
+  return { value: date };
+}
+
+function dayBefore(value) {
+  const date = new Date(value);
+  date.setUTCDate(date.getUTCDate() - 1);
+  date.setUTCHours(0, 0, 0, 0);
+  return date;
+}
+
+function discountRulesAreValid(rules) {
+  return Array.isArray(rules) && rules.every(
+    (rule) => rule?.name?.trim()
+      && ["FIXED", "PERCENT"].includes(rule.type)
+      && asAmount(rule.amount) !== null
+      && (rule.type !== "PERCENT" || Number(rule.amount) <= 100),
+  );
+}
+
+function feeTermAuditSnapshot(term) {
+  const current = term?.toObject ? term.toObject() : term;
+  return {
+    _id: current._id,
+    plan: current.plan?._id || current.plan,
+    branch: current.branch?._id || current.branch || null,
+    billingFrequency: current.billingFrequency,
+    currency: current.currency || null,
+    amount: current.amount,
+    registrationFee: current.registrationFee,
+    taxRate: current.taxRate,
+    discountRules: current.discountRules || [],
+    effectiveFrom: current.effectiveFrom,
+    effectiveUntil: current.effectiveUntil,
+    status: current.status,
+    version: current.version,
+    supersedes: current.supersedes || null,
+  };
+}
+
+async function feeTermBranch(req, input, session, { defaultToAssigned = false } = {}) {
+  const assigned = getBranchId(req.user);
+  const candidate = input === undefined && defaultToAssigned ? assigned : input;
+  if (candidate === undefined || candidate === null || candidate === "") {
+    if (isBranchScoped(req.user)) {
+      const error = new Error("A branch-scoped user must use their assigned branch");
+      error.status = 403;
+      throw error;
+    }
+    return null;
+  }
+  if (!isId(candidate)) {
+    const error = new Error("A valid branch ID is required");
+    error.status = 400;
+    throw error;
+  }
+  if (isBranchScoped(req.user) && String(candidate) !== String(assigned || "")) {
+    const error = new Error("You can only manage FeeTerms for your assigned branch");
+    error.status = 403;
+    throw error;
+  }
+  const branch = await Branch.findById(candidate).select("_id isActive").session(session);
+  if (!branch || branch.isActive === false) {
+    const error = new Error("Selected branch is unavailable");
+    error.status = 400;
+    throw error;
+  }
+  return branch._id;
+}
+
+async function ensureNoActiveFeeTermOverlap({ plan, branch, billingFrequency, effectiveFrom, effectiveUntil, excludeId = null, session }) {
+  const candidateEnd = effectiveUntil || new Date("9999-12-31T00:00:00.000Z");
+  const query = {
+    plan,
+    branch: branch || null,
+    billingFrequency,
+    status: "ACTIVE",
+    effectiveFrom: { $lte: candidateEnd },
+    $or: [{ effectiveUntil: null }, { effectiveUntil: { $gte: effectiveFrom } }],
+  };
+  if (excludeId) query._id = { $ne: excludeId };
+  const overlap = await FeeTerm.findOne(query).select("_id effectiveFrom effectiveUntil").session(session);
+  if (overlap) {
+    const error = new Error("An active FeeTerm already overlaps this plan, branch, billing frequency, and effective period");
+    error.status = 409;
+    throw error;
+  }
+}
+
+async function getFeeTermInScope(req, feeTermId, session) {
+  if (!isId(feeTermId)) {
+    const error = new Error("Invalid FeeTerm ID");
+    error.status = 400;
+    throw error;
+  }
+  const feeTerm = await FeeTerm.findById(feeTermId).session(session);
+  if (!feeTerm || !queryInScope(req.user, feeTerm.branch)) {
+    const error = new Error("FeeTerm not found");
+    error.status = 404;
+    throw error;
+  }
+  return feeTerm;
+}
+
+async function lockFeeTermSchedule(planId, session) {
+  const result = await Plan.updateOne({ _id: planId }, { $inc: { feeTermsRevision: 1 } }, { session });
+  if (!result.matchedCount) {
+    const error = new Error("Training plan not found");
+    error.status = 404;
+    throw error;
+  }
+}
+
+const listFeeTerms = async (req, res) => {
+  if (!isId(req.params.planId)) return res.status(400).json({ success: false, message: "Invalid plan ID" });
+  try {
+    const plan = await Plan.findById(req.params.planId).select("_id name").lean();
+    if (!plan) return res.status(404).json({ success: false, message: "Training plan not found" });
+    const query = { plan: plan._id };
+    if (isBranchScoped(req.user)) query.$or = [{ branch: getBranchId(req.user) }, { branch: null }];
+    const feeTerms = await FeeTerm.find(query)
+      .populate("plan", "name")
+      .populate("branch", "name")
+      .sort({ billingFrequency: 1, effectiveFrom: -1, version: -1 })
+      .lean();
+    res.json({ success: true, feeTerms });
+  } catch (error) {
+    console.error("FeeTerm list failed", { name: error.name });
+    res.status(500).json({ success: false, message: "Failed to load FeeTerms" });
+  }
+};
+
+const listAllFeeTerms = async (req, res) => {
   try {
     const query = {};
-    if (isBranchScoped(req.user)) {
-      const branch = getBranchId(req.user);
-      query.$or = [{ feeBranch: branch }, { feeBranch: null, "branchFeeOverrides.branch": branch }, { feeBranch: null }];
+    if (req.query.planId) {
+      if (!isId(req.query.planId)) return res.status(400).json({ success: false, message: "Invalid plan ID" });
+      query.plan = req.query.planId;
     }
-    const branchId = getBranchId(req.user);
-    const plans = await Plan.find(query).select("name feeName feeActive price duration durationUnit billingFrequency registrationFee taxRate discountRules feeBranch branchFeeOverrides effectiveFrom effectiveUntil programs isActive").populate("feeBranch", "name").populate("branchFeeOverrides.branch", "name").populate("programs.program", "name").sort({ name: 1 }).lean();
-    const plansWithEffectiveTerms = plans.filter((plan) => !isBranchScoped(req.user) || !plan.feeBranch || String(plan.feeBranch._id || plan.feeBranch) === String(branchId)).map((plan) => {
-      const override = branchId ? (plan.branchFeeOverrides || []).find((item) => String(item.branch?._id || item.branch) === String(branchId)) : null;
-      return { ...plan, effectiveFee: override || { feeName: plan.feeName || plan.name, amount: plan.price, billingFrequency: plan.billingFrequency, registrationFee: plan.registrationFee, taxRate: plan.taxRate, active: plan.feeActive !== false, discountRules: plan.discountRules, effectiveFrom: plan.effectiveFrom, effectiveUntil: plan.effectiveUntil } };
+    if (isBranchScoped(req.user)) {
+      const branchId = getBranchId(req.user);
+      if (!branchId) return res.status(403).json({ success: false, message: "A branch is required" });
+      if (req.query.branchId && String(req.query.branchId) !== String(branchId)) return res.status(403).json({ success: false, message: "You cannot view FeeTerms for another branch" });
+      query.$or = [{ branch: branchId }, { branch: null }];
+    } else if (req.query.branchId) {
+      if (!isId(req.query.branchId)) return res.status(400).json({ success: false, message: "Invalid branch ID" });
+      query.$or = [{ branch: req.query.branchId }, { branch: null }];
+    }
+    if (req.query.billingFrequency) {
+      if (!FREQUENCIES.has(req.query.billingFrequency)) return res.status(400).json({ success: false, message: "Invalid billing frequency" });
+      query.billingFrequency = req.query.billingFrequency;
+    }
+    if (req.query.status) {
+      if (!FEE_TERM_STATUSES.has(req.query.status)) return res.status(400).json({ success: false, message: "Invalid FeeTerm status" });
+      query.status = req.query.status;
+    }
+    if (req.query.asOf) {
+      const asOf = dateInput(req.query.asOf, "Effective date", { required: true });
+      if (asOf.error) return res.status(400).json({ success: false, message: asOf.error });
+      query.effectiveFrom = { $lte: asOf.value };
+      query.$and = [{ $or: [{ effectiveUntil: null }, { effectiveUntil: { $gte: asOf.value } }] }];
+    }
+    const feeTerms = await FeeTerm.find(query)
+      .populate("plan", "name")
+      .populate("branch", "name")
+      .sort({ plan: 1, billingFrequency: 1, effectiveFrom: -1, version: -1 })
+      .lean();
+    res.json({ success: true, feeTerms });
+  } catch (error) {
+    console.error("FeeTerm list failed", { name: error.name });
+    res.status(500).json({ success: false, message: "Failed to load FeeTerms" });
+  }
+};
+
+const createFeeTerm = async (req, res) => {
+  if (!isId(req.params.planId)) return res.status(400).json({ success: false, message: "Invalid plan ID" });
+  const values = req.body || {};
+  if (Object.keys(values).some((key) => !feeTermMutableFields.has(key))) return res.status(400).json({ success: false, message: "Only FeeTerm fields can be changed here" });
+  const from = dateInput(values.effectiveFrom, "Effective start date", { required: true });
+  const until = dateInput(values.effectiveUntil, "Effective end date");
+  if (from.error || until.error) return res.status(400).json({ success: false, message: from.error || until.error });
+  if (until.value && until.value < from.value) return res.status(400).json({ success: false, message: "Effective end date must follow the start date" });
+  if (!FREQUENCIES.has(values.billingFrequency)) return res.status(400).json({ success: false, message: "Invalid billing frequency" });
+  if (asAmount(values.amount) === null || Number(values.amount) < 0) return res.status(400).json({ success: false, message: "Fee amount must be zero or greater" });
+  if (asAmount(values.registrationFee ?? 0) === null) return res.status(400).json({ success: false, message: "Registration fee must be zero or greater" });
+  if (!Number.isFinite(Number(values.taxRate ?? 0)) || Number(values.taxRate ?? 0) < 0 || Number(values.taxRate ?? 0) > 100) return res.status(400).json({ success: false, message: "Tax rate must be between 0 and 100" });
+  if (values.discountRules !== undefined && !discountRulesAreValid(values.discountRules)) return res.status(400).json({ success: false, message: "Discount rules are invalid" });
+  const status = values.status || "ACTIVE";
+  if (!FEE_TERM_STATUSES.has(status)) return res.status(400).json({ success: false, message: "FeeTerm status is invalid" });
+  try {
+    const feeTerm = await createSession(async (session) => {
+      const plan = await Plan.findById(req.params.planId).select("_id name").session(session);
+      if (!plan) { const error = new Error("Training plan not found"); error.status = 404; throw error; }
+      const branch = await feeTermBranch(req, values.branch, session, { defaultToAssigned: true });
+      const currency = await configuredCurrency(session);
+      // A write to the parent Plan serializes range checks for this schedule.
+      await lockFeeTermSchedule(plan._id, session);
+      if (status === "ACTIVE") await ensureNoActiveFeeTermOverlap({ plan: plan._id, branch, billingFrequency: values.billingFrequency, effectiveFrom: from.value, effectiveUntil: until.value, session });
+      const latest = await FeeTerm.findOne({ plan: plan._id, branch: branch || null, billingFrequency: values.billingFrequency }).sort({ version: -1 }).select("version").session(session);
+      const [created] = await FeeTerm.create([{
+        plan: plan._id,
+        branch,
+        currency,
+        billingFrequency: values.billingFrequency,
+        amount: round(values.amount),
+        registrationFee: round(values.registrationFee ?? 0),
+        taxRate: Number(values.taxRate ?? 0),
+        discountRules: values.discountRules || [],
+        effectiveFrom: from.value,
+        effectiveUntil: until.value,
+        status,
+        version: Number(latest?.version || 0) + 1,
+      }], { session });
+      await audit(req, session, { action: AUDIT_ACTIONS.FEE_TERM_CREATED, feeTerm: created._id, branch, reason: String(values.reason || "FeeTerm created").slice(0, 500), before: null, after: feeTermAuditSnapshot(created) });
+      return created;
     });
-    res.json({ success: true, plans: plansWithEffectiveTerms });
-  } catch (error) { console.error("Finance plans read failed", { name: error.name }); res.status(500).json({ success: false, message: "Failed to load fee plans" }); }
+    await feeTerm.populate("plan", "name");
+    await feeTerm.populate("branch", "name");
+    res.status(201).json({ success: true, feeTerm });
+  } catch (error) {
+    if (error.status) return res.status(error.status).json({ success: false, message: error.message });
+    if (error.code === 11000) return res.status(409).json({ success: false, message: "A FeeTerm already exists for this plan, branch, billing frequency, and effective start date" });
+    console.error("FeeTerm create failed", { name: error.name, code: error.code, message: error.message });
+    res.status(500).json({ success: false, message: "Failed to create FeeTerm" });
+  }
+};
+
+const updateFeeTerm = async (req, res) => {
+  const values = req.body || {};
+  if (Object.keys(values).some((key) => !feeTermMutableFields.has(key))) return res.status(400).json({ success: false, message: "Only FeeTerm fields can be changed here" });
+  try {
+    const feeTerm = await createSession(async (session) => {
+      const record = await getFeeTermInScope(req, req.params.feeTermId, session);
+      const before = feeTermAuditSnapshot(record);
+      const nextBranch = values.branch === undefined ? record.branch : await feeTermBranch(req, values.branch, session);
+      const nextFrequency = values.billingFrequency === undefined ? record.billingFrequency : values.billingFrequency;
+      const from = values.effectiveFrom === undefined ? { value: record.effectiveFrom } : dateInput(values.effectiveFrom, "Effective start date", { required: true });
+      const until = values.effectiveUntil === undefined ? { value: record.effectiveUntil } : dateInput(values.effectiveUntil, "Effective end date");
+      const nextStatus = values.status === undefined ? record.status : values.status;
+      if (from.error || until.error) { const error = new Error(from.error || until.error); error.status = 400; throw error; }
+      if (until.value && until.value < from.value) { const error = new Error("Effective end date must follow the start date"); error.status = 400; throw error; }
+      if (!FREQUENCIES.has(nextFrequency)) { const error = new Error("Invalid billing frequency"); error.status = 400; throw error; }
+      if (!FEE_TERM_STATUSES.has(nextStatus)) { const error = new Error("FeeTerm status is invalid"); error.status = 400; throw error; }
+      if (values.amount !== undefined && (asAmount(values.amount) === null || Number(values.amount) < 0)) { const error = new Error("Fee amount must be zero or greater"); error.status = 400; throw error; }
+      if (values.registrationFee !== undefined && asAmount(values.registrationFee) === null) { const error = new Error("Registration fee must be zero or greater"); error.status = 400; throw error; }
+      if (values.taxRate !== undefined && (!Number.isFinite(Number(values.taxRate)) || Number(values.taxRate) < 0 || Number(values.taxRate) > 100)) { const error = new Error("Tax rate must be between 0 and 100"); error.status = 400; throw error; }
+      if (values.discountRules !== undefined && !discountRulesAreValid(values.discountRules)) { const error = new Error("Discount rules are invalid"); error.status = 400; throw error; }
+      const used = await Student.exists({ "planEnrollments.feeTerm": record._id }).session(session);
+      const historicalFields = ["branch", "billingFrequency", "amount", "registrationFee", "taxRate", "discountRules", "effectiveFrom", "effectiveUntil"];
+      if (used && historicalFields.some((field) => values[field] !== undefined)) { const error = new Error("A used FeeTerm cannot change financial or effective-date fields; create a successor instead"); error.status = 409; throw error; }
+      await lockFeeTermSchedule(record.plan, session);
+      if (nextStatus === "ACTIVE") await ensureNoActiveFeeTermOverlap({ plan: record.plan, branch: nextBranch, billingFrequency: nextFrequency, effectiveFrom: from.value, effectiveUntil: until.value, excludeId: record._id, session });
+      record.branch = nextBranch;
+      record.billingFrequency = nextFrequency;
+      if (values.amount !== undefined) record.amount = round(values.amount);
+      if (values.registrationFee !== undefined) record.registrationFee = round(values.registrationFee);
+      if (values.taxRate !== undefined) record.taxRate = Number(values.taxRate);
+      if (values.discountRules !== undefined) record.discountRules = values.discountRules;
+      record.effectiveFrom = from.value;
+      record.effectiveUntil = until.value;
+      record.status = nextStatus;
+      await record.save({ session });
+      const action = nextStatus === "RETIRED" && before.status !== "RETIRED" ? AUDIT_ACTIONS.FEE_TERM_RETIRED : AUDIT_ACTIONS.FEE_TERM_UPDATED;
+      await audit(req, session, { action, feeTerm: record._id, branch: record.branch, reason: String(values.reason || "FeeTerm updated").slice(0, 500), before, after: feeTermAuditSnapshot(record) });
+      return record;
+    });
+    await feeTerm.populate("plan", "name");
+    await feeTerm.populate("branch", "name");
+    res.json({ success: true, feeTerm });
+  } catch (error) {
+    if (error.status) return res.status(error.status).json({ success: false, message: error.message });
+    if (error.code === 11000) return res.status(409).json({ success: false, message: "A FeeTerm already exists for this plan, branch, billing frequency, and effective start date" });
+    console.error("FeeTerm update failed", { name: error.name, code: error.code });
+    res.status(500).json({ success: false, message: "Failed to update FeeTerm" });
+  }
+};
+
+const supersedeFeeTerm = async (req, res) => {
+  const values = req.body || {};
+  const allowed = new Set(["amount", "registrationFee", "taxRate", "discountRules", "effectiveFrom", "effectiveUntil", "reason"]);
+  if (Object.keys(values).some((key) => !allowed.has(key))) return res.status(400).json({ success: false, message: "Only successor FeeTerm fields can be changed here" });
+  const from = dateInput(values.effectiveFrom, "Successor effective start date", { required: true });
+  const until = dateInput(values.effectiveUntil, "Successor effective end date");
+  if (from.error || until.error) return res.status(400).json({ success: false, message: from.error || until.error });
+  if (until.value && until.value < from.value) return res.status(400).json({ success: false, message: "Effective end date must follow the start date" });
+  if (asAmount(values.amount) === null || Number(values.amount) < 0) return res.status(400).json({ success: false, message: "Fee amount must be zero or greater" });
+  if (asAmount(values.registrationFee ?? 0) === null) return res.status(400).json({ success: false, message: "Registration fee must be zero or greater" });
+  if (!Number.isFinite(Number(values.taxRate ?? 0)) || Number(values.taxRate ?? 0) < 0 || Number(values.taxRate ?? 0) > 100) return res.status(400).json({ success: false, message: "Tax rate must be between 0 and 100" });
+  if (values.discountRules !== undefined && !discountRulesAreValid(values.discountRules)) return res.status(400).json({ success: false, message: "Discount rules are invalid" });
+  try {
+    const output = await createSession(async (session) => {
+      const previous = await getFeeTermInScope(req, req.params.feeTermId, session);
+      if (previous.status !== "ACTIVE") { const error = new Error("Only an active FeeTerm can be superseded"); error.status = 409; throw error; }
+      if (from.value <= previous.effectiveFrom) { const error = new Error("A successor must start after the previous FeeTerm"); error.status = 400; throw error; }
+      if (await FeeTerm.exists({ supersedes: previous._id }).session(session)) { const error = new Error("This FeeTerm already has a successor"); error.status = 409; throw error; }
+      const before = feeTermAuditSnapshot(previous);
+      const currency = await configuredCurrency(session);
+      await lockFeeTermSchedule(previous.plan, session);
+      await ensureNoActiveFeeTermOverlap({ plan: previous.plan, branch: previous.branch, billingFrequency: previous.billingFrequency, effectiveFrom: from.value, effectiveUntil: until.value, excludeId: previous._id, session });
+      const closeDate = dayBefore(from.value);
+      if (!previous.effectiveUntil || previous.effectiveUntil > closeDate) previous.effectiveUntil = closeDate;
+      previous.status = "RETIRED";
+      await previous.save({ session });
+      const [successor] = await FeeTerm.create([{
+        plan: previous.plan,
+        branch: previous.branch,
+        currency,
+        billingFrequency: previous.billingFrequency,
+        amount: round(values.amount),
+        registrationFee: round(values.registrationFee ?? 0),
+        taxRate: Number(values.taxRate ?? 0),
+        discountRules: values.discountRules === undefined ? previous.discountRules : values.discountRules,
+        effectiveFrom: from.value,
+        effectiveUntil: until.value,
+        status: "ACTIVE",
+        version: previous.version + 1,
+        supersedes: previous._id,
+      }], { session });
+      await audit(req, session, { action: AUDIT_ACTIONS.FEE_TERM_SUPERSEDED, feeTerm: previous._id, branch: previous.branch, reason: String(values.reason || "FeeTerm superseded").slice(0, 500), before, after: { retired: feeTermAuditSnapshot(previous), successor: feeTermAuditSnapshot(successor) } });
+      return { previous, successor };
+    });
+    await output.previous.populate("plan", "name");
+    await output.previous.populate("branch", "name");
+    await output.successor.populate("plan", "name");
+    await output.successor.populate("branch", "name");
+    res.status(201).json({ success: true, previous: output.previous, feeTerm: output.successor });
+  } catch (error) {
+    if (error.status) return res.status(error.status).json({ success: false, message: error.message });
+    if (error.code === 11000) return res.status(409).json({ success: false, message: "A FeeTerm already exists for this plan, branch, billing frequency, and effective start date" });
+    console.error("FeeTerm supersede failed", { name: error.name, code: error.code });
+    res.status(500).json({ success: false, message: "Failed to supersede FeeTerm" });
+  }
+};
+
+const getAvailableFeeTerms = async (req, res) => {
+  const { planId, branchId, asOf } = req.query || {};
+  if (!isId(planId) || !isId(branchId)) return res.status(400).json({ success: false, message: "Valid planId and branchId are required" });
+  if (isBranchScoped(req.user) && String(branchId) !== String(getBranchId(req.user) || "")) return res.status(403).json({ success: false, message: "You can only view FeeTerms for your assigned branch" });
+  const date = dateInput(asOf, "Start date", { required: true });
+  if (date.error) return res.status(400).json({ success: false, message: date.error });
+  try {
+    const [plan, branch] = await Promise.all([
+      Plan.findById(planId).select("_id name").lean(),
+      Branch.findById(branchId).select("_id isActive").lean(),
+    ]);
+    if (!plan) return res.status(404).json({ success: false, message: "Training plan not found" });
+    if (!branch || branch.isActive === false) return res.status(400).json({ success: false, message: "Selected branch is unavailable" });
+    const scopedTerms = { plan: plan._id, branch: { $in: [branch._id, null] } };
+    const [terms, existingTerms] = await Promise.all([FeeTerm.find({
+      ...scopedTerms,
+      status: "ACTIVE",
+      effectiveFrom: { $lte: date.value },
+      $or: [{ effectiveUntil: null }, { effectiveUntil: { $gte: date.value } }],
+    }).populate("plan", "name").populate("branch", "name").sort({ billingFrequency: 1, branch: -1, version: -1 }).lean(), FeeTerm.find(scopedTerms).select("status effectiveFrom effectiveUntil").lean()]);
+    const exactFrequencies = new Set(terms.filter((term) => String(term.branch?._id || term.branch || "") === String(branch._id)).map((term) => term.billingFrequency));
+    const feeTerms = terms.filter((term) => term.branch || !exactFrequencies.has(term.billingFrequency));
+    const availability = {
+      configuredCount: existingTerms.length,
+      inactiveCount: existingTerms.filter((term) => term.status !== "ACTIVE").length,
+      notYetEffectiveCount: existingTerms.filter((term) => term.status === "ACTIVE" && new Date(term.effectiveFrom) > date.value).length,
+      expiredCount: existingTerms.filter((term) => term.status === "ACTIVE" && term.effectiveUntil && new Date(term.effectiveUntil) < date.value).length,
+      applicableCount: feeTerms.length,
+    };
+    res.json({ success: true, feeTerms, availability });
+  } catch (error) {
+    console.error("Available FeeTerms read failed", { name: error.name });
+    res.status(500).json({ success: false, message: "Failed to load available FeeTerms" });
+  }
+};
+
+const getFeeTermPlanOptions = async (req, res) => {
+  try {
+    const plans = await Plan.find({ isActive: { $ne: false } })
+      .select("name duration durationUnit programs isActive")
+      .populate("programs.program", "name")
+      .sort({ name: 1 })
+      .lean();
+    res.json({ success: true, plans });
+  } catch (error) {
+    console.error("FeeTerm Plan options read failed", { name: error.name });
+    res.status(500).json({ success: false, message: "Failed to load Training Plans" });
+  }
 };
 
 const getInvoiceCandidates = async (req, res) => {
@@ -132,91 +531,6 @@ const getFeeBranches = async (req, res) => {
   } catch (error) { console.error("Fee branches read failed", { name: error.name }); res.status(500).json({ success: false, message: "Failed to load branches" }); }
 };
 
-const updateBranchFeePlan = async (req, res) => {
-  const { branchId, ...values } = req.body || {};
-  if (!isId(req.params.planId) || !isId(branchId)) return res.status(400).json({ success: false, message: "Valid plan and branch IDs are required" });
-  if (isBranchScoped(req.user) && String(branchId) !== String(getBranchId(req.user))) return res.status(403).json({ success: false, message: "You can only update fee terms for your assigned branch" });
-  const allowed = new Set(["feeName", "amount", "billingFrequency", "registrationFee", "taxRate", "active", "effectiveFrom", "effectiveUntil", "discountRules", "reason"]);
-  if (Object.keys(values).some((key) => !allowed.has(key))) return res.status(400).json({ success: false, message: "Only branch fee terms can be changed here" });
-  if (values.billingFrequency !== undefined && !FREQUENCIES.has(values.billingFrequency)) return res.status(400).json({ success: false, message: "Invalid billing frequency" });
-  if (values.amount !== undefined && (asAmount(values.amount) === null || Number(values.amount) <= 0)) return res.status(400).json({ success: false, message: "Fee amount must be greater than zero" });
-  if (values.registrationFee !== undefined && asAmount(values.registrationFee) === null) return res.status(400).json({ success: false, message: "Registration fee must be zero or greater" });
-  if (values.taxRate !== undefined && (!Number.isFinite(Number(values.taxRate)) || Number(values.taxRate) < 0 || Number(values.taxRate) > 100)) return res.status(400).json({ success: false, message: "Tax rate must be between 0 and 100" });
-  if (values.active !== undefined && typeof values.active !== "boolean") return res.status(400).json({ success: false, message: "Fee plan active status is invalid" });
-  if (values.discountRules !== undefined && (!Array.isArray(values.discountRules) || values.discountRules.some((rule) => !rule.name?.trim() || !["FIXED", "PERCENT"].includes(rule.type) || asAmount(rule.amount) === null || (rule.type === "PERCENT" && Number(rule.amount) > 100)))) return res.status(400).json({ success: false, message: "Discount rules are invalid" });
-  try {
-    const result = await createSession(async (session) => {
-      const plan = await Plan.findById(req.params.planId).session(session);
-      const branch = await Branch.findById(branchId).select("_id").session(session);
-      if (!plan || !branch) { const error = new Error("Plan or branch not found"); error.status = 404; throw error; }
-      const overrides = [...(plan.branchFeeOverrides || [])];
-      const index = overrides.findIndex((item) => String(item.branch) === String(branchId));
-      const existing = index >= 0 ? overrides[index].toObject() : null;
-      const before = existing ? { ...existing } : null;
-      const override = {
-        branch: branchId,
-        feeName: values.feeName !== undefined ? String(values.feeName).trim() : existing?.feeName || plan.feeName || plan.name,
-        amount: values.amount !== undefined ? round(values.amount) : Number(existing?.amount ?? plan.price),
-        billingFrequency: values.billingFrequency || existing?.billingFrequency || plan.billingFrequency || "ONE_TIME",
-        registrationFee: values.registrationFee !== undefined ? round(values.registrationFee) : Number(existing?.registrationFee ?? plan.registrationFee ?? 0),
-        taxRate: values.taxRate !== undefined ? Number(values.taxRate) : Number(existing?.taxRate ?? plan.taxRate ?? 0),
-        active: values.active !== undefined ? values.active : existing?.active !== false && plan.feeActive !== false,
-        effectiveFrom: values.effectiveFrom !== undefined ? values.effectiveFrom || null : existing?.effectiveFrom || null,
-        effectiveUntil: values.effectiveUntil !== undefined ? values.effectiveUntil || null : existing?.effectiveUntil || null,
-        discountRules: values.discountRules !== undefined ? values.discountRules : (existing?.discountRules || plan.discountRules || []),
-      };
-      if (!override.feeName || !override.amount) { const error = new Error("Fee name and amount are required"); error.status = 400; throw error; }
-      if (override.effectiveFrom && override.effectiveUntil && new Date(override.effectiveUntil) < new Date(override.effectiveFrom)) { const error = new Error("Effective end date must follow the start date"); error.status = 400; throw error; }
-      if (index >= 0) overrides[index] = override; else overrides.push(override);
-      plan.branchFeeOverrides = overrides;
-      await plan.save({ session });
-      await audit(req, session, { action: "FEE_PLAN_UPDATED", branch: branchId, reason: String(values.reason || "Branch fee terms updated").slice(0, 500), before, after: override });
-      return { plan, branchFee: override };
-    });
-    res.json({ success: true, ...result });
-  } catch (error) {
-    if (error.status) return res.status(error.status).json({ success: false, message: error.message });
-    console.error("Branch fee terms update failed", { name: error.name, code: error.code }); res.status(500).json({ success: false, message: "Failed to update branch fee terms" });
-  }
-};
-
-const updateFeePlan = async (req, res) => {
-  const allowed = ["feeName", "price", "billingFrequency", "registrationFee", "taxRate", "feeBranch", "feeActive", "effectiveFrom", "effectiveUntil", "discountRules"];
-  if (!isId(req.params.planId)) return res.status(400).json({ success: false, message: "Invalid plan ID" });
-  const invalid = Object.keys(req.body || {}).filter((key) => ![...allowed, "reason"].includes(key));
-  if (invalid.length) return res.status(400).json({ success: false, message: "Only fee terms can be changed here" });
-  const frequency = req.body.billingFrequency;
-  if (frequency !== undefined && !FREQUENCIES.has(frequency)) return res.status(400).json({ success: false, message: "Invalid billing frequency" });
-  if (req.body.registrationFee !== undefined && asAmount(req.body.registrationFee) === null) return res.status(400).json({ success: false, message: "Registration fee must be zero or greater" });
-  if (req.body.price !== undefined && (asAmount(req.body.price) === null || Number(req.body.price) <= 0)) return res.status(400).json({ success: false, message: "Fee amount must be greater than zero" });
-  if (req.body.feeName !== undefined && !String(req.body.feeName).trim()) return res.status(400).json({ success: false, message: "Fee name is required" });
-  if (req.body.feeBranch != null && !isId(req.body.feeBranch)) return res.status(400).json({ success: false, message: "Invalid fee branch" });
-  if (req.body.taxRate !== undefined && (!Number.isFinite(Number(req.body.taxRate)) || Number(req.body.taxRate) < 0 || Number(req.body.taxRate) > 100)) return res.status(400).json({ success: false, message: "Tax rate must be between 0 and 100" });
-  if (req.body.feeActive !== undefined && typeof req.body.feeActive !== "boolean") return res.status(400).json({ success: false, message: "Fee plan active status is invalid" });
-  if (req.body.discountRules !== undefined && (!Array.isArray(req.body.discountRules) || req.body.discountRules.some((rule) => !rule.name?.trim() || !["FIXED", "PERCENT"].includes(rule.type) || asAmount(rule.amount) === null || (rule.type === "PERCENT" && Number(rule.amount) > 100)))) return res.status(400).json({ success: false, message: "Discount rules are invalid" });
-  try {
-    const plan = await createSession(async (session) => {
-      const record = await Plan.findById(req.params.planId).session(session);
-      if (!record) { const error = new Error("Plan not found"); error.status = 404; throw error; }
-      const assignedBranch = String(getBranchId(req.user) || "");
-      const planBranch = String(record.feeBranch || "");
-      const feeBranchChange = req.body.feeBranch === undefined ? planBranch : String(req.body.feeBranch || "");
-      if (isBranchScoped(req.user) && (!planBranch || planBranch !== assignedBranch || feeBranchChange !== assignedBranch)) { const error = new Error("Branch users can only change fee terms assigned to their branch"); error.status = 403; throw error; }
-      const before = { feeName: record.feeName, billingFrequency: record.billingFrequency, price: record.price, registrationFee: record.registrationFee, taxRate: record.taxRate, feeActive: record.feeActive, feeBranch: record.feeBranch, effectiveFrom: record.effectiveFrom, effectiveUntil: record.effectiveUntil, discountRules: record.discountRules };
-      for (const key of allowed) if (req.body[key] !== undefined) record[key] = req.body[key];
-      if (record.effectiveFrom && record.effectiveUntil && record.effectiveUntil < record.effectiveFrom) { const error = new Error("Effective end date must follow the start date"); error.status = 400; throw error; }
-      await record.save({ session });
-      const branch = record.feeBranch || getBranchId(req.user);
-      await audit(req, session, { action: "FEE_PLAN_UPDATED", branch, reason: String(req.body.reason || "Fee terms updated").slice(0, 500), before, after: { feeName: record.feeName, billingFrequency: record.billingFrequency, price: record.price, registrationFee: record.registrationFee, taxRate: record.taxRate, feeActive: record.feeActive, feeBranch: record.feeBranch, effectiveFrom: record.effectiveFrom, effectiveUntil: record.effectiveUntil, discountRules: record.discountRules } });
-      return record;
-    });
-    res.json({ success: true, plan });
-  } catch (error) {
-    if (error.status) return res.status(error.status).json({ success: false, message: error.message });
-    console.error("Finance fee plan update failed", { name: error.name, code: error.code }); res.status(500).json({ success: false, message: "Failed to update fee plan" });
-  }
-};
-
 const createInvoice = async (req, res) => {
   const { studentId, enrollmentId, dueDate: dueDateInput, discountRuleId, notes = "", status = "ISSUED", periodStart: periodStartInput } = req.body || {};
   if (!isId(studentId) || !isId(enrollmentId)) return res.status(400).json({ success: false, message: "Valid student and enrollment IDs are required" });
@@ -225,30 +539,29 @@ const createInvoice = async (req, res) => {
     const invoice = await createSession(async (session) => {
       const student = await Student.findById(studentId).session(session);
       if (!student) { const error = new Error("Student not found"); error.status = 404; throw error; }
-      if (!queryInScope(req.user, student.branch)) { const error = new Error("Student not found"); error.status = 404; throw error; }
       const enrollment = student.planEnrollments.id(enrollmentId);
       if (!enrollment) { const error = new Error("Enrollment not found for this student"); error.status = 404; throw error; }
-      const plan = await Plan.findById(enrollment.plan).session(session);
-      if (!plan) { const error = new Error("Training plan not found"); error.status = 400; throw error; }
-      if (plan.feeBranch && String(plan.feeBranch) !== String(student.branch)) { const error = new Error("Fee plan is not available to this student's branch"); error.status = 400; throw error; }
-      const branchOverride = (plan.branchFeeOverrides || []).find((item) => String(item.branch) === String(student.branch));
-      const terms = enrollment.billingSnapshot?.amount !== undefined && enrollment.billingSnapshot?.feeName
-        ? enrollment.billingSnapshot
-        : { feeName: branchOverride?.feeName || plan.feeName || plan.name, amount: branchOverride?.amount ?? plan.price, billingFrequency: branchOverride?.billingFrequency || plan.billingFrequency || "ONE_TIME", registrationFee: branchOverride?.registrationFee ?? plan.registrationFee ?? 0, taxRate: branchOverride?.taxRate ?? plan.taxRate ?? 0, discountRules: branchOverride?.discountRules || plan.discountRules || [], effectiveFrom: branchOverride?.effectiveFrom || plan.effectiveFrom, effectiveUntil: branchOverride?.effectiveUntil || plan.effectiveUntil };
-      if (!FREQUENCIES.has(terms.billingFrequency)) { const error = new Error("Enrollment billing frequency is invalid"); error.status = 400; throw error; }
-      if (terms.active === false || plan.feeActive === false || branchOverride?.active === false) { const error = new Error("This fee structure is inactive"); error.status = 409; throw error; }
+      const enrollmentBranch = enrollment.branch || enrollment.billingSnapshot?.branch || student.branch;
+      if (!queryInScope(req.user, enrollmentBranch)) { const error = new Error("Enrollment not found for this student"); error.status = 404; throw error; }
+      const snapshot = enrollment.billingSnapshot;
+      const agreement = validateBillingSnapshot(enrollment);
+      if (!agreement.valid) {
+        const error = new Error(`This enrollment has no valid FeeTerm billing agreement. Missing: ${agreement.missing.join(", ")}.`);
+        error.status = 409;
+        throw error;
+      }
+      const terms = snapshot;
+      if (String(enrollmentBranch) !== String(snapshot.branch)) { const error = new Error("The enrollment branch does not match its frozen billing agreement."); error.status = 409; throw error; }
       const period = periodFor(terms.billingFrequency, periodStartInput || enrollment.startDate);
       if (terms.billingFrequency !== "ONE_TIME" && periodStartInput && new Date(periodStartInput) < new Date(enrollment.startDate)) { const error = new Error("Billing period cannot begin before enrollment"); error.status = 400; throw error; }
       if (enrollment.endDate && period.periodStart >= new Date(enrollment.endDate)) { const error = new Error("Billing period falls after this enrollment ended"); error.status = 400; throw error; }
-      if (terms.effectiveFrom && period.periodStart < new Date(terms.effectiveFrom)) { const error = new Error("Fee plan is not effective for this enrollment date"); error.status = 400; throw error; }
-      if (terms.effectiveUntil && period.periodStart > new Date(terms.effectiveUntil)) { const error = new Error("Fee plan is no longer effective for this enrollment date"); error.status = 400; throw error; }
       if (new Date(dueDateInput) < period.periodStart) { const error = new Error("Invoice due date cannot be before its billing period starts"); error.status = 400; throw error; }
       const duplicate = await Invoice.findOne({ enrollment: enrollment._id, cycleKey: period.cycleKey, status: { $ne: "CANCELLED" } }).session(session);
       if (duplicate) { const error = new Error("An invoice already exists for this billing period"); error.status = 409; throw error; }
       const programIds = (enrollment.programs || []).map((item) => item.program).filter(Boolean);
       const programs = programIds.length ? await TrainingSessionType.find({ _id: { $in: programIds } }).select("name").session(session).lean() : [];
       const programName = programs.map((item) => item.name).join(", ");
-      const items = [{ description: terms.feeName || plan.name, quantity: 1, unitAmount: round(terms.amount), amount: round(terms.amount), kind: "TUITION", program: programIds[0] || null, programName }];
+      const items = [{ description: terms.planName, quantity: 1, unitAmount: round(terms.amount), amount: round(terms.amount), kind: "TUITION", program: programIds[0] || null, programName }];
       const hasExistingInvoice = await Invoice.exists({ enrollment: enrollment._id, status: { $ne: "CANCELLED" } }).session(session);
       const registration = !hasExistingInvoice ? round(terms.registrationFee || 0) : 0;
       if (registration > 0) items.push({ description: "Registration fee", quantity: 1, unitAmount: registration, amount: registration, kind: "REGISTRATION" });
@@ -267,16 +580,18 @@ const createInvoice = async (req, res) => {
       if (total <= 0) { const error = new Error("The selected fee structure produces no billable amount"); error.status = 400; throw error; }
       const invoiceStatus = status === "ISSUED" && isPastDue(dueDateInput) ? "OVERDUE" : status;
       const settings = await AcademySettings.findOne().session(session).lean();
+      const feeTermCurrency = snapshot.currency ? null : await FeeTerm.findById(enrollment.feeTerm || snapshot.feeTerm).select("currency").session(session).lean();
       const invoiceNumber = await nextNumber("INV", session);
       const [created] = await Invoice.create([{
-        invoiceNumber, student: student._id, enrollment: enrollment._id, plan: plan._id, branch: student.branch, items, subtotal, discount, discountName, taxRate, tax, total, balance: total,
-        currency: settings?.currency || "INR", dueDate: new Date(dueDateInput), periodStart: period.periodStart,
+        invoiceNumber, student: student._id, enrollment: enrollment._id, plan: enrollment.plan, feeTerm: enrollment.feeTerm, branch: enrollmentBranch, items, subtotal, discount, discountName, taxRate, tax, total, balance: total,
+        currency: snapshot.currency || normalizeCurrency(feeTermCurrency?.currency) || normalizeCurrency(settings?.currency) || "INR", dueDate: new Date(dueDateInput), periodStart: period.periodStart,
         periodEnd: enrollment.endDate && period.periodEnd > enrollment.endDate ? enrollment.endDate : period.periodEnd,
         cycleKey: period.cycleKey, status: invoiceStatus, notes: String(notes).slice(0, 1000), createdBy: req.user._id, issuedAt: status !== "DRAFT" ? new Date() : null,
       }], { session });
-      await audit(req, session, { action: "INVOICE_CREATED", branch: student.branch, student: student._id, invoice: created._id, after: { invoiceNumber, total, status: invoiceStatus, discount, tax } });
+      await audit(req, session, { action: "INVOICE_CREATED", branch: enrollmentBranch, student: student._id, invoice: created._id, after: { invoiceNumber, total, status: invoiceStatus, discount, tax } });
       return created;
     });
+    if (invoice.status !== "DRAFT") await sendInvoiceIssuedEmail(invoice).catch(() => {});
     res.status(201).json({ success: true, invoice });
   } catch (error) {
     if (error.status) return res.status(error.status).json({ success: false, message: error.message });
@@ -313,10 +628,16 @@ const cancelInvoice = async (req, res) => {
       if (!["DRAFT", "ISSUED"].includes(record.status) || record.paidAmount > 0) { const error = new Error("Only unpaid draft or issued invoices can be cancelled"); error.status = 409; throw error; }
       const before = { status: record.status, total: record.total };
       record.status = "CANCELLED"; await record.save({ session });
+      let inventoryTransitions = [];
+      if (record.kind === "MERCHANDISE") {
+        const order = await InventoryOrder.findOne({ invoice: record._id }).session(session);
+        inventoryTransitions = await releaseOrderReservation({ order, req, session, reason: `Invoice ${record.invoiceNumber} cancelled: ${reason}` });
+      }
       await audit(req, session, { action: "INVOICE_CANCELLED", branch: record.branch, student: record.student, invoice: record._id, reason, before, after: { status: "CANCELLED" } });
-      return record;
+      return { invoice: record, inventoryTransitions };
     });
-    res.json({ success: true, invoice });
+    await publishStockTransitions(invoice.inventoryTransitions);
+    res.json({ success: true, invoice: invoice.invoice });
   } catch (error) { if (error.status) return res.status(error.status).json({ success: false, message: error.message }); console.error("Invoice cancellation failed", { name: error.name }); res.status(500).json({ success: false, message: "Failed to cancel invoice" }); }
 };
 
@@ -331,6 +652,7 @@ const issueInvoice = async (req, res) => {
       await audit(req, session, { action: "INVOICE_CREATED", branch: record.branch, student: record.student, invoice: record._id, reason: "Draft invoice issued", before: { status: "DRAFT" }, after: { status: "ISSUED" } });
       return record;
     });
+    await sendInvoiceIssuedEmail(invoice).catch(() => {});
     res.json({ success: true, invoice });
   } catch (error) { if (error.status) return res.status(error.status).json({ success: false, message: error.message }); console.error("Invoice issue failed", { name: error.name }); res.status(500).json({ success: false, message: "Failed to issue invoice" }); }
 };
@@ -367,7 +689,10 @@ const addPayment = async (req, res) => {
       await invoice.save({ session });
       const receipt = await writeReceipt(payment, invoice, session);
       await audit(req, session, { action: "PAYMENT_CREATED", branch: invoice.branch, student: invoice.student, invoice: invoice._id, payment: payment._id, after: { amount, method, status: invoice.status, balance } });
-      return { payment, receipt, invoice };
+      const inventoryResult = invoice.kind === "MERCHANDISE" && balance === 0
+        ? await completeOrderForInvoice({ invoice, payment, req, session })
+        : { order: null, transitions: [] };
+      return { payment, receipt, invoice, inventoryOrder: inventoryResult.order, inventoryTransitions: inventoryResult.transitions };
     });
   } catch (error) {
     if (error.status) return res.status(error.status).json({ success: false, message: error.message });
@@ -382,10 +707,12 @@ const addPayment = async (req, res) => {
     }
     console.error("Payment recording failed", { name: error.name, code: error.code }); return res.status(500).json({ success: false, message: "Failed to record payment" });
   }
+  await publishStockTransitions(output.inventoryTransitions);
   const partial = output.invoice.balance > 0;
   await safelyNotify({ type: partial ? "FINANCE_PARTIAL_PAYMENT_RECEIVED" : "FINANCE_PAYMENT_RECEIVED", title: partial ? "Partial payment received" : "Payment received", message: `${output.payment.amount.toFixed(2)} ${output.invoice.currency} received for invoice ${output.invoice.invoiceNumber}.`, severity: "SUCCESS", branch: output.invoice.branch, student: output.invoice.student, entityType: "FINANCE", entityId: output.payment._id, actionUrl: "/fees", eventKey: `finance:payment:${output.payment._id}:staff` });
   const linkedStudent = await Student.findById(output.invoice.student).select("user name").lean();
   if (linkedStudent?.user) await createNotification({ type: partial ? "FINANCE_STUDENT_PARTIAL_PAYMENT_RECEIVED" : "FINANCE_STUDENT_PAYMENT_RECEIVED", recipient: linkedStudent.user, title: partial ? "Partial payment received" : "Payment received", message: `Your payment of ${output.payment.amount.toFixed(2)} ${output.invoice.currency} was recorded for invoice ${output.invoice.invoiceNumber}.`, severity: "SUCCESS", branch: output.invoice.branch, student: output.invoice.student, entityType: "FINANCE", entityId: output.payment._id, actionUrl: "/student-dashboard", eventKey: `finance:payment:${output.payment._id}:student` }).catch(() => {});
+  await sendReceiptEmail({ payment: output.payment, receipt: output.receipt, invoice: output.invoice }).catch(() => {});
   res.status(201).json({ success: true, ...output });
 };
 
@@ -417,9 +744,13 @@ const refundPayment = async (req, res) => {
       const [refund] = await Payment.create([{ invoice: invoice._id, student: payment.student, branch: payment.branch, amount, direction: "DEBIT", kind: "REFUND", paymentDate: refundDate, method: payment.method, referenceId: "", receivedBy: req.user._id, notes: String(req.body?.notes || "").slice(0, 1000), idempotencyKey, relatedPayment: payment._id, reason }], { session });
       invoice.paidAmount = round(Math.max(0, invoice.paidAmount - amount)); invoice.balance = round(invoice.total - invoice.paidAmount); invoice.status = invoice.paidAmount === 0 ? "REFUNDED" : currentStatus(invoice.total, invoice.paidAmount, invoice.dueDate, invoice.status); await invoice.save({ session });
       const receipt = await writeReceipt(refund, invoice, session);
+      if (invoice.kind === "MERCHANDISE" && invoice.paidAmount === 0) {
+        await InventoryOrder.updateOne({ invoice: invoice._id }, { $set: { status: "REFUNDED", paymentStatus: "REFUNDED" } }, { session });
+      }
       await audit(req, session, { action: "PAYMENT_REFUNDED", branch: payment.branch, student: payment.student, invoice: invoice._id, payment: refund._id, reason, before: { paidAmount: round(invoice.paidAmount + amount) }, after: { paidAmount: invoice.paidAmount, balance: invoice.balance, refundAmount: amount } });
       return { refund, invoice, receipt };
     });
+    await sendReceiptEmail({ payment: result.refund, receipt: result.receipt, invoice: result.invoice, kind: "refund" }).catch(() => {});
     res.status(201).json({ success: true, ...result });
   } catch (error) {
     if (error.status) return res.status(error.status).json({ success: false, message: error.message });
@@ -469,8 +800,9 @@ const correctPayment = async (req, res) => {
       const receipts = [];
       for (const movement of corrections) receipts.push(await writeReceipt(movement, invoice, session));
       await audit(req, session, { action: "PAYMENT_CORRECTED", branch: original.branch, student: original.student, invoice: invoice._id, payment: original._id, reason, before: { amount: original.amount }, after: { correctedAmount, invoicePaidAmount: invoice.paidAmount, balance: invoice.balance, correctionIds: corrections.map((item) => item._id) } });
-      return { corrections, receipts, invoice };
+      return { original, corrections, receipts, invoice };
     });
+    await sendCorrectionEmail({ originalPaymentId: result.original._id, corrections: result.corrections, receipts: result.receipts, invoice: result.invoice }).catch(() => {});
     res.status(201).json({ success: true, ...result });
   } catch (error) {
     if (error.status) return res.status(error.status).json({ success: false, message: error.message });
@@ -511,7 +843,24 @@ async function financialProfile(student, branch) {
   const totalBilled = round(invoices.reduce((sum, invoice) => sum + invoice.total, 0));
   const totalPaid = round(invoices.reduce((sum, invoice) => sum + invoice.paidAmount, 0));
   const overdue = round(invoices.filter((invoice) => invoice.balance > 0 && new Date(invoice.dueDate) < now).reduce((sum, invoice) => sum + invoice.balance, 0));
-  return { summary: { totalBilled, totalPaid, outstanding: round(invoices.reduce((sum, invoice) => sum + invoice.balance, 0)), overdue }, invoices, payments, receipts };
+  const currencySummaries = new Map();
+  for (const invoice of invoices) {
+    const currency = String(invoice.currency || "INR").trim().toUpperCase() || "INR";
+    const summary = currencySummaries.get(currency) || { currency, totalBilled: 0, totalPaid: 0, outstanding: 0, overdue: 0 };
+    summary.totalBilled += Number(invoice.total || 0);
+    summary.totalPaid += Number(invoice.paidAmount || 0);
+    summary.outstanding += Number(invoice.balance || 0);
+    if (invoice.balance > 0 && new Date(invoice.dueDate) < now) summary.overdue += Number(invoice.balance || 0);
+    currencySummaries.set(currency, summary);
+  }
+  const summaryByCurrency = [...currencySummaries.values()].map((summary) => ({
+    ...summary,
+    totalBilled: round(summary.totalBilled),
+    totalPaid: round(summary.totalPaid),
+    outstanding: round(summary.outstanding),
+    overdue: round(summary.overdue),
+  }));
+  return { summary: { totalBilled, totalPaid, outstanding: round(invoices.reduce((sum, invoice) => sum + invoice.balance, 0)), overdue }, summaryByCurrency, invoices, payments, receipts };
 }
 
 const getStudentFinancialProfile = async (req, res) => {
@@ -606,19 +955,57 @@ const getFinanceDashboard = async (req, res) => {
 
 const getFinanceReport = async (req, res) => {
   try {
-    const scope = branchFilter(req.user);
-    const since = new Date(Date.now() - 365 * 86400000);
-    const [invoices, payments, audits, counts] = await Promise.all([
-      Invoice.find({ ...scope, createdAt: { $gte: since } }).populate("student", "name").populate("branch", "name").sort({ createdAt: -1 }).limit(5000).lean(),
-      Payment.find({ ...scope, paymentDate: { $gte: since } }).populate("student", "name").populate("branch", "name").sort({ paymentDate: -1 }).limit(5000).lean(),
-      FinanceAudit.find({ ...scope, createdAt: { $gte: since } }).sort({ createdAt: -1 }).limit(5000).lean(),
+    const scope = { ...branchFilter(req.user) };
+    if (isBranchScoped(req.user)) {
+      if (req.query.branchId && String(req.query.branchId) !== String(getBranchId(req.user) || "")) return res.status(403).json({ success: false, message: "You cannot report on another branch" });
+    } else if (req.query.branchId) {
+      if (!isId(req.query.branchId)) return res.status(400).json({ success: false, message: "Invalid branch ID" });
+      scope.branch = req.query.branchId;
+    }
+    if (req.query.planId && !isId(req.query.planId)) return res.status(400).json({ success: false, message: "Invalid plan ID" });
+    if (req.query.invoiceStatus && !["DRAFT", "ISSUED", "PARTIALLY_PAID", "PAID", "OVERDUE", "CANCELLED", "REFUNDED"].includes(req.query.invoiceStatus)) return res.status(400).json({ success: false, message: "Invalid invoice status" });
+    if (req.query.paymentKind && !["PAYMENT", "REFUND", "CORRECTION"].includes(req.query.paymentKind)) return res.status(400).json({ success: false, message: "Invalid payment movement" });
+    const from = dateInput(req.query.from, "Start date");
+    const to = dateInput(req.query.to, "End date");
+    if (from.error || to.error) return res.status(400).json({ success: false, message: from.error || to.error });
+    if (from.value && to.value && from.value > to.value) return res.status(400).json({ success: false, message: "Start date must be on or before end date" });
+    const now = new Date();
+    const start = from.value ? academyDayStart(from.value) : new Date(now.getTime() - 365 * 86400000);
+    const end = to.value ? academyDayStart(new Date(to.value.getTime() + 86400000)) : now;
+    const dateRange = { $gte: start, $lt: end };
+    const invoiceQuery = { ...scope, createdAt: dateRange };
+    if (req.query.planId) invoiceQuery.plan = req.query.planId;
+    if (req.query.invoiceStatus) invoiceQuery.status = req.query.invoiceStatus;
+    const relatedInvoiceQuery = { ...scope };
+    if (req.query.planId) relatedInvoiceQuery.plan = req.query.planId;
+    if (req.query.invoiceStatus) relatedInvoiceQuery.status = req.query.invoiceStatus;
+    const matchingInvoiceIds = req.query.planId || req.query.invoiceStatus
+      ? await Invoice.find(relatedInvoiceQuery).distinct("_id")
+      : null;
+    const paymentQuery = { ...scope, paymentDate: dateRange };
+    const receiptQuery = { ...scope, date: dateRange };
+    if (matchingInvoiceIds) {
+      paymentQuery.invoice = { $in: matchingInvoiceIds };
+      receiptQuery.invoice = { $in: matchingInvoiceIds };
+    }
+    if (req.query.paymentKind) {
+      paymentQuery.kind = req.query.paymentKind;
+      receiptQuery.kind = req.query.paymentKind;
+    }
+    const auditQuery = { ...scope, createdAt: dateRange };
+    const [invoices, payments, receipts, audits, counts] = await Promise.all([
+      Invoice.find(invoiceQuery).populate("student", "name").populate("branch", "name").sort({ createdAt: -1 }).limit(5000).lean(),
+      Payment.find(paymentQuery).populate("student", "name").populate("branch", "name").sort({ paymentDate: -1 }).limit(5000).lean(),
+      Receipt.find(receiptQuery).sort({ date: -1 }).limit(5000).lean(),
+      FinanceAudit.find(auditQuery).sort({ createdAt: -1 }).limit(5000).lean(),
       Promise.all([
-        Invoice.countDocuments({ ...scope, createdAt: { $gte: since } }),
-        Payment.countDocuments({ ...scope, paymentDate: { $gte: since } }),
-        FinanceAudit.countDocuments({ ...scope, createdAt: { $gte: since } }),
+        Invoice.countDocuments(invoiceQuery),
+        Payment.countDocuments(paymentQuery),
+        Receipt.countDocuments(receiptQuery),
+        FinanceAudit.countDocuments(auditQuery),
       ]),
     ]);
-    res.json({ success: true, invoices, payments, audits, truncated: { invoices: counts[0] > invoices.length, payments: counts[1] > payments.length, audits: counts[2] > audits.length } });
+    res.json({ success: true, filters: { branchId: scope.branch || null, planId: req.query.planId || null, invoiceStatus: req.query.invoiceStatus || null, paymentKind: req.query.paymentKind || null, from: from.value || null, to: to.value || null }, invoices, payments, receipts, audits, truncated: { invoices: counts[0] > invoices.length, payments: counts[1] > payments.length, receipts: counts[2] > receipts.length, audits: counts[3] > audits.length } });
   } catch (error) { console.error("Finance report failed", { name: error.name }); res.status(500).json({ success: false, message: "Failed to load finance report" }); }
 };
 
@@ -658,4 +1045,4 @@ const listStudentInvoices = async (req, res) => {
   } catch (error) { console.error("Student invoice list failed", { name: error.name }); res.status(500).json({ success: false, message: "Failed to load invoices" }); }
 };
 
-module.exports = { getFeePlans, getFeeBranches, updateFeePlan, updateBranchFeePlan, getInvoiceCandidates, createInvoice, listInvoices, listPayments, cancelInvoice, issueInvoice, addPayment, refundPayment, correctPayment, getReceipt, getStudentFinancialProfile, getMyFinancialProfile, getFinanceDashboard, getFinanceReport, listStudentInvoices };
+module.exports = { getFeeTermPlanOptions, getFeeBranches, listFeeTerms, listAllFeeTerms, createFeeTerm, updateFeeTerm, supersedeFeeTerm, getAvailableFeeTerms, getInvoiceCandidates, createInvoice, listInvoices, listPayments, cancelInvoice, issueInvoice, addPayment, refundPayment, correctPayment, getReceipt, getStudentFinancialProfile, getMyFinancialProfile, getFinanceDashboard, getFinanceReport, listStudentInvoices };

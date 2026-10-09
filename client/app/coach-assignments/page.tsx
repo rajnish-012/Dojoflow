@@ -34,6 +34,7 @@ import {
   Badge,
   Button,
   DataTableSection,
+  DataTableToolbar,
   DataFilters,
   DataSort,
   EmptyState,
@@ -478,7 +479,7 @@ export default function CoachAssignmentsPage() {
         title="Coach Assignments"
         description="Assign students to coaches and control which students each coach can access."
         actions={
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Button variant="outline" onClick={() => void loadData()}>
               <RefreshCw size={17} />
               Refresh
@@ -538,16 +539,9 @@ export default function CoachAssignmentsPage() {
       {/* Main table */}
 
       <DataTableSection className="mt-6" title="All assignments" description="View and manage every coach-student assignment." icon={<UserCheck size={18} />} toolbar={
-          <div
-            className="
-              flex w-full
-              flex-col gap-2
-              lg:w-auto
-              lg:flex-row
-              lg:items-start
-            "
-          >
+          <DataTableToolbar>
             <div
+              data-toolbar-search
               className="
                 relative w-full
                 lg:w-[340px]
@@ -602,6 +596,7 @@ export default function CoachAssignmentsPage() {
             <DataFilters
               activeFilters={activeFilters}
               onClearAll={clearAssignmentFilters}
+              responsiveToolbar
             >
               <label
                 className="
@@ -714,7 +709,7 @@ export default function CoachAssignmentsPage() {
                 },
               ]}
             />
-        </div>
+        </DataTableToolbar>
       }>
 
         {/* Desktop table */}

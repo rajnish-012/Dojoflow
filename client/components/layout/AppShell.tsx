@@ -9,7 +9,6 @@ import Header from "./Header";
 import RouteGuard from "./RouteGuard";
 
 import { useAuth } from "@/hooks/userAuth";
-import { getRoleDashboardPath } from "@/lib/current-user";
 
 import AcademyBrandProvider from "@/components/settings/AcademyBrandProvider";
 import {
@@ -27,6 +26,7 @@ const publicRoutes = [
   "/forgot-password",
   "/reset-password",
   "/inquiry",
+  "/merchandise",
 ];
 
 function isPublicPath(pathname: string) {
@@ -141,56 +141,40 @@ function AppLoadingScreen({ showBrand = true }: { showBrand?: boolean }) {
   );
 }
 
-function AppShellContent({ children }: AppShellProps) {
+function AuthenticatedAppShell({ children }: AppShellProps) {
   const { initialized: academyBrandInitialized } = useAcademyBrand();
   const pathname = usePathname();
-
   const router = useRouter();
-
-  const { isLoading, isAuthenticated, user } = useAuth();
+  const { isLoading, isAuthenticated } = useAuth();
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
-
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-
-  const isPublicRoute = isPublicPath(pathname);
+  const [desktopSidebarLayout, setDesktopSidebarLayout] = useState(false);
 
   useEffect(() => {
-    if (!isPublicRoute && isLoading) {
+    const desktopQuery = window.matchMedia("(min-width: 1024px)");
+    const syncDesktopLayout = () => setDesktopSidebarLayout(desktopQuery.matches);
+
+    syncDesktopLayout();
+    desktopQuery.addEventListener("change", syncDesktopLayout);
+    return () => desktopQuery.removeEventListener("change", syncDesktopLayout);
+  }, []);
+
+  const isSidebarCollapsed = sidebarCollapsed && desktopSidebarLayout;
+
+  useEffect(() => {
+    if (isLoading || isAuthenticated) {
       return;
     }
 
-    if (isPublicRoute && pathname === "/login" && isAuthenticated) {
-      router.replace(getRoleDashboardPath(user?.role));
-    }
-  }, [isPublicRoute, pathname, isAuthenticated, user?.role, isLoading, router]);
+    const redirect = pathname ? `?redirect=${encodeURIComponent(pathname)}` : "";
+    router.replace(`/login${redirect}`);
+  }, [isLoading, isAuthenticated, pathname, router]);
 
   useEffect(() => {
-    if (isPublicRoute) {
-      return;
-    }
-
-    if (isLoading) {
-      return;
-    }
-
-    if (!isAuthenticated) {
-      const redirect =
-        pathname && pathname !== "/login"
-          ? `?redirect=${encodeURIComponent(pathname)}`
-          : "";
-
-      router.replace(`/login${redirect}`);
-    }
-  }, [isPublicRoute, isLoading, isAuthenticated, pathname, router]);
-
-  useEffect(() => {
-    setSidebarOpen(false);
+    const timer = window.setTimeout(() => setSidebarOpen(false), 0);
+    return () => window.clearTimeout(timer);
   }, [pathname]);
-
-  if (isPublicRoute) {
-    return <>{children}</>;
-  }
 
   if (!academyBrandInitialized) {
     return <AppLoadingScreen showBrand={false} />;
@@ -217,14 +201,14 @@ function AppShellContent({ children }: AppShellProps) {
       <Sidebar
         isOpen={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
-        collapsed={sidebarCollapsed}
+        collapsed={isSidebarCollapsed}
         onToggleCollapse={() => setSidebarCollapsed((previous) => !previous)}
       />
 
       <div
         className={[
           "df-app-shell",
-          sidebarCollapsed ? "df-shell-collapsed" : "df-shell-expanded",
+          isSidebarCollapsed ? "df-shell-collapsed" : "df-shell-expanded",
         ].join(" ")}
       >
         <Header onMenuClick={() => setSidebarOpen(true)} />
@@ -243,6 +227,16 @@ function AppShellContent({ children }: AppShellProps) {
       </div>
     </div>
   );
+}
+
+function AppShellContent({ children }: AppShellProps) {
+  const pathname = usePathname();
+
+  if (isPublicPath(pathname)) {
+    return <>{children}</>;
+  }
+
+  return <AuthenticatedAppShell>{children}</AuthenticatedAppShell>;
 }
 
 export default function AppShell(props: AppShellProps) {

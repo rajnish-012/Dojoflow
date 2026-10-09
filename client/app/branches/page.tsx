@@ -19,6 +19,7 @@ import {
   Badge,
   Button,
   Card,
+  CopyButton,
   EmptyState,
   ErrorState,
   Input,
@@ -543,16 +544,14 @@ function BranchCard({ branch }: { branch: Branch }) {
         <div className="flex items-start gap-3">
           <MapPin size={17} className="mt-0.5 shrink-0 text-(--ink-faint)" />
 
-          <p className="text-sm leading-6 text-(--ink-muted)">
-            {branch.address}
-          </p>
+          <div className="flex min-w-0 items-start gap-1.5"><p className="text-sm leading-6 text-(--ink-muted)">{branch.address || "No address added"}</p>{branch.address && <CopyButton value={branch.address} label={`${branch.name} address`} />}</div>
         </div>
 
         {branch.phone && (
           <div className="flex items-center gap-3">
             <Phone size={16} className="shrink-0 text-(--ink-faint)" />
 
-            <p className="text-sm text-(--ink-muted)">{branch.phone}</p>
+            <div className="flex items-center gap-1.5"><p className="text-sm text-(--ink-muted)">{branch.phone}</p><CopyButton value={branch.phone} label={`${branch.name} phone number`} /></div>
           </div>
         )}
       </div>

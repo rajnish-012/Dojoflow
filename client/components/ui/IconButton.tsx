@@ -59,10 +59,9 @@ export default function IconButton({
 
     danger: `
       border-(--danger)
-      bg-(--danger-soft)
-      text-(--danger)
-      hover:bg-(--danger)
-      hover:text-white
+      bg-(--danger)
+      text-white
+      hover:opacity-90
     `,
 
     ghost: `
@@ -92,6 +91,11 @@ export default function IconButton({
     transition-all
     duration-200
     active:scale-95
+    focus-visible:outline-none
+    focus-visible:ring-2
+    focus-visible:ring-(--accent)
+    focus-visible:ring-offset-2
+    focus-visible:ring-offset-(--surface)
     disabled:cursor-not-allowed
     disabled:opacity-50
     ${variants[variant]}

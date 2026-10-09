@@ -4,6 +4,7 @@ const AttendanceCorrection = require("../models/AttendanceCorrection");
 const Makeup = require("../models/Makeup");
 const CoachStudentAssignment = require("../models/CoachStudentAssignment");
 const auditService = require("../services/audit.service");
+const { recalculateEnrollmentFirstAttendedClassDate } = require("../services/enrollmentAttendance.service");
 const { AUDIT_ACTIONS } = require("../config/auditActions");
 const { isBranchScoped } = require("../utils/access");
 
@@ -112,6 +113,7 @@ async function decideCorrection(req, res, decision) {
           attendance.status = "ABSENT"; attendance.makeupRequired = true; attendance.makeupCompleted = false;
         }
         await attendance.save({ session });
+        if (attendance.enrollment) await recalculateEnrollmentFirstAttendedClassDate({ studentId: attendance.student, enrollmentId: attendance.enrollment, session });
       }
       correction.status = decision;
       correction.approvedBy = req.user._id;

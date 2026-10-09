@@ -59,9 +59,16 @@ const getNotifications = async (req, res) => {
       Notification.countDocuments(query),
       Notification.countDocuments({ ...accessQuery(req), read: false }),
     ]);
+    // Older inquiry alerts used /inquiries before the CRM route was consolidated
+    // at /crm. Normalize on read so already stored notifications remain usable.
+    const routedNotifications = notifications.map((notification) =>
+      notification.type === "INQUIRY_RECEIVED"
+        ? { ...notification, actionUrl: "/crm" }
+        : notification,
+    );
     return res.json({
       success: true,
-      notifications,
+      notifications: routedNotifications,
       unreadCount,
       pagination: { page, limit, total, hasMore: page * limit < total },
     });

@@ -13,6 +13,11 @@ const TYPE_PERMISSION = Object.freeze({
   STUDENT_COMPLETED: "student.view",
   PROMOTION_ELIGIBLE: "promotion.view",
   PROMOTION_COMPLETED: "promotion.view",
+  GRADING_SCHEDULED: "grading.view",
+  STUDENT_GRADING_SCHEDULED: "student.grading.view",
+  GRADING_RESULT_PUBLISHED: "grading.view",
+  STUDENT_GRADING_RESULT_PUBLISHED: "student.grading.view",
+  STUDENT_PROMOTION_COMPLETED: "student.grading.view",
   FINANCE_PAYMENT_RECEIVED: "finance.view",
   FINANCE_PARTIAL_PAYMENT_RECEIVED: "finance.view",
   FINANCE_DUE_REMINDER: "finance.view",
@@ -21,9 +26,20 @@ const TYPE_PERMISSION = Object.freeze({
   FINANCE_STUDENT_PARTIAL_PAYMENT_RECEIVED: "student.finance.view",
   FINANCE_STUDENT_DUE_REMINDER: "student.finance.view",
   FINANCE_STUDENT_OVERDUE_REMINDER: "student.finance.view",
+  INVENTORY_LOW_STOCK: "inventory.view",
+  INVENTORY_OUT_OF_STOCK: "inventory.view",
+  INVENTORY_TRANSFER_COMPLETED: "inventory.view",
   INQUIRY_RECEIVED: "inquiry.view",
   LEAD_FOLLOWUP_OVERDUE: "inquiry.view",
   LEAD_CONVERTED: "inquiry.view",
+  ACADEMY_EVENT_SCHEDULED: "event.view",
+  ACADEMY_EVENT_UPDATED: "event.view",
+  ACADEMY_EVENT_CANCELLED: "event.view",
+  ACADEMY_EVENT_REGISTRATION: "event.view",
+  STUDENT_ACADEMY_EVENT_SCHEDULED: null,
+  STUDENT_ACADEMY_EVENT_UPDATED: null,
+  STUDENT_ACADEMY_EVENT_CANCELLED: null,
+  STUDENT_ACADEMY_EVENT_REGISTRATION: null,
   MEMBERSHIP_EXPIRING: "student.view",
   MEMBERSHIP_EXPIRED: "student.view",
   MEMBERSHIP_RENEWAL_COMPLETED: "student.view",
@@ -31,7 +47,7 @@ const TYPE_PERMISSION = Object.freeze({
 });
 
 const ALLOWED_ACTION_ROOTS = new Set([
-  "/students", "/memberships", "/attendance", "/makeups", "/inquiries", "/crm", "/promotions", "/notifications", "/fees", "/student-dashboard",
+  "/students", "/memberships", "/attendance", "/makeups", "/inquiries", "/crm", "/promotions", "/grading", "/notifications", "/fees", "/student-dashboard", "/inventory", "/calendar",
 ]);
 
 function validateActionUrl(actionUrl) {
@@ -129,4 +145,9 @@ async function safelyNotify(input) {
   }
 }
 
-module.exports = { TYPE_PERMISSION, createNotification, notifyAuthorizedUsers, safelyNotify, resolveRecipients };
+async function safelyCreateNotification(input) {
+  try { return await createNotification(input); }
+  catch (error) { console.error("Notification persistence failed", { type: input?.type, name: error?.name || "Error", code: error?.code }); return null; }
+}
+
+module.exports = { TYPE_PERMISSION, createNotification, safelyCreateNotification, notifyAuthorizedUsers, safelyNotify, resolveRecipients };

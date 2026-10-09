@@ -1,0 +1,7 @@
+# Curriculum milestone consolidation
+
+Curriculum versions are the only source for new learning milestones, belt-progression rewards, and promotion eligibility. Plan-level `milestones` are deprecated historical data. They remain in the Plan schema and are still returned by the normal Plan read endpoints for staff that need to review old configuration, but the Plan editor no longer shows or writes them. Plan create/update requests ignore submitted `milestones` values.
+
+No automatic migration is performed. A Plan milestone contains a training-day threshold and target belt but does not identify a Program, Curriculum version, learning step, achievement criteria, or enrollment. Mapping it to one Curriculum step would therefore guess at intent. Existing Plan records and BeltHistory records are preserved unchanged.
+
+For manual migration, review each old Plan milestone with the academy. Identify its intended Program and the appropriate step in a new Curriculum version, then configure that step as an optional milestone with its name, criteria, prerequisites, coach confirmation, assessment, and (if appropriate) belt-progression reward. Publish a new Curriculum version so existing enrollments retain their frozen version. Do not copy a legacy Plan day into a new achievement automatically. Historical Plan milestones and existing BeltHistory remain available for audit; only Curriculum milestone awards in the active enrollment's frozen version can qualify a student for a new grading/promotion workflow.

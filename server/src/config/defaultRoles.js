@@ -6,7 +6,7 @@ const {
   PERMISSIONS,
 } = require("./permissions");
 
-const PERMISSIONS_VERSION = 8;
+const PERMISSIONS_VERSION = 13;
 
 const DEFAULT_ROLES = [
   {
@@ -96,9 +96,13 @@ const ensureDefaultRoles = async () => {
           currentPermissions.add(PERMISSIONS.FINANCE_COLLECT);
           currentPermissions.add(PERMISSIONS.FINANCE_REFUND);
           currentPermissions.add(PERMISSIONS.FINANCE_REPORT);
+          for (const permission of [PERMISSIONS.INVENTORY_VIEW, PERMISSIONS.INVENTORY_CREATE, PERMISSIONS.INVENTORY_UPDATE, PERMISSIONS.INVENTORY_ADJUST, PERMISSIONS.INVENTORY_PURCHASE, PERMISSIONS.INVENTORY_SALE, PERMISSIONS.INVENTORY_RETURN, PERMISSIONS.INVENTORY_DAMAGE, PERMISSIONS.INVENTORY_REPORT, PERMISSIONS.INVENTORY_MANAGE]) currentPermissions.add(permission);
         }
         if (role.key === "COACH") currentPermissions.add(PERMISSIONS.ATTENDANCE_CORRECT);
         if (role.key === "STUDENT") currentPermissions.add(PERMISSIONS.STUDENT_FINANCE_VIEW);
+        if (role.key === "STUDENT") currentPermissions.add(PERMISSIONS.STUDENT_GRADING_VIEW);
+        if (role.key === "STUDENT") currentPermissions.add(PERMISSIONS.CURRICULUM_PROGRESS_VIEW);
+        if (role.key === "BRANCH_ADMIN") currentPermissions.add(PERMISSIONS.CURRICULUM_REWARD_MANAGE);
         if (["BRANCH_ADMIN", "COACH"].includes(role.key)) {
           currentPermissions.add(PERMISSIONS.NOTIFICATION_VIEW);
         }
@@ -136,6 +140,23 @@ const ensureDefaultRoles = async () => {
           currentPermissions.add(PERMISSIONS.MAINTENANCE_CLEANUP);
           currentPermissions.add(PERMISSIONS.MAINTENANCE_CACHE);
           currentPermissions.add(PERMISSIONS.MAINTENANCE_LOGS);
+        }
+
+        if (["BRANCH_ADMIN", "COACH"].includes(role.key)) {
+          currentPermissions.add(PERMISSIONS.GRADING_VIEW);
+          currentPermissions.add(PERMISSIONS.GRADING_EVALUATE);
+        }
+        if (role.key === "COACH") {
+          currentPermissions.add(PERMISSIONS.GRADING_UPDATE);
+          currentPermissions.add(PERMISSIONS.GRADING_FINALIZE);
+        }
+        if (role.key === "BRANCH_ADMIN") {
+          for (const permission of [PERMISSIONS.GRADING_CREATE, PERMISSIONS.GRADING_UPDATE, PERMISSIONS.GRADING_FINALIZE, PERMISSIONS.GRADING_PUBLISH, PERMISSIONS.GRADING_CANCEL, PERMISSIONS.CERTIFICATE_VIEW, PERMISSIONS.CERTIFICATE_GENERATE, PERMISSIONS.CERTIFICATE_DOWNLOAD]) currentPermissions.add(permission);
+          for (const permission of [PERMISSIONS.CALENDAR_VIEW, PERMISSIONS.EVENT_VIEW, PERMISSIONS.EVENT_MANAGE, PERMISSIONS.EVENT_REGISTER]) currentPermissions.add(permission);
+        }
+        if (role.key === "COACH") {
+          currentPermissions.add(PERMISSIONS.CALENDAR_VIEW);
+          currentPermissions.add(PERMISSIONS.EVENT_VIEW);
         }
 
         permissionsChanged = true;
@@ -190,6 +211,24 @@ const ensureDefaultRoles = async () => {
 
       if (permissions.has(PERMISSIONS.SETTINGS_MANAGE)) {
         permissions.add(PERMISSIONS.WEBSITE_MANAGE);
+      }
+
+      if (permissions.has(PERMISSIONS.PROMOTION_VIEW)) permissions.add(PERMISSIONS.GRADING_VIEW);
+      if (permissions.has(PERMISSIONS.PROMOTION_MANAGE)) {
+        permissions.add(PERMISSIONS.GRADING_EVALUATE);
+        permissions.add(PERMISSIONS.GRADING_FINALIZE);
+        permissions.add(PERMISSIONS.GRADING_UPDATE);
+      }
+
+      if (permissions.has(PERMISSIONS.BRANCH_SCHEDULE_VIEW) || permissions.has(PERMISSIONS.ATTENDANCE_VIEW)) {
+        permissions.add(PERMISSIONS.CALENDAR_VIEW);
+      }
+      if (permissions.has(PERMISSIONS.CALENDAR_VIEW)) {
+        permissions.add(PERMISSIONS.EVENT_VIEW);
+      }
+      if (permissions.has(PERMISSIONS.BRANCH_SCHEDULE_MANAGE)) {
+        permissions.add(PERMISSIONS.EVENT_MANAGE);
+        permissions.add(PERMISSIONS.EVENT_REGISTER);
       }
 
       role.permissions = [...permissions];

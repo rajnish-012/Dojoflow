@@ -34,6 +34,7 @@ import {
 
 import { useCan } from "@/lib/permissions";
 import { toast } from "@/lib/toast";
+import { getBatches, type BatchRecord } from "@/lib/batchApi";
 import { getApiErrorMessage } from "@/lib/apiError";
 import {
   getTrainingSessionTypes,
@@ -43,10 +44,14 @@ import {
 import {
   deleteBranchSchedule,
   getBranchSchedule,
+  getBranchRooms,
+  createBranchRoom,
+  updateBranchRoomStatus,
   upsertBranchSchedule,
   type BranchSchedule,
   type TrainingSlot,
   type WeeklyScheduleDay,
+  type BranchRoom,
 } from "@/lib/branchScheduleApi";
 
 /* =========================================================
@@ -76,13 +81,9 @@ const DEFAULT_SLOT: TrainingSlot = {
 };
 
 type SessionDraft = {
-  sessionTypeId: string;
   sessionName: string;
   startTime: string;
   endTime: string;
-  isActive: boolean;
-  capacity: string;
-  coach: string;
 };
 
 type ConfirmationAction =
@@ -128,6 +129,9 @@ function normalizeWeeklySchedule(weeklySchedule?: WeeklyScheduleDay[] | null) {
               sessionName: slot.sessionName || "Training Session",
               sessionTypeId: slot.sessionTypeId,
               sessionType: slot.sessionType,
+              batchId: slot.batchId ?? null,
+              room: slot.room || "",
+              roomId: typeof slot.roomId === "string" ? slot.roomId : slot.roomId?._id || null,
               startTime: slot.startTime || DEFAULT_SLOT.startTime,
               endTime: slot.endTime || DEFAULT_SLOT.endTime,
               isActive: slot.isActive !== false,
@@ -227,6 +231,7 @@ export default function BranchSchedulePage() {
   const canManageSchedule = useCan("branch_schedule.manage");
 
   const requestedDay = Number(searchParams.get("day"));
+  const requestedBatchId = searchParams.get("batch") || "";
 
   const initialDay =
     Number.isInteger(requestedDay) && requestedDay >= 0 && requestedDay <= 6
@@ -238,6 +243,7 @@ export default function BranchSchedulePage() {
   ======================================================= */
 
   const [branchName, setBranchName] = useState("Branch");
+  const [branchIsActive, setBranchIsActive] = useState(true);
 
   const [branchAddress, setBranchAddress] = useState("");
 
@@ -265,16 +271,17 @@ export default function BranchSchedulePage() {
     [],
   );
   const [coaches, setCoaches] = useState<{ _id: string; name: string }[]>([]);
+  const [rooms, setRooms] = useState<BranchRoom[]>([]);
+  const [newRoomName, setNewRoomName] = useState("");
+  const [creatingRoom, setCreatingRoom] = useState(false);
+  const [batches, setBatches] = useState<BatchRecord[]>([]);
+  const [configuredBatchId, setConfiguredBatchId] = useState(requestedBatchId);
   const [sessionTypesLoading, setSessionTypesLoading] = useState(true);
   const [sessionTypesError, setSessionTypesError] = useState("");
   const [sessionDraft, setSessionDraft] = useState<SessionDraft>({
-    sessionTypeId: "",
     sessionName: "",
     startTime: DEFAULT_SLOT.startTime,
     endTime: DEFAULT_SLOT.endTime,
-    isActive: true,
-    capacity: "",
-    coach: "",
   });
 
   useEffect(() => {
@@ -316,6 +323,50 @@ export default function BranchSchedulePage() {
   );
 
   const selectedDayName = DAY_NAMES[selectedDay] || "Monday";
+  const configuredBatch = batches.find((batch) => batch._id === configuredBatchId) || null;
+  const configuredBatchPlan = typeof configuredBatch?.plan === "object" ? configuredBatch.plan : null;
+  const requiredWeeklySessions = Number(configuredBatchPlan?.classesPerWeek || 0);
+  const localToday = (() => { const date = new Date(); return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`; })();
+  const assignedCoach = typeof configuredBatch?.coach === "object" ? configuredBatch.coach : null;
+  const assignedCoachBranch = typeof assignedCoach?.branch === "object" ? assignedCoach.branch._id : assignedCoach?.branch;
+  const batchPrerequisitesValid = Boolean(configuredBatch && branchIsActive && configuredBatchPlan?.isActive !== false && configuredBatch.capacity >= 1 && (!configuredBatch.effectiveFrom || !configuredBatch.effectiveUntil || configuredBatch.effectiveUntil >= configuredBatch.effectiveFrom) && (!configuredBatch.effectiveUntil || configuredBatch.effectiveUntil >= localToday) && (!assignedCoach || (assignedCoach.isActive !== false && String(assignedCoachBranch || "") === branchId)));
+  const configuredProgramIds = useMemo(() => new Set((configuredBatchPlan?.programs || []).map((item) => String(typeof item.program === "string" ? item.program : item.program?._id || ""))), [configuredBatchPlan]);
+  const batchScheduleCheck = useMemo(() => {
+    if (!configuredBatchId || !batchPrerequisitesValid || !requiredWeeklySessions) return { count: 0, hasIssues: Boolean(configuredBatchId) };
+    const keys = new Set<string>();
+    const slotIds = new Set<string>();
+    let hasIssues = false;
+    const branchOpen = timeToMinutes(openingTime);
+    const branchClose = timeToMinutes(closingTime);
+    for (const day of weeklySchedule) {
+      if (day.isClosed) continue;
+      for (const slot of day.slots) {
+        if (String(slot.batchId || "") !== configuredBatchId || slot.isActive === false) continue;
+        const start = timeToMinutes(slot.startTime);
+        const end = timeToMinutes(slot.endTime);
+        const programId = String(slot.sessionTypeId || "");
+        const slotBatch = batches.find((batch) => batch._id === String(slot.batchId || ""));
+        const roomId = String(slot.roomId || (typeof slotBatch?.roomId === "object" ? slotBatch.roomId?._id : slotBatch?.roomId) || "");
+        const coachId = String((typeof slot.coach === "string" ? slot.coach : slot.coach?._id) || (typeof slotBatch?.coach === "object" ? slotBatch.coach?._id : slotBatch?.coach) || "");
+        const overlaps = start !== null && end !== null && day.slots.some((other) => {
+          if (other === slot || other.isActive === false || timeToMinutes(other.startTime) === null || timeToMinutes(other.endTime) === null || timeToMinutes(other.startTime)! >= end || timeToMinutes(other.endTime)! <= start) return false;
+          const otherBatch = batches.find((batch) => batch._id === String(other.batchId || ""));
+          const otherRoomId = String(other.roomId || (typeof otherBatch?.roomId === "object" ? otherBatch.roomId?._id : otherBatch?.roomId) || "");
+          const otherCoachId = String((typeof other.coach === "string" ? other.coach : other.coach?._id) || (typeof otherBatch?.coach === "object" ? otherBatch.coach?._id : otherBatch?.coach) || "");
+          return Boolean((slot.batchId && String(slot.batchId) === String(other.batchId || "")) || (roomId && roomId === otherRoomId) || (coachId && coachId === otherCoachId));
+        });
+        const signature = `${day.dayOfWeek}:${slot.startTime}:${slot.endTime}`;
+        const slotId = String(slot._id || "");
+        const invalid = !slot.sessionName.trim() || start === null || end === null || start >= end || branchOpen === null || branchClose === null || start < branchOpen || end > branchClose || overlaps || (String(slot.batchId || "") === configuredBatchId && !roomId) || !configuredProgramIds.has(programId) || !sessionTypes.some((type) => type._id === programId && type.isActive) || (slotId && slotIds.has(slotId)) || keys.has(signature);
+        if (invalid) { hasIssues = true; continue; }
+        if (slotId) slotIds.add(slotId);
+        keys.add(signature);
+      }
+    }
+    return { count: keys.size, hasIssues };
+  }, [weeklySchedule, configuredBatchId, batchPrerequisitesValid, requiredWeeklySessions, openingTime, closingTime, configuredProgramIds, sessionTypes, batches]);
+  const weeklyBatchSessionCount = batchScheduleCheck.count;
+  const weeklyBatchHasIssues = batchScheduleCheck.hasIssues;
 
   /* =======================================================
      DAY COUNTS
@@ -348,14 +399,18 @@ export default function BranchSchedulePage() {
 
         setError("");
 
-        const response = await getBranchSchedule(branchId);
+        const [response, branchBatches, branchRooms] = await Promise.all([getBranchSchedule(branchId), getBatches(branchId).catch(() => []), getBranchRooms(branchId)]);
 
         const schedule = response.schedule;
 
         setBranchName(response.branch?.name || "Branch");
+        setBranchIsActive(response.branch?.isActive !== false);
 
         setBranchAddress(response.branch?.address || "");
         setCoaches(response.coaches || []);
+        setBatches(branchBatches);
+        setRooms(branchRooms);
+        setConfiguredBatchId(requestedBatchId);
 
         setOpeningTime(schedule?.openingTime || DEFAULT_OPENING_TIME);
 
@@ -375,7 +430,7 @@ export default function BranchSchedulePage() {
         setRefreshing(false);
       }
     },
-    [branchId],
+    [branchId, requestedBatchId],
   );
 
   useEffect(() => {
@@ -420,13 +475,9 @@ export default function BranchSchedulePage() {
     setError("");
     setSessionFormError("");
     setSessionDraft({
-      sessionTypeId: "",
       sessionName: "",
       startTime: DEFAULT_SLOT.startTime,
       endTime: DEFAULT_SLOT.endTime,
-      isActive: true,
-      capacity: "",
-      coach: "",
     });
     setSessionModalOpen(true);
   }
@@ -441,10 +492,6 @@ export default function BranchSchedulePage() {
       setSessionFormError("Enter a name for the training session.");
       return;
     }
-    if (!sessionDraft.sessionTypeId) {
-      setSessionFormError("Select a program.");
-      return;
-    }
     if (start === null || end === null || start >= end) {
       setSessionFormError(
         "The session end time must be later than its start time.",
@@ -452,16 +499,20 @@ export default function BranchSchedulePage() {
       return;
     }
 
+    const selectedBatch = configuredBatch;
+    const configuredPrograms = typeof selectedBatch?.plan === "object" ? selectedBatch.plan.programs || [] : [];
+    const inferredProgram = configuredPrograms.length === 1 ? configuredPrograms[0].program : undefined;
     const newSlot: TrainingSlot = {
       ...createLocalSlot(),
       _id: createTemporaryId(),
-      sessionTypeId: sessionDraft.sessionTypeId,
+      ...(typeof inferredProgram === "string" ? { sessionTypeId: inferredProgram } : inferredProgram?._id ? { sessionTypeId: inferredProgram._id } : {}),
+      batchId: selectedBatch?._id || null,
       sessionName,
       startTime: sessionDraft.startTime,
       endTime: sessionDraft.endTime,
-      isActive: sessionDraft.isActive,
-      capacity: sessionDraft.capacity ? Number(sessionDraft.capacity) : null,
-      coach: sessionDraft.coach || null,
+      isActive: true,
+      capacity: null,
+      coach: null,
     };
 
     updateDay(selectedDay, (day) => ({
@@ -491,31 +542,52 @@ export default function BranchSchedulePage() {
       | "startTime"
       | "endTime"
       | "capacity"
-      | "coach",
+      | "coach"
+      | "batchId"
+      | "roomId",
     value: string | number | null,
   ) {
     updateDay(selectedDay, (day) => ({
       ...day,
 
-      slots: day.slots.map((slot) =>
-        slot._id === slotId
-          ? {
-              ...slot,
-              [field]:
-                field === "sessionTypeId"
-                  ? value || undefined
-                  : field === "capacity"
-                    ? value === ""
-                      ? null
-                      : Number(value)
-                    : field === "coach"
-                      ? value || null
-                      : value,
-              ...(field === "sessionTypeId" ? { sessionType: undefined } : {}),
-            }
-          : slot,
-      ),
+      slots: day.slots.map((slot) => {
+        if (slot._id !== slotId) return slot;
+        const next = {
+          ...slot,
+          [field]: field === "sessionTypeId" ? value || undefined : field === "capacity" ? (value === "" ? null : Number(value)) : field === "coach" || field === "batchId" || field === "roomId" ? value || null : value,
+          ...(field === "sessionTypeId" ? { sessionType: undefined } : {}),
+        };
+        if (field === "batchId") {
+          const assigned = batches.find((batch) => batch._id === String(value || ""));
+          const programs = typeof assigned?.plan === "object" ? assigned.plan.programs || [] : [];
+          const ids = programs.map((item) => String(typeof item.program === "string" ? item.program : item.program?._id || ""));
+          const currentProgram = String(slot.sessionTypeId || "");
+          next.sessionTypeId = ids.length === 1 ? ids[0] : ids.includes(currentProgram) ? currentProgram : undefined;
+          next.sessionType = undefined;
+        }
+        return next;
+      }),
     }));
+  }
+
+  async function addRoom() {
+    if (!branchId || !newRoomName.trim()) return;
+    setCreatingRoom(true);
+    try {
+      const room = await createBranchRoom(branchId, newRoomName.trim());
+      setRooms((current) => [...current, room].sort((a, b) => a.name.localeCompare(b.name)));
+      setNewRoomName("");
+      toast.success("Room added to this Branch.");
+    } catch (caught) { toast.error(caught instanceof Error ? caught.message : "Unable to add room."); }
+    finally { setCreatingRoom(false); }
+  }
+
+  async function toggleRoomStatus(room: BranchRoom) {
+    try {
+      const updated = await updateBranchRoomStatus(room._id, !room.isActive);
+      setRooms((current) => current.map((item) => item._id === room._id ? updated : item));
+      toast.success(updated.isActive ? "Room activated." : "Room deactivated.");
+    } catch (caught) { toast.error(caught instanceof Error ? caught.message : "Unable to update room."); }
   }
 
   /* =======================================================
@@ -659,28 +731,6 @@ export default function BranchSchedulePage() {
     for (const day of weeklySchedule) {
       const activeSlots = day.slots.filter((slot) => slot.isActive !== false);
 
-      const validTimeSlots = activeSlots.filter(
-        (slot) =>
-          /^\d{2}:\d{2}$/.test(slot.startTime) &&
-          /^\d{2}:\d{2}$/.test(slot.endTime),
-      );
-      const sortedForOverlap = [...validTimeSlots].sort(
-        (a, b) =>
-          (timeToMinutes(a.startTime) || 0) - (timeToMinutes(b.startTime) || 0),
-      );
-      for (let index = 1; index < sortedForOverlap.length; index += 1) {
-        const previous = sortedForOverlap[index - 1],
-          current = sortedForOverlap[index];
-        const previousEnd = timeToMinutes(previous.endTime),
-          currentStart = timeToMinutes(current.startTime);
-        if (
-          previousEnd !== null &&
-          currentStart !== null &&
-          currentStart < previousEnd
-        )
-          return `${DAY_NAMES[day.dayOfWeek]} already has a session scheduled from ${formatTime(previous.startTime)} to ${formatTime(previous.endTime)}. The requested time ${formatTime(current.startTime)} to ${formatTime(current.endTime)} overlaps with it.`;
-      }
-
       if (day.isClosed) continue;
 
       for (const slot of activeSlots) {
@@ -717,28 +767,6 @@ export default function BranchSchedulePage() {
         }
       }
 
-      const sortedSlots = [...activeSlots].sort(
-        (a, b) =>
-          (timeToMinutes(a.startTime) || 0) - (timeToMinutes(b.startTime) || 0),
-      );
-
-      for (let index = 1; index < sortedSlots.length; index += 1) {
-        const previous = sortedSlots[index - 1];
-
-        const current = sortedSlots[index];
-
-        const previousEnd = timeToMinutes(previous.endTime);
-
-        const currentStart = timeToMinutes(current.startTime);
-
-        if (
-          previousEnd !== null &&
-          currentStart !== null &&
-          currentStart < previousEnd
-        ) {
-          return `${DAY_NAMES[day.dayOfWeek]} already has a session scheduled from ${formatTime(previous.startTime)} to ${formatTime(previous.endTime)}. The requested time ${formatTime(current.startTime)} to ${formatTime(current.endTime)} overlaps with it.`;
-        }
-      }
     }
 
     return "";
@@ -783,6 +811,9 @@ export default function BranchSchedulePage() {
           sessionName: slot.sessionName.trim() || "Training Session",
           ...(slot.sessionTypeId ? { sessionTypeId: slot.sessionTypeId } : {}),
           sessionType: slot.sessionType,
+          batchId: slot.batchId || null,
+          room: slot.room || "",
+          roomId: slot.roomId || null,
 
           startTime: slot.startTime,
           endTime: slot.endTime,
@@ -907,7 +938,7 @@ export default function BranchSchedulePage() {
               <Link href="/branch-schedules">
                 <Button variant="back">
                   <ArrowLeft size={16} />
-                  Back to Branch Schedule
+                  Back to Training Availability
                 </Button>
               </Link>
 
@@ -1072,6 +1103,20 @@ export default function BranchSchedulePage() {
           </div>
         </Card>
 
+        <Card className="mb-6 p-5">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <h3 className="font-bold">Rooms at {branchName}</h3>
+              <p className="mt-1 text-sm text-(--ink-muted)">Create Branch rooms here, then assign them to recurring sessions. Existing unassigned slots remain unreserved.</p>
+              <div className="mt-2 flex flex-wrap gap-2">{rooms.length ? rooms.map((room) => <span key={room._id} className="inline-flex items-center gap-2 rounded-full border border-(--line) px-3 py-1 text-xs"><span>{room.name}{!room.isActive ? " (inactive)" : ""}</span>{canManageSchedule && <button type="button" className="font-bold text-(--accent) hover:underline" onClick={() => void toggleRoomStatus(room)}>{room.isActive ? "Deactivate" : "Activate"}</button>}</span>) : <span className="text-xs text-(--ink-muted)">No rooms configured</span>}</div>
+            </div>
+            {canManageSchedule && <div className="flex w-full gap-2 sm:max-w-md">
+              <Input aria-label="New room name" maxLength={80} placeholder="New room name" value={newRoomName} onChange={(event) => setNewRoomName(event.target.value)} />
+              <Button type="button" onClick={() => void addRoom()} disabled={creatingRoom || !newRoomName.trim()}><Plus size={16}/>{creatingRoom ? "Adding…" : "Add room"}</Button>
+            </div>}
+          </div>
+        </Card>
+
         {/* =================================================
             WEEKLY SCHEDULE
         ================================================= */}
@@ -1097,28 +1142,6 @@ export default function BranchSchedulePage() {
                 <p className="mt-1 text-sm text-(--ink-muted)">
                   Configure the recurring sessions for Sunday through Saturday.
                 </p>
-              </div>
-
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={copySelectedDayToOtherDays}
-                  disabled={!canManageSchedule}
-                >
-                  <Copy size={16} />
-                  Copy Day
-                </Button>
-
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setConfirmationAction({ type: "reset-day" })}
-                  disabled={!canManageSchedule}
-                >
-                  <RotateCcw size={16} />
-                  Reset Day
-                </Button>
               </div>
             </div>
           </div>
@@ -1215,6 +1238,8 @@ export default function BranchSchedulePage() {
                 <h3 className="mt-1 text-2xl font-bold text-(--foreground)">
                   {selectedDayName}
                 </h3>
+                {sessionTypesLoading && <p className="mt-1 text-xs text-(--ink-muted)">Loading Program catalog…</p>}
+                {sessionTypesError && <p className="mt-1 text-xs text-(--danger)" role="alert">{sessionTypesError}</p>}
 
                 <p className="mt-1 text-sm text-(--ink-muted)">
                   {selectedDaySchedule.isClosed
@@ -1232,6 +1257,20 @@ export default function BranchSchedulePage() {
                       }`}
                 </p>
               </div>
+
+              {configuredBatch && (
+                <div className="flex flex-col gap-1 sm:items-end">
+                  <span className="text-sm font-semibold">{configuredBatch.name} weekly sessions</span>
+                  <Badge variant={requiredWeeklySessions > 0 && configuredBatchPlan?.isActive !== false && !weeklyBatchHasIssues && weeklyBatchSessionCount === requiredWeeklySessions ? "success" : "warning"}>
+                    {weeklyBatchSessionCount} of {requiredWeeklySessions} weekly sessions configured
+                  </Badge>
+                  {weeklyBatchHasIssues && <span className="max-w-sm text-xs text-(--danger) sm:text-right">Resolve invalid schedule entries or Batch prerequisites before activation.</span>}
+                  {configuredBatchPlan?.isActive === false && <span className="text-xs text-(--danger)">Activate the Plan before activating this Batch.</span>}
+                  {!branchIsActive && <span className="text-xs text-(--danger)">Activate the Branch before activating this Batch.</span>}
+                  {(configuredBatchPlan?.programs || []).length > 1 && <span className="max-w-sm text-xs text-(--ink-muted) sm:text-right">Choose one of the Plan’s Programs in each schedule row; curriculum is never guessed.</span>}
+                  {weeklyBatchSessionCount > requiredWeeklySessions && <span className="text-xs text-(--danger)">Remove extra active sessions before activation.</span>}
+                </div>
+              )}
 
               <button
                 type="button"
@@ -1377,6 +1416,9 @@ export default function BranchSchedulePage() {
                 <div className="space-y-3 pt-4">
                   {selectedDaySchedule.slots.map((slot, index) => {
                     const slotId = slot._id || `${selectedDay}-${index}`;
+                    const slotBatch = batches.find((batch) => batch._id === String(slot.batchId || ""));
+                    const batchPrograms = typeof slotBatch?.plan === "object" ? slotBatch.plan.programs || [] : [];
+                    const showProgramSelector = !slotBatch || batchPrograms.length > 1;
 
                     return (
                       <div
@@ -1422,7 +1464,7 @@ export default function BranchSchedulePage() {
                               </Badge>
                             </div>
 
-                            <Select
+                            {showProgramSelector && <Select
                               aria-label="Program"
                               value={slot.sessionTypeId || ""}
                               disabled={!canManageSchedule}
@@ -1439,8 +1481,8 @@ export default function BranchSchedulePage() {
                               {sessionTypes
                                 .filter(
                                   (type) =>
-                                    type.isActive ||
-                                    type._id === slot.sessionTypeId,
+                                    (type.isActive || type._id === slot.sessionTypeId) &&
+                                    (!slotBatch || batchPrograms.some((item) => String(typeof item.program === "string" ? item.program : item.program?._id || "") === type._id)),
                                 )
                                 .map((type) => (
                                   <option
@@ -1452,7 +1494,7 @@ export default function BranchSchedulePage() {
                                     {!type.isActive ? " (inactive)" : ""}
                                   </option>
                                 ))}
-                            </Select>
+                            </Select>}
 
                             <Input
                               type="text"
@@ -1469,6 +1511,28 @@ export default function BranchSchedulePage() {
                               className="h-12 font-semibold"
                             />
                             <Select
+                              aria-label={`Batch for ${slot.sessionName}`}
+                              value={slot.batchId || ""}
+                              disabled={!canManageSchedule}
+                              onChange={(event) => updateTrainingSession(slotId, "batchId", event.target.value || null)}
+                              className="mt-2 h-10 text-sm"
+                            >
+                              <option value="">Legacy / unassigned slot</option>
+                              {batches.filter((batch) => batch.status !== "INACTIVE").map((batch) => (
+                                <option key={batch._id} value={batch._id}>{batch.name} · {typeof batch.plan === "string" ? "Plan" : batch.plan.name}</option>
+                              ))}
+                            </Select>
+                            <Select
+                              aria-label={`Room for ${slot.sessionName}`}
+                              value={(typeof slot.roomId === "string" ? slot.roomId : slot.roomId?._id) || (typeof slotBatch?.roomId === "object" ? slotBatch.roomId?._id : slotBatch?.roomId) || ""}
+                              disabled={!canManageSchedule}
+                              onChange={(event) => updateTrainingSession(slotId, "roomId", event.target.value)}
+                              className="mt-2 h-10 text-sm"
+                            >
+                              <option value="">{slotBatch?.roomId ? `Use Batch room (${typeof slotBatch.roomId === "object" ? slotBatch.roomId.name : "assigned"})` : "No room reserved"}</option>
+                              {rooms.filter((room) => room.isActive || (typeof slot.roomId === "string" && room._id === slot.roomId)).map((room) => <option key={room._id} value={room._id} disabled={!room.isActive}>{room.name}{!room.isActive ? " (inactive)" : ""}</option>)}
+                            </Select>
+                            {!slotBatch && <Select
                               aria-label={`Coach for ${slot.sessionName}`}
                               value={
                                 typeof slot.coach === "string"
@@ -1491,7 +1555,7 @@ export default function BranchSchedulePage() {
                                   {coach.name}
                                 </option>
                               ))}
-                            </Select>
+                            </Select>}
                           </div>
 
                           {/* START */}
@@ -1564,7 +1628,7 @@ export default function BranchSchedulePage() {
                             </div>
                           </div>
 
-                          <div>
+                          {!slotBatch && <div>
                             <label className="mb-1.5 block text-xs font-semibold text-(--ink-muted) lg:hidden">
                               Capacity
                             </label>
@@ -1585,7 +1649,7 @@ export default function BranchSchedulePage() {
                               className="h-12 font-semibold"
                               aria-label={`Capacity for ${slot.sessionName}`}
                             />
-                          </div>
+                          </div>}
 
                           {/* STATUS */}
 
@@ -1711,7 +1775,7 @@ export default function BranchSchedulePage() {
                 ADD SESSION
             ================================================= */}
 
-            {!selectedDaySchedule.isClosed && canManageSchedule && (
+            {!selectedDaySchedule.isClosed && canManageSchedule && (!configuredBatch || !requiredWeeklySessions || weeklyBatchSessionCount < requiredWeeklySessions) && (
               <Button
                 type="button"
                 onClick={addTrainingSession}
@@ -1818,7 +1882,7 @@ export default function BranchSchedulePage() {
           open={sessionModalOpen}
           onClose={() => setSessionModalOpen(false)}
           title="Add Training Session"
-          description="Choose a program, then set the session details for this day."
+          description={configuredBatch ? `Add a recurring occurrence for ${configuredBatch.name}. The Plan controls the weekly count. If it has multiple Programs, choose the curriculum in the schedule row after adding.` : "Set the name and time for this recurring session."}
           size="lg"
           footer={
             <>
@@ -1840,52 +1904,7 @@ export default function BranchSchedulePage() {
           }
         >
           <div className="space-y-5">
-            <section aria-labelledby="training-type-label">
-              <h3
-                id="training-type-label"
-                className="mb-2 text-sm font-bold text-(--foreground)"
-              >
-                Training Type
-              </h3>
-              {sessionTypesLoading ? (
-                <p className="text-sm text-(--ink-muted)">Loading programs…</p>
-              ) : sessionTypesError ? (
-                <p role="alert" className="text-sm text-(--danger)">
-                  {sessionTypesError}
-                </p>
-              ) : sessionTypes.filter((type) => type.isActive).length === 0 ? (
-                <div className="rounded-lg border border-(--line) p-3 text-sm text-(--ink-muted)">
-                  No programs have been created yet.{" "}
-                  <Link
-                    className="font-semibold text-(--accent) underline"
-                    href="/training-session-types"
-                  >
-                    Manage programs
-                  </Link>
-                </div>
-              ) : (
-                <Select
-                  aria-label="Program"
-                  value={sessionDraft.sessionTypeId}
-                  disabled={!canManageSchedule}
-                  onChange={(event) =>
-                    setSessionDraft((current) => ({
-                      ...current,
-                      sessionTypeId: event.target.value,
-                    }))
-                  }
-                >
-                  <option value="">Select a program</option>
-                  {sessionTypes
-                    .filter((type) => type.isActive)
-                    .map((type) => (
-                      <option key={type._id} value={type._id}>
-                        {type.name}
-                      </option>
-                    ))}
-                </Select>
-              )}
-            </section>
+
 
             <div>
               <label
@@ -1897,6 +1916,7 @@ export default function BranchSchedulePage() {
               <Input
                 id="new-session-name"
                 autoFocus
+                required
                 value={sessionDraft.sessionName}
                 onChange={(event) =>
                   setSessionDraft((current) => ({
@@ -1920,6 +1940,7 @@ export default function BranchSchedulePage() {
                 <Input
                   id="new-session-start"
                   type="time"
+                  required
                   value={sessionDraft.startTime}
                   onChange={(event) =>
                     setSessionDraft((current) => ({
@@ -1940,6 +1961,7 @@ export default function BranchSchedulePage() {
                 <Input
                   id="new-session-end"
                   type="time"
+                  required
                   value={sessionDraft.endTime}
                   onChange={(event) =>
                     setSessionDraft((current) => ({
@@ -1951,72 +1973,6 @@ export default function BranchSchedulePage() {
                 />
               </div>
             </div>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div>
-                <label
-                  htmlFor="new-session-capacity"
-                  className="mb-1.5 block text-sm font-semibold text-(--foreground)"
-                >
-                  Capacity (optional)
-                </label>
-                <Input
-                  id="new-session-capacity"
-                  type="number"
-                  min={1}
-                  max={1000}
-                  placeholder="Unlimited"
-                  value={sessionDraft.capacity}
-                  onChange={(event) =>
-                    setSessionDraft((current) => ({
-                      ...current,
-                      capacity: event.target.value,
-                    }))
-                  }
-                  disabled={!canManageSchedule}
-                />
-              </div>
-              <div>
-                <label
-                  htmlFor="new-session-coach"
-                  className="mb-1.5 block text-sm font-semibold text-(--foreground)"
-                >
-                  Coach
-                </label>
-                <Select
-                  id="new-session-coach"
-                  value={sessionDraft.coach}
-                  onChange={(event) =>
-                    setSessionDraft((current) => ({
-                      ...current,
-                      coach: event.target.value,
-                    }))
-                  }
-                  disabled={!canManageSchedule}
-                >
-                  <option value="">No coach assigned</option>
-                  {coaches.map((coach) => (
-                    <option key={coach._id} value={coach._id}>
-                      {coach.name}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-            </div>
-
-            <label className="flex items-center gap-2 text-sm font-semibold text-(--foreground)">
-              <Checkbox
-                checked={sessionDraft.isActive}
-                onChange={(event) =>
-                  setSessionDraft((current) => ({
-                    ...current,
-                    isActive: event.target.checked,
-                  }))
-                }
-                disabled={!canManageSchedule}
-              />
-              Session is active
-            </label>
-
             {sessionFormError && (
               <p
                 role="alert"

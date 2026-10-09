@@ -888,11 +888,11 @@ export default function PublicBranchSchedules({
                   </div>
 
                   <div className="p-4 sm:p-6">
-                    <div className="grid grid-cols-7 border-l border-t border-(--line)">
+                    <div className="grid grid-cols-[repeat(7,minmax(0,1fr))] border-l border-t border-(--line)">
                       {DAY_NAMES.map((day) => (
                         <div
                           key={day}
-                          className="border-r border-b border-(--line) bg-(--surface) px-2 py-3 text-center text-[10px] font-bold uppercase tracking-wider text-(--ink-muted) sm:text-xs"
+                          className="border-r border-b border-(--line) bg-(--surface) px-1 py-3 text-center text-[10px] font-bold uppercase tracking-wider text-(--ink-muted) sm:px-2 sm:text-xs"
                         >
                           {day.slice(0, 3)}
                         </div>
@@ -903,7 +903,7 @@ export default function PublicBranchSchedules({
                           return (
                             <div
                               key={`empty-${index}`}
-                              className="min-h-28 border-r border-b border-(--line) bg-(--background)"
+                              className="min-h-16 border-r border-b border-(--line) bg-(--background) sm:min-h-28"
                             />
                           );
                         }
@@ -914,6 +914,8 @@ export default function PublicBranchSchedules({
                           <button
                             type="button"
                             key={day.date}
+                            aria-label={`${day.dayName}, ${day.date}, ${getStatusLabel(day)}${day.slots.some(matchesFilter) ? `, ${day.slots.filter(matchesFilter).length} matching sessions` : ""}`}
+                            title={`${day.dayName}, ${day.date}: ${getStatusLabel(day)}`}
                             onClick={() => {
                               if (!isSelectableDay(day)) return;
                               setSelectedDate(day);
@@ -921,7 +923,7 @@ export default function PublicBranchSchedules({
                               onClearSession?.();
                             }}
                             disabled={!isSelectableDay(day)}
-                            className={`min-h-28 border-r border-b p-2 text-left transition hover:shadow-inner sm:p-3 ${getStatusClass(
+                            className={`min-h-16 min-w-0 border-r border-b p-1.5 text-left transition hover:shadow-inner sm:min-h-28 sm:p-3 ${getStatusClass(
                               day,
                             )} ${
                               isSelected
@@ -930,19 +932,25 @@ export default function PublicBranchSchedules({
                             }`}
                           >
                             <div className="flex items-start justify-between gap-2">
-                              <span className="text-sm font-bold">
+                              <span className="text-xs font-bold sm:text-sm">
                                 {Number(day.date.slice(-2))}
                               </span>
 
                               <span className="h-2 w-2 rounded-full bg-current opacity-70" />
                             </div>
 
-                            <span className="mt-2 inline-flex rounded-full border border-current px-2 py-1 text-[9px] font-bold uppercase">
+                            <span className="mt-2 hidden rounded-full border border-current px-2 py-1 text-[9px] font-bold uppercase sm:inline-flex">
                               {getStatusLabel(day)}
                             </span>
 
                             {day.slots.some(matchesFilter) && (
-                              <div className="mt-2 space-y-1">
+                              <span className="mt-1 block text-[9px] font-semibold sm:hidden">
+                                {day.slots.filter(matchesFilter).length} sessions
+                              </span>
+                            )}
+
+                            {day.slots.some(matchesFilter) && (
+                              <div className="mt-2 hidden space-y-1 sm:block">
                                 {day.slots
                                   .filter(matchesFilter)
                                   .slice(0, 2)
@@ -967,7 +975,7 @@ export default function PublicBranchSchedules({
                             )}
 
                             {day.isHoliday && day.holiday?.name && (
-                              <p className="mt-2 truncate text-[10px] font-semibold">
+                              <p className="mt-2 hidden truncate text-[10px] font-semibold sm:block">
                                 {day.holiday.name}
                               </p>
                             )}

@@ -1,13 +1,11 @@
 const mongoose = require("mongoose");
 
 const Student = require("../models/Student");
-const Attendance = require("../models/Attendance");
 const BeltHistory = require("../models/BeltHistory");
+const StudentCurriculumMilestone = require("../models/StudentCurriculumMilestone");
 const CoachStudentAssignment = require("../models/CoachStudentAssignment");
-const { getProgramLearningProgress } = require("../services/programProgress.service");
-const { resolveProgramCurriculum } = require("../services/curriculumResolver.service");
-const { safelyNotify } = require("../services/notification.service");
-const { findEnrollmentForDate } = require("../services/enrollmentLifecycle.service");
+const { safelyNotify, safelyCreateNotification } = require("../services/notification.service");
+const { evaluateStudentPromotionEligibility } = require("../services/promotionEligibility.service");
 const auditService = require("../services/audit.service");
 const { AUDIT_ACTIONS } = require("../config/auditActions");
 
@@ -111,66 +109,6 @@ async function hasCoachStudentAccess(user, studentId) {
   }).select("_id");
 
   return Boolean(assignment);
-}
-
-/**
- * Same training-day definition used by the existing
- * progress system:
- *
- * PRESENT
- * OR
- * ABSENT + makeup completed
- */
-async function getCompletedTrainingDay(studentId) {
-  const attendance = await Attendance.find({
-    student: studentId,
-  })
-    .select("planDay status makeupRequired makeupCompleted")
-    .lean();
-
-  const completedDays = attendance
-    .filter(
-      (record) =>
-        record.status === "PRESENT" ||
-        (record.makeupRequired === true && record.makeupCompleted === true),
-    )
-    .map((record) => Number(record.planDay))
-    .filter((day) => Number.isFinite(day));
-
-  if (completedDays.length === 0) {
-    return 0;
-  }
-
-  return Math.max(...completedDays);
-}
-
-/**
- * Find the next belt milestone that:
- *
- * 1. Has already been reached by training day.
- * 2. Is different from the student's current belt.
- *
- * Milestones are sorted ascending so the system
- * promotes students through the configured roadmap
- * instead of skipping directly to a later belt.
- */
-function getEligibleMilestone(plan, currentBelt, trainingDay) {
-  const milestones = Array.isArray(plan?.milestones) ? plan.milestones : [];
-
-  return (
-    milestones
-      .filter(
-        (milestone) =>
-          Number(milestone.day) <= trainingDay &&
-          String(milestone.belt || "")
-            .trim()
-            .toLowerCase() !==
-            String(currentBelt || "")
-              .trim()
-              .toLowerCase(),
-      )
-      .sort((a, b) => Number(a.day) - Number(b.day))[0] || null
-  );
 }
 
 /**
@@ -285,30 +223,8 @@ const getEligiblePromotions = async (req, res) => {
       }
 
       const today = new Date();
-      const enrollment = findEnrollmentForDate(student.planEnrollments, today);
-      const entitlements = enrollment?.programs?.length
-        ? enrollment.programs
-        : (student.plan.programs || []).map((item) => ({ program: item.program?._id || item.program, curriculum: item.curriculum || [] }));
-      for (const entitlement of entitlements) {
-        const programId = entitlement.program?._id || entitlement.program;
-        if (!programId) continue;
-        const program = student.plan.programs?.find((item) => String(item.program?._id || item.program) === String(programId))?.program;
-        const planProgram = (student.plan.programs || []).find((item) => String(item.program?._id || item.program) === String(programId));
-        const curriculum = resolveProgramCurriculum(entitlement, planProgram, student.plan.curriculum);
-        const { currentTrainingDay: trainingDay } = await getProgramLearningProgress({
-          studentId: student._id,
-          programId,
-          enrollmentId: enrollment?._id,
-          enrollmentStartDate: enrollment?.startDate,
-          enrollmentEndDate: enrollment?.endDate,
-          curriculum,
-          asOfDate: today,
-        });
-        const currentBelt = student.programBelts?.find((item) => String(item.program) === String(programId))?.belt || (entitlements.length === 1 ? student.currentBelt : enrollment?.startingBelt) || "White";
-        const milestone = getEligibleMilestone(student.plan, currentBelt, trainingDay);
-        if (!milestone) continue;
-        const existingHistory = await BeltHistory.findOne({ student: student._id, sessionTypeId: programId, toBelt: milestone.belt }).lean();
-        if (existingHistory) continue;
+      const eligibility = await evaluateStudentPromotionEligibility(student, { asOfDate: today });
+      for (const candidate of eligibility.filter((item) => item.eligible)) {
         eligible.push({
         student: {
           _id: student._id,
@@ -316,7 +232,7 @@ const getEligiblePromotions = async (req, res) => {
           age: student.age,
           phone: student.phone,
           email: student.email,
-          currentBelt,
+          currentBelt: candidate.currentBelt,
         },
 
         branch: student.branch,
@@ -326,15 +242,15 @@ const getEligiblePromotions = async (req, res) => {
           name: student.plan.name,
         },
 
-        program: { _id: String(programId), name: program?.name || "Training program" },
+        program: { _id: String(candidate.programId), name: candidate.program?.name || "Training program" },
 
-        trainingDay,
+        trainingDay: candidate.trainingDay,
 
         milestone: {
-          day: milestone.day,
-          belt: milestone.belt,
-          skill: milestone.skill || "",
-          description: milestone.description || "",
+          belt: candidate.milestone.belt,
+          skill: candidate.milestone.skill || "",
+          description: candidate.milestone.description || "",
+          requiresFormalGrading: candidate.milestone.requiresFormalGrading !== false,
         },
         });
       }
@@ -350,7 +266,7 @@ const getEligiblePromotions = async (req, res) => {
         student: candidate.student._id,
         entityType: "STUDENT",
         entityId: candidate.student._id,
-        eventKey: `promotion-eligible:${candidate.student._id}:${candidate.program._id}:${candidate.milestone.day}:${candidate.milestone.belt}`,
+        eventKey: `promotion-eligible:${candidate.student._id}:${candidate.program._id}:${candidate.milestone.belt}`,
         actionUrl: "/promotions",
       });
     }
@@ -377,7 +293,7 @@ const getEligiblePromotions = async (req, res) => {
 
 const promoteStudent = async (req, res) => {
   try {
-    const { student: studentId, programId } = req.body;
+    const { student: studentId, programId, gradingEventId = null } = req.body;
 
     if (!studentId) {
       return res.status(400).json({
@@ -461,48 +377,38 @@ const promoteStudent = async (req, res) => {
     }
 
     const today = new Date();
-    const enrollment = findEnrollmentForDate(student.planEnrollments, today);
-    const entitlements = enrollment?.programs?.length ? enrollment.programs : (student.plan.programs || []).map((item) => ({ program: item.program?._id || item.program, curriculum: item.curriculum || [] }));
-    if (!programId && entitlements.length > 1) return res.status(400).json({ success: false, message: "programId is required when the student's plan includes multiple programs" });
-    const entitlement = entitlements.find((item) => String(item.program?._id || item.program) === String(programId || item.program?._id || item.program));
-    const selectedProgramId = entitlement?.program?._id || entitlement?.program;
-    if (!entitlement || !selectedProgramId) return res.status(400).json({ success: false, message: "The selected program is not included in the active plan" });
-    const planProgram = (student.plan.programs || []).find((item) => String(item.program?._id || item.program) === String(selectedProgramId));
-    const curriculum = resolveProgramCurriculum(entitlement, planProgram, student.plan.curriculum);
-    const { currentTrainingDay: trainingDay } = await getProgramLearningProgress({ studentId: student._id, programId: selectedProgramId, enrollmentId: enrollment?._id, enrollmentStartDate: enrollment?.startDate, enrollmentEndDate: enrollment?.endDate, curriculum, asOfDate: today });
-    const previousBelt = student.programBelts?.find((item) => String(item.program) === String(selectedProgramId))?.belt || (entitlements.length === 1 ? student.currentBelt : enrollment?.startingBelt) || "White";
-    const milestone = getEligibleMilestone(student.plan, previousBelt, trainingDay);
+    const results = await evaluateStudentPromotionEligibility(student, { asOfDate: today, programId });
+    if (!programId && results.some((item) => item.programCount > 1)) return res.status(400).json({ success: false, message: "programId is required when the student's plan includes multiple programs" });
+    const candidate = results.find((item) => item.eligible);
+    const selectedProgramId = candidate?.programId || results[0]?.programId;
+    const previousBelt = candidate?.currentBelt || results[0]?.currentBelt || student.currentBelt || "White";
+    const milestone = candidate?.milestone;
+    const programCount = candidate?.programCount || results[0]?.programCount || 1;
 
-    if (!milestone) {
+    if (results.some((item) => item.reason === "This belt promotion has already been recorded.")) {
+      return res.status(409).json({ success: false, message: "This belt promotion has already been recorded" });
+    }
+
+    if (!milestone || !candidate?.eligible) {
       return res.status(400).json({
         success: false,
         message: "Student is not currently eligible for a belt promotion",
       });
     }
+    if (milestone.requiresFormalGrading !== false && !gradingEventId) {
+      return res.status(409).json({ success: false, message: "This curriculum belt reward requires formal grading before promotion." });
+    }
 
     /*
      * Prevent duplicate promotion.
      */
-    const existingHistory = await BeltHistory.findOne({
-      student: student._id,
-      sessionTypeId: selectedProgramId,
-      toBelt: milestone.belt,
-    });
-
-    if (existingHistory) {
-      return res.status(409).json({
-        success: false,
-        message: "This belt promotion has already been recorded",
-      });
-    }
-
     /*
      * Update student's current belt.
      */
     const existingProgramBelt = student.programBelts.find((item) => String(item.program) === String(selectedProgramId));
     if (existingProgramBelt) existingProgramBelt.belt = String(milestone.belt).trim();
     else student.programBelts.push({ program: selectedProgramId, belt: String(milestone.belt).trim() });
-    if (entitlements.length === 1) student.currentBelt = String(milestone.belt).trim();
+    if (programCount === 1) student.currentBelt = String(milestone.belt).trim();
 
     let history;
     const session = await mongoose.startSession();
@@ -514,15 +420,33 @@ const promoteStudent = async (req, res) => {
           branch: student.branch?._id || student.branch,
           plan: student.plan._id,
           sessionTypeId: selectedProgramId,
+          gradingEvent: gradingEventId,
           fromBelt: previousBelt,
           toBelt: milestone.belt,
-          milestoneDay: milestone.day,
+          milestoneDay: null,
           skill: milestone.skill || "",
           description: milestone.description || "",
+          curriculumMilestone: milestone.curriculumMilestoneId,
+          curriculum: milestone.curriculumId,
+          curriculumStepId: milestone.curriculumStepId,
+          reason: gradingEventId ? "Grading examination pass" : "Eligibility milestone approved",
           promotedAt: new Date(),
           approvedBy: req.user._id,
         }], { session });
-        await auditService.record({ req, session, action: AUDIT_ACTIONS.PROMOTION_CREATED, entityType: "PROMOTION", entityId: history._id, branchId: student.branch?._id || student.branch, before: { belt: previousBelt }, after: { belt: milestone.belt, studentId: student._id, programId: selectedProgramId, milestoneDay: milestone.day } });
+        const achievement = await StudentCurriculumMilestone.findOne({ _id: milestone.curriculumMilestoneId, student: student._id, enrollment: candidate.enrollment?._id, program: selectedProgramId, curriculum: milestone.curriculumId, status: "EARNED" }).session(session);
+        const reward = achievement?.rewards.id(milestone.curriculumRewardId);
+        const allowedRewardStatuses = gradingEventId ? ["AWAITING_GRADING", "AWAITING_PROMOTION_APPROVAL"] : ["AWAITING_PROMOTION_APPROVAL"];
+        if (!achievement || !reward || reward.type !== "BELT_PROGRESSION" || reward.targetBelt !== String(milestone.belt).trim() || !allowedRewardStatuses.includes(reward.status) || (!gradingEventId && reward.requiresFormalGrading !== false)) {
+          const error = new Error("The curriculum belt reward changed before this promotion was recorded."); error.status = 409; throw error;
+        }
+        reward.status = "FULFILLED";
+        reward.beltHistory = history._id;
+        reward.fulfilledAt = new Date();
+        reward.fulfilledBy = req.user._id;
+        reward.fulfillmentNote = `Promotion recorded through ${gradingEventId ? "formal grading" : "authorized promotion approval"}.`;
+        achievement.history.push({ action: "REWARD_FULFILLED", rewardId: reward.rewardId, performedBy: req.user._id, performedAt: new Date(), reason: reward.fulfillmentNote });
+        await achievement.save({ session });
+        await auditService.record({ req, session, action: AUDIT_ACTIONS.PROMOTION_CREATED, entityType: "PROMOTION", entityId: history._id, branchId: student.branch?._id || student.branch, before: { belt: previousBelt }, after: { belt: milestone.belt, studentId: student._id, programId: selectedProgramId, curriculumMilestoneId: achievement._id, curriculumId: achievement.curriculum, gradingEventId } });
       });
     } finally { await session.endSession(); }
 
@@ -543,6 +467,19 @@ const promoteStudent = async (req, res) => {
       entityId: history._id,
       eventKey: `promotion:${history._id}:completed`,
       actionUrl: "/promotions",
+    });
+    if (gradingEventId && student.user) await safelyCreateNotification({
+      recipient: student.user,
+      type: "STUDENT_PROMOTION_COMPLETED",
+      title: "Belt promotion completed",
+      message: `Your belt changed from ${previousBelt} to ${milestone.belt}.`,
+      severity: "SUCCESS",
+      branch: student.branch?._id || student.branch,
+      student: student._id,
+      entityType: "PROMOTION",
+      entityId: history._id,
+      eventKey: `grading-promotion:${history._id}:student-completed`,
+      actionUrl: "/student-dashboard",
     });
 
     return res.status(201).json({
@@ -669,4 +606,14 @@ module.exports = {
   getEligiblePromotions,
   promoteStudent,
   getStudentBeltHistory,
+  promoteStudentForGrading: async ({ req, studentId, programId, gradingEventId }) => {
+    let statusCode = 200;
+    let body = null;
+    const response = {
+      status(code) { statusCode = code; return this; },
+      json(value) { body = value; return this; },
+    };
+    await promoteStudent({ ...req, body: { student: studentId, programId, gradingEventId } }, response);
+    return { statusCode, body };
+  },
 };

@@ -32,7 +32,7 @@ export type CrmLead = {
   notes?: string;
   preferredDate?: string;
   preferredSession?: { sessionName?: string; sessionTypeName?: string; startTime?: string; endTime?: string };
-  preferredWeeklySessions?: { dayName?: string; sessionName?: string; sessionTypeName?: string; startTime?: string; endTime?: string }[];
+  preferredWeeklySessions?: { dayOfWeek?: number; dayName?: string; sessionName?: string; sessionTypeName?: string; sessionTypeId?: string; scheduleSlotId?: string; batchId?: string | null; startTime?: string; endTime?: string }[];
   assignedTo?: { _id: string; name: string } | null;
   nextFollowUpAt?: string | null;
   followUps?: {
@@ -136,7 +136,7 @@ export const updateCrmTrial = (id: string, values: Record<string, unknown>) =>
   });
 export const convertCrmLead = (
   id: string,
-  values: { age: number; plan: string; createInvoice: boolean },
+  values: { age: number; plan: string; branch: string; batch?: string; feeTerm: string; joinDate: string; createInvoice: boolean },
 ) =>
   request<{
     lead: CrmLead;

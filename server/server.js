@@ -34,6 +34,7 @@ const attendanceRoutes = require("./src/routes/attendance.routes");
 const makeupRoutes = require("./src/routes/makeup.routes");
 const performanceRoutes = require("./src/routes/performance.routes");
 const progressRoutes = require("./src/routes/progress.routes");
+const curriculumRoutes = require("./src/routes/curriculum.routes");
 const dashboardRoutes = require("./src/routes/dashboard.routes");
 const branchRoutes = require("./src/routes/branch.routes");
 const userRoutes = require("./src/routes/user.routes");
@@ -41,6 +42,8 @@ const inquiryRoutes = require("./src/routes/inquiry.routes");
 const moduleRoutes = require("./src/routes/module.routes");
 const roleRoutes = require("./src/routes/role.routes");
 const promotionRoutes = require("./src/routes/promotion.routes");
+const gradingRoutes = require("./src/routes/grading.routes");
+const certificateRoutes = require("./src/routes/certificate.routes");
 const reportsRoutes = require("./src/routes/reports.routes");
 const coachAssignmentRoutes = require("./src/routes/coachAssignment.routes");
 const holidayRoutes = require("./src/routes/holiday.routes");
@@ -50,10 +53,18 @@ const publicWebsiteRoutes = require("./src/routes/publicWebsite.routes");
 const maintenanceRoutes = require("./src/routes/maintenance.routes");
 const notificationRoutes = require("./src/routes/notification.routes");
 const financeRoutes = require("./src/routes/finance.routes");
+const inventoryRoutes = require("./src/routes/inventory.routes");
+const academyEventRoutes = require("./src/routes/academyEvent.routes");
+const calendarRoutes = require("./src/routes/calendar.routes");
 const auditLogRoutes = require("./src/routes/auditLog.routes");
 const enrollmentRoutes = require("./src/routes/enrollment.routes");
-const { refreshFinanceReminders } = require("./src/services/financeReminder.service");
-const { refreshEnrollmentReminders } = require("./src/services/enrollmentReminder.service");
+const batchRoutes = require("./src/routes/batch.routes");
+const {
+  refreshFinanceReminders,
+} = require("./src/services/financeReminder.service");
+const {
+  refreshEnrollmentReminders,
+} = require("./src/services/enrollmentReminder.service");
 const { notifyOverdueFollowUps } = require("./src/controllers/crm.controller");
 
 /*
@@ -66,22 +77,16 @@ const { notifyOverdueFollowUps } = require("./src/controllers/crm.controller");
  * - Session slots
  * - Branch-specific schedules
  */
-const branchScheduleRoutes = require(
-  "./src/routes/branchSchedule.routes",
-);
+const branchScheduleRoutes = require("./src/routes/branchSchedule.routes");
 const trainingSessionTypeRoutes = require("./src/routes/trainingSessionType.routes");
 
 /* =========================================================
    CONFIG / SEEDERS
 ========================================================= */
 
-const {
-  ensureDefaultModules,
-} = require("./src/config/defaultModules");
+const { ensureDefaultModules } = require("./src/config/defaultModules");
 
-const {
-  ensureDefaultRoles,
-} = require("./src/config/defaultRoles");
+const { ensureDefaultRoles } = require("./src/config/defaultRoles");
 
 /* =========================================================
    APP
@@ -117,8 +122,7 @@ const loginLimiter = rateLimit({
   legacyHeaders: false,
   message: {
     success: false,
-    message:
-      "Too many login attempts. Please try again in 15 minutes.",
+    message: "Too many login attempts. Please try again in 15 minutes.",
   },
 });
 
@@ -127,21 +131,30 @@ const inquiryLimiter = rateLimit({
   max: 5,
   standardHeaders: true,
   legacyHeaders: false,
-  message: { success: false, message: "Too many inquiry attempts. Please try again later." },
+  message: {
+    success: false,
+    message: "Too many inquiry attempts. Please try again later.",
+  },
 });
 const forgotPasswordLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
   max: 5,
   standardHeaders: true,
   legacyHeaders: false,
-  message: { success: false, message: "Too many recovery requests. Please try again later." },
+  message: {
+    success: false,
+    message: "Too many recovery requests. Please try again later.",
+  },
 });
 const resetPasswordLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
   max: 10,
   standardHeaders: true,
   legacyHeaders: false,
-  message: { success: false, message: "Too many reset attempts. Please try again later." },
+  message: {
+    success: false,
+    message: "Too many reset attempts. Please try again later.",
+  },
 });
 
 /*
@@ -161,9 +174,6 @@ const apiLimiter = rateLimit({
   },
 });
 
-/* Apply the general limiter to all API routes */
-app.use("/api/", apiLimiter);
-
 /* =========================================================
    CORS
 ========================================================= */
@@ -175,16 +185,26 @@ app.use(
   }),
 );
 
+/* Apply the general limiter after CORS so allowed origins can read 429s. */
+app.use("/api/", apiLimiter);
+
 // Cross-site session cookies require explicit app-origin validation on
 // cookie-authenticated unsafe browser requests as an additional CSRF guard.
 app.use("/api", (req, res, next) => {
   if (["GET", "HEAD", "OPTIONS"].includes(req.method)) return next();
   const allowedOrigins = getClientOrigins();
-  const hasSessionCookie = (req.headers.cookie || "").split(";").some((part) => part.trim().startsWith("forcestrike_session="));
+  const hasSessionCookie = (req.headers.cookie || "")
+    .split(";")
+    .some((part) => part.trim().startsWith("forcestrike_session="));
   if (!req.headers.origin && !hasSessionCookie) return next();
-  if (!req.headers.origin) return res.status(403).json({ success: false, message: "Request origin is required" });
+  if (!req.headers.origin)
+    return res
+      .status(403)
+      .json({ success: false, message: "Request origin is required" });
   if (!allowedOrigins.includes(req.headers.origin)) {
-    return res.status(403).json({ success: false, message: "Request origin is not allowed" });
+    return res
+      .status(403)
+      .json({ success: false, message: "Request origin is not allowed" });
   }
   return next();
 });
@@ -252,14 +272,19 @@ app.use("/api/performance", performanceRoutes);
 app.use("/api/maintenance", maintenanceRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/finance", financeRoutes);
+app.use("/api/inventory", inventoryRoutes);
+app.use("/api/academy-events", academyEventRoutes);
+app.use("/api/calendar", calendarRoutes);
 app.use("/api/audit-logs", auditLogRoutes);
 app.use("/api/enrollments", enrollmentRoutes);
+app.use("/api/batches", batchRoutes);
 
 /* -------------------------
    Student Progress
 ------------------------- */
 
 app.use("/api/progress", progressRoutes);
+app.use("/api/curricula", curriculumRoutes);
 
 /* -------------------------
    Dashboard
@@ -283,10 +308,15 @@ app.use("/api/users", userRoutes);
    Inquiries
 ------------------------- */
 
-app.use("/api/inquiries", (req, res, next) => {
-  if (req.method === "POST" && req.path === "/") return inquiryLimiter(req, res, next);
-  return next();
-}, inquiryRoutes);
+app.use(
+  "/api/inquiries",
+  (req, res, next) => {
+    if (req.method === "POST" && req.path === "/")
+      return inquiryLimiter(req, res, next);
+    return next();
+  },
+  inquiryRoutes,
+);
 
 /* -------------------------
    Modules
@@ -305,6 +335,8 @@ app.use("/api/roles", roleRoutes);
 ------------------------- */
 
 app.use("/api/promotions", promotionRoutes);
+app.use("/api/grading", gradingRoutes);
+app.use("/api/certificates", certificateRoutes);
 
 /* -------------------------
    Reports
@@ -316,10 +348,7 @@ app.use("/api/reports", reportsRoutes);
    Coach Assignments
 ------------------------- */
 
-app.use(
-  "/api/coach-assignments",
-  coachAssignmentRoutes,
-);
+app.use("/api/coach-assignments", coachAssignmentRoutes);
 
 /* -------------------------
    Holidays
@@ -331,10 +360,7 @@ app.use("/api/holidays", holidayRoutes);
    Academy Settings
 ------------------------- */
 
-app.use(
-  "/api/settings",
-  academySettingRoutes,
-);
+app.use("/api/settings", academySettingRoutes);
 
 /* -------------------------
    Website CMS
@@ -346,19 +372,13 @@ app.use("/api/website", websiteRoutes);
    Public Website
 ------------------------- */
 
-app.use(
-  "/api/public/website",
-  publicWebsiteRoutes,
-);
+app.use("/api/public/website", publicWebsiteRoutes);
 
 /* =========================================================
    BRANCH SCHEDULES
 ========================================================= */
 
-app.use(
-  "/api/branch-schedules",
-  branchScheduleRoutes,
-);
+app.use("/api/branch-schedules", branchScheduleRoutes);
 app.use("/api/training-session-types", trainingSessionTypeRoutes);
 
 /* =========================================================
@@ -367,7 +387,9 @@ app.use("/api/training-session-types", trainingSessionTypeRoutes);
 
 app.get("/api/health", (req, res) => {
   const ready = mongoose.connection.readyState === 1;
-  res.status(ready ? 200 : 503).json({ success: ready, status: ready ? "ready" : "not_ready" });
+  res
+    .status(ready ? 200 : 503)
+    .json({ success: ready, status: ready ? "ready" : "not_ready" });
 });
 
 /* =========================================================
@@ -377,7 +399,10 @@ app.get("/api/health", (req, res) => {
 app.use((req, res) => {
   res.status(404).json({
     success: false,
-    message: process.env.NODE_ENV === "production" ? "Route not found" : `Route not found: ${req.method} ${req.path}`,
+    message:
+      process.env.NODE_ENV === "production"
+        ? "Route not found"
+        : `Route not found: ${req.method} ${req.path}`,
   });
 });
 
@@ -388,8 +413,7 @@ app.use((req, res) => {
 ========================================================= */
 
 app.use((error, req, res, next) => {
-  const isProduction =
-    process.env.NODE_ENV === "production";
+  const isProduction = process.env.NODE_ENV === "production";
 
   // Keep operational logs useful without logging credentials, request bodies,
   // database connection strings, or complete error objects.
@@ -401,11 +425,18 @@ app.use((error, req, res, next) => {
     name: typeof error.name === "string" ? error.name : "Error",
   });
 
-  const status = Number(error.status) >= 400 && Number(error.status) < 500 ? Number(error.status) : 500;
+  const status =
+    Number(error.status) >= 400 && Number(error.status) < 500
+      ? Number(error.status)
+      : 500;
 
   res.status(status).json({
     success: false,
-    message: isProduction ? (status < 500 ? "Request could not be processed." : "Internal server error") : error.message || "Internal server error",
+    message: isProduction
+      ? status < 500
+        ? "Request could not be processed."
+        : "Internal server error"
+      : error.message || "Internal server error",
   });
 });
 
@@ -433,41 +464,69 @@ const startServer = async () => {
     await ensureDefaultModules();
 
     // Reminder events are event-keyed, so retrying this scheduler cannot spam.
-    refreshFinanceReminders().catch((error) => console.error("Finance reminder refresh failed", { name: error?.name || "Error" }));
-    refreshEnrollmentReminders().catch((error) => console.error("Membership reminder refresh failed", { name: error?.name || "Error" }));
-    notifyOverdueFollowUps().catch((error) => console.error("Lead follow-up reminder refresh failed", { name: error?.name || "Error" }));
-    const financeReminderTimer = setInterval(() => {
-      refreshFinanceReminders().catch((error) => console.error("Finance reminder refresh failed", { name: error?.name || "Error" }));
-    }, 60 * 60 * 1000);
+    refreshFinanceReminders().catch((error) =>
+      console.error("Finance reminder refresh failed", {
+        name: error?.name || "Error",
+      }),
+    );
+    refreshEnrollmentReminders().catch((error) =>
+      console.error("Membership reminder refresh failed", {
+        name: error?.name || "Error",
+      }),
+    );
+    notifyOverdueFollowUps().catch((error) =>
+      console.error("Lead follow-up reminder refresh failed", {
+        name: error?.name || "Error",
+      }),
+    );
+    const financeReminderTimer = setInterval(
+      () => {
+        refreshFinanceReminders().catch((error) =>
+          console.error("Finance reminder refresh failed", {
+            name: error?.name || "Error",
+          }),
+        );
+      },
+      60 * 60 * 1000,
+    );
     financeReminderTimer.unref?.();
-    const membershipReminderTimer = setInterval(() => {
-      refreshEnrollmentReminders().catch((error) => console.error("Membership reminder refresh failed", { name: error?.name || "Error" }));
-    }, 60 * 60 * 1000);
+    const membershipReminderTimer = setInterval(
+      () => {
+        refreshEnrollmentReminders().catch((error) =>
+          console.error("Membership reminder refresh failed", {
+            name: error?.name || "Error",
+          }),
+        );
+      },
+      60 * 60 * 1000,
+    );
     membershipReminderTimer.unref?.();
-    const leadFollowUpTimer = setInterval(() => {
-      notifyOverdueFollowUps().catch((error) => console.error("Lead follow-up reminder refresh failed", { name: error?.name || "Error" }));
-    }, 60 * 60 * 1000);
+    const leadFollowUpTimer = setInterval(
+      () => {
+        notifyOverdueFollowUps().catch((error) =>
+          console.error("Lead follow-up reminder refresh failed", {
+            name: error?.name || "Error",
+          }),
+        );
+      },
+      60 * 60 * 1000,
+    );
     leadFollowUpTimer.unref?.();
 
     /*
      * Start HTTP server only after
      * database initialization succeeds.
      */
-    app.listen(
-      PORT,
-      "0.0.0.0",
-      () => {
-        console.log(
-          `ForceStrike server running on port ${PORT}`,
-        );
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(`ForceStrike server running on port ${PORT}`);
 
-        console.log(
-          `Branch Schedule API: /api/branch-schedules`,
-        );
-      },
-    );
+      console.log(`Branch Schedule API: /api/branch-schedules`);
+    });
   } catch (error) {
-    console.error("Failed to start ForceStrike server", { name: error?.name || "Error", code: error?.code });
+    console.error("Failed to start ForceStrike server", {
+      name: error?.name || "Error",
+      code: error?.code,
+    });
 
     process.exit(1);
   }

@@ -1,6 +1,14 @@
 const mongoose = require("mongoose");
 const Plan = require("../models/Plan");
 const TrainingSessionType = require("../models/TrainingSessionType");
+const Batch = require("../models/Batch");
+const { summarizePlanCurriculumCapacity, capacityError } = require("../services/curriculumCapacity.service");
+
+const LEGACY_PRICING_FIELDS = new Set([
+  "price", "billingFrequency", "registrationFee", "taxRate", "discounts",
+  "discountRules", "feeActive", "feeBranch", "effectiveFrom", "effectiveUntil",
+  "branchFeeOverrides", "feeName",
+]);
 
 const validatePrograms = async (programs, previousPrograms = []) => {
   if (!Array.isArray(programs) || programs.length === 0) {
@@ -117,7 +125,6 @@ const getCurriculumPlans = async (req, res) => {
           "durationUnit",
           "startingBelt",
           "progressReports",
-          "milestones",
           "curriculum",
           "programs",
           "isActive",
@@ -168,7 +175,6 @@ const getPlanCurriculum = async (req, res) => {
         "durationUnit",
         "startingBelt",
         "progressReports",
-        "milestones",
         "curriculum",
         "programs",
         "isActive",
@@ -227,29 +233,29 @@ const getPlanCurriculum = async (req, res) => {
 
 const createPlan = async (req, res) => {
   try {
+    if (Object.keys(req.body || {}).some((field) => LEGACY_PRICING_FIELDS.has(field))) {
+      return res.status(400).json({ success: false, message: "Plan pricing is managed through Fee Terms." });
+    }
     const {
       name,
-      price,
       duration,
       durationUnit,
       classesPerWeek,
       startingBelt,
       progressReports,
-      milestones,
       programs,
     } = req.body;
 
     if (
       !name ||
-      price === undefined ||
-      !duration ||
-      !durationUnit ||
-      !classesPerWeek
+      !Number.isInteger(Number(duration)) || Number(duration) < 1 ||
+      !["MONTHS", "DAYS"].includes(durationUnit) ||
+      !Number.isInteger(Number(classesPerWeek)) || Number(classesPerWeek) < 1
     ) {
       return res.status(400).json({
         success: false,
         message:
-          "Name, price, duration, durationUnit and classesPerWeek are required",
+          "Name, duration, durationUnit and classesPerWeek are required",
       });
     }
 
@@ -258,18 +264,12 @@ const createPlan = async (req, res) => {
 
     const plan = await Plan.create({
       name,
-      price,
       duration,
       durationUnit,
       classesPerWeek,
       programs: programValidation.value,
       startingBelt,
       progressReports,
-
-      /*
-       * Milestones remain part of general plan configuration.
-       */
-      milestones: Array.isArray(milestones) ? milestones : [],
 
       /*
        * Curriculum starts empty.
@@ -324,6 +324,9 @@ const createPlan = async (req, res) => {
 
 const updatePlan = async (req, res) => {
   try {
+    if (Object.keys(req.body || {}).some((field) => LEGACY_PRICING_FIELDS.has(field))) {
+      return res.status(400).json({ success: false, message: "Plan pricing is managed through Fee Terms." });
+    }
     const { id } = req.params;
 
     if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -342,6 +345,15 @@ const updatePlan = async (req, res) => {
       });
     }
 
+    const weeklyCountChanged = req.body.classesPerWeek !== undefined && Number(req.body.classesPerWeek) !== Number(plan.classesPerWeek);
+    const requestedProgramIds = Array.isArray(req.body.programs) ? req.body.programs.map((item) => String(item?.program || "")).sort() : null;
+    const existingProgramIds = (plan.programs || []).map((item) => String(item.program)).sort();
+    const programsChanged = requestedProgramIds && (requestedProgramIds.length !== existingProgramIds.length || requestedProgramIds.some((programId, index) => programId !== existingProgramIds[index]));
+    if (weeklyCountChanged || programsChanged) {
+      const activeBatches = await Batch.find({ plan: plan._id, status: "ACTIVE" }).select("name").lean();
+      if (activeBatches.length) return res.status(409).json({ success: false, message: `Pause these Batches before changing the Plan’s weekly session count or Programs, then update their schedules before reactivation: ${activeBatches.map((batch) => batch.name).join(", ")}. Existing historical Sessions will be preserved.` });
+    }
+
     /*
      * Only fields belonging to general Plan management
      * are allowed here.
@@ -350,13 +362,11 @@ const updatePlan = async (req, res) => {
      */
     const allowedFields = [
       "name",
-      "price",
       "duration",
       "durationUnit",
       "classesPerWeek",
       "startingBelt",
       "progressReports",
-      "milestones",
       "isActive",
     ];
 
@@ -372,7 +382,16 @@ const updatePlan = async (req, res) => {
       }
     });
 
+    if (!Number.isInteger(Number(plan.duration)) || Number(plan.duration) < 1 || !["MONTHS", "DAYS"].includes(plan.durationUnit) || !Number.isInteger(Number(plan.classesPerWeek)) || Number(plan.classesPerWeek) < 1) {
+      return res.status(400).json({ success: false, message: "Plan duration must be a positive whole number, the duration unit must be Months or Days, and classes per week must be a positive whole number." });
+    }
+    const proposedCapacity = await summarizePlanCurriculumCapacity(plan, { publishedOnly: true });
+    const curriculumCapacityError = capacityError({ requiredSteps: proposedCapacity.combinedSteps, maximumSessions: proposedCapacity.maximumSessions });
+    if (curriculumCapacityError) return res.status(409).json({ success: false, message: curriculumCapacityError, capacity: proposedCapacity });
+
     await plan.save();
+    try { await require("../services/batchCompletion.service").recalculateBatchCompletionsForPlan(plan._id); }
+    catch (error) { console.error("Batch completion dates could not be recalculated after Plan update", { name: error?.name || "Error" }); }
 
     return res.status(200).json({
       success: true,
@@ -542,7 +561,7 @@ const getPublicPlans = async (req, res) => {
       isActive: true,
     })
       .select(
-        "name price duration durationUnit classesPerWeek startingBelt progressReports milestones curriculum programs",
+        "name duration durationUnit classesPerWeek startingBelt progressReports curriculum programs",
       )
       .populate("programs.program", "name slug isActive")
       .sort({

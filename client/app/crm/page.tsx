@@ -36,7 +36,9 @@ import {
   Button,
   Badge,
   Card,
+  CopyButton,
   DataTableSection,
+  DataTableToolbar,
   Checkbox,
   DataFilters,
   DataSort,
@@ -53,6 +55,8 @@ import {
   TablePagination,
   Textarea,
 } from "@/components/ui";
+import EnrollmentFeeTermSelect from "@/components/finance/EnrollmentFeeTermSelect";
+import { getBatches, type BatchRecord } from "@/lib/batchApi";
 
 const API_URL = (
   process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api"
@@ -118,9 +122,12 @@ function statusLabel(value: string) {
     .toLowerCase()
     .replace(/^\w/, (letter) => letter.toUpperCase());
 }
-function statusBadgeVariant(status: string): "success" | "warning" | "danger" | "info" | "accent" | "neutral" {
+function statusBadgeVariant(
+  status: string,
+): "success" | "warning" | "danger" | "info" | "accent" | "neutral" {
   if (["CONVERTED", "ENROLLED", "COMPLETED"].includes(status)) return "success";
-  if (["LOST", "CLOSED", "NOT_INTERESTED", "MISSED"].includes(status)) return "danger";
+  if (["LOST", "CLOSED", "NOT_INTERESTED", "MISSED"].includes(status))
+    return "danger";
   if (["TRIAL_SCHEDULED", "SCHEDULED"].includes(status)) return "info";
   if (["INTERESTED", "PRESENT"].includes(status)) return "accent";
   if (status === "TRIAL_COMPLETED") return "warning";
@@ -176,6 +183,7 @@ export default function CrmPage() {
   const [summary, setSummary] = useState<CrmSummary | null>(null);
   const [plans, setPlans] = useState<PlanOption[]>([]);
   const [branches, setBranches] = useState<BranchOption[]>([]);
+  const [batches, setBatches] = useState<BatchRecord[]>([]);
   const [employees, setEmployees] = useState<StaffOption[]>([]);
   const [coaches, setCoaches] = useState<StaffOption[]>([]);
   const [programs, setPrograms] = useState<ProgramOption[]>([]);
@@ -184,6 +192,11 @@ export default function CrmPage() {
   const [error, setError] = useState("");
   const [showCreate, setShowCreate] = useState(false);
   const [modal, setModal] = useState<ModalState>(null);
+  const [convertPlan, setConvertPlan] = useState("");
+  const [convertBranch, setConvertBranch] = useState("");
+  const [convertDate, setConvertDate] = useState("");
+  const [convertFeeTerm, setConvertFeeTerm] = useState("");
+  const [convertBatch, setConvertBatch] = useState("");
   const [view, setView] = useState<ViewMode>("pipeline");
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
@@ -235,14 +248,17 @@ export default function CrmPage() {
       fetchWithSession(`${API_URL}/training-session-types`, {
         cache: "no-store",
       }).then((response) => response.json()),
+      getBatches().catch(() => []),
     ])
       .then(
-        ([branchData, staffData, programData]: [
+        ([branchData, staffData, programData, batchData]: [
           { branches?: BranchOption[] },
           { users?: StaffOption[] },
           { types?: ProgramOption[] },
+          BatchRecord[],
         ]) => {
           setBranches(branchData.branches || []);
+          setBatches(batchData);
           setEmployees(
             (staffData.users || []).filter(
               (person) =>
@@ -400,7 +416,11 @@ export default function CrmPage() {
       () =>
         convertCrmLead(modal.lead._id, {
           age: Number(form.get("age")),
-          plan: String(form.get("plan")),
+          plan: convertPlan,
+          branch: convertBranch,
+          feeTerm: convertFeeTerm,
+          batch: convertBatch || undefined,
+          joinDate: convertDate,
           createInvoice: form.get("createInvoice") === "on",
         }),
       "Lead admitted",
@@ -455,13 +475,63 @@ export default function CrmPage() {
     toDate,
   );
   const activeFilterChips = [
-    ...(statusFilter !== "ALL" ? [{ id: "status", label: `Status: ${statusLabel(statusFilter)}`, onClear: () => setStatusFilter("ALL") }] : []),
-    ...(branchFilter !== "ALL" ? [{ id: "branch", label: `Branch: ${branches.find((item) => item._id === branchFilter)?.name || "Selected"}`, onClear: () => setBranchFilter("ALL") }] : []),
-    ...(programFilter !== "ALL" ? [{ id: "program", label: `Program: ${programs.find((item) => item._id === programFilter)?.name || programFilter}`, onClear: () => setProgramFilter("ALL") }] : []),
-    ...(sourceFilter !== "ALL" ? [{ id: "source", label: `Source: ${sourceFilter}`, onClear: () => setSourceFilter("ALL") }] : []),
-    ...(assigneeFilter !== "ALL" ? [{ id: "assignee", label: `Staff: ${employees.find((item) => item._id === assigneeFilter)?.name || "Selected"}`, onClear: () => setAssigneeFilter("ALL") }] : []),
-    ...(fromDate ? [{ id: "from", label: `From: ${fromDate}`, onClear: () => setFromDate("") }] : []),
-    ...(toDate ? [{ id: "to", label: `To: ${toDate}`, onClear: () => setToDate("") }] : []),
+    ...(statusFilter !== "ALL"
+      ? [
+          {
+            id: "status",
+            label: `Status: ${statusLabel(statusFilter)}`,
+            onClear: () => setStatusFilter("ALL"),
+          },
+        ]
+      : []),
+    ...(branchFilter !== "ALL"
+      ? [
+          {
+            id: "branch",
+            label: `Branch: ${branches.find((item) => item._id === branchFilter)?.name || "Selected"}`,
+            onClear: () => setBranchFilter("ALL"),
+          },
+        ]
+      : []),
+    ...(programFilter !== "ALL"
+      ? [
+          {
+            id: "program",
+            label: `Program: ${programs.find((item) => item._id === programFilter)?.name || programFilter}`,
+            onClear: () => setProgramFilter("ALL"),
+          },
+        ]
+      : []),
+    ...(sourceFilter !== "ALL"
+      ? [
+          {
+            id: "source",
+            label: `Source: ${sourceFilter}`,
+            onClear: () => setSourceFilter("ALL"),
+          },
+        ]
+      : []),
+    ...(assigneeFilter !== "ALL"
+      ? [
+          {
+            id: "assignee",
+            label: `Staff: ${employees.find((item) => item._id === assigneeFilter)?.name || "Selected"}`,
+            onClear: () => setAssigneeFilter("ALL"),
+          },
+        ]
+      : []),
+    ...(fromDate
+      ? [
+          {
+            id: "from",
+            label: `From: ${fromDate}`,
+            onClear: () => setFromDate(""),
+          },
+        ]
+      : []),
+    ...(toDate
+      ? [{ id: "to", label: `To: ${toDate}`, onClear: () => setToDate("") }]
+      : []),
   ];
   const changeStatus = (lead: CrmLead, next: string) =>
     void run(
@@ -491,466 +561,721 @@ export default function CrmPage() {
   return (
     <main>
       <div className="df-page">
-      <PageHeader
-        eyebrow="Admissions CRM"
-        title="Leads & Trials"
-        description="A clear view of every prospect, from first contact to admission."
-        actions={
-          <>
-            <Button variant="outline" onClick={() => { setLoading(true); void refresh(); }} disabled={busy}>
-              <RefreshCw className="h-4 w-4" />
-              Refresh
-            </Button>
-            <Button onClick={() => setShowCreate((value) => !value)}>
-              <Plus className="h-4 w-4" />
-              Add lead
-            </Button>
-          </>
-        }
-      />
-      {error && (
-        <ErrorState
-          className=""
-          title="Could not load CRM"
-          message={error}
-          action={<Button variant="outline" onClick={() => void refresh()}>Retry</Button>}
+        <PageHeader
+          eyebrow="Admissions CRM"
+          title="Leads & Trials"
+          description="A clear view of every prospect, from first contact to admission."
+          actions={
+            <>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setLoading(true);
+                  void refresh();
+                }}
+                disabled={busy}
+              >
+                <RefreshCw className="h-4 w-4" />
+                Refresh
+              </Button>
+              <Button onClick={() => setShowCreate((value) => !value)}>
+                <Plus className="h-4 w-4" />
+                Add lead
+              </Button>
+            </>
+          }
         />
-      )}
+        {error && (
+          <ErrorState
+            className=""
+            title="Could not load CRM"
+            message={error}
+            action={
+              <Button variant="outline" onClick={() => void refresh()}>
+                Retry
+              </Button>
+            }
+          />
+        )}
 
-      {summary && (
-        <section
-          aria-label="CRM overview"
-          className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4"
-        >
-          {(
-            [
-              { label: "New leads", value: summary.newLeads, subtitle: "Ready for first contact", Icon: Users },
-              {
-                label: "Trials this month",
-                value: summary.trials,
-                subtitle: "Trial sessions scheduled",
-                Icon: CalendarPlus,
-              },
-              {
-                label: "Trial conversion",
-                value: `${summary.trialConversionRate}%`,
-                subtitle: "Completed trials converted",
-                Icon: Check,
-              },
-              { label: "Admissions", value: summary.admissions, subtitle: "New student admissions", Icon: Check },
-              {
-                label: "Lead conversion",
-                value: `${summary.conversionRate}%`,
-                subtitle: "Leads converted",
-                Icon: ChevronRight,
-              },
-              {
-                label: "Lost leads",
-                value: summary.lostLeads,
-                subtitle: "Lost or not interested",
-                Icon: AlertTriangle,
-              },
-              {
-                label: "Pending follow-ups",
-                value: summary.pendingFollowUps,
-                subtitle: "Follow-ups awaiting action",
-                Icon: Clock3,
-              },
-            ] as { label: string; value: string | number; subtitle: string; Icon: LucideIcon }[]
-          ).map(({ label, value, subtitle, Icon }) => (
-            <SummaryCard
-              key={label}
-              title={label}
-              value={value}
-              subtitle={subtitle}
-              icon={<Icon className="h-5 w-5" />}
-            />
-          ))}
-        </section>
-      )}
-
-      {showCreate && (
-        <Card>
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="font-bold">Add a lead</h2>
-            <IconButton label="Close add lead form" size="sm" variant="ghost" onClick={() => setShowCreate(false)}><X className="h-4 w-4" /></IconButton>
-          </div>
-          <form
-            onSubmit={handleCreateLead}
-            className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6"
+        {summary && (
+          <section
+            aria-label="CRM overview"
+            className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4"
           >
-            <Input
-              name="name"
-              required
-              minLength={2}
-              placeholder="Lead name"
-              aria-label="Lead name"
-            />
-            <Input
-              name="phone"
-              required
-              placeholder="Phone number"
-              aria-label="Phone number"
-            />
-            <Input
-              name="email"
-              type="email"
-              placeholder="Email (optional)"
-              aria-label="Email"
-            />
-            <Input
-              name="source"
-              placeholder="Source (e.g. referral)"
-              aria-label="Source"
-            />
-            <Select
-              name="branch"
-              required
-              aria-label="Branch"
-              className="min-w-0"
-            >
-              <option value="">Select branch</option>
-              {branches.map((branch) => (
-                <option key={branch._id} value={branch._id}>
-                  {branch.name}
-                </option>
-              ))}
-            </Select>
-            <Input
-              name="notes"
-              placeholder="Notes (optional)"
-              aria-label="Lead notes"
-            />
-            <Button type="submit" disabled={busy}>
-              Save lead
-            </Button>
-          </form>
-        </Card>
-      )}
+            {(
+              [
+                {
+                  label: "New leads",
+                  value: summary.newLeads,
+                  subtitle: "Ready for first contact",
+                  Icon: Users,
+                },
+                {
+                  label: "Trials this month",
+                  value: summary.trials,
+                  subtitle: "Trial sessions scheduled",
+                  Icon: CalendarPlus,
+                },
+                {
+                  label: "Trial conversion",
+                  value: `${summary.trialConversionRate}%`,
+                  subtitle: "Completed trials converted",
+                  Icon: Check,
+                },
+                {
+                  label: "Admissions",
+                  value: summary.admissions,
+                  subtitle: "New student admissions",
+                  Icon: Check,
+                },
+                {
+                  label: "Lead conversion",
+                  value: `${summary.conversionRate}%`,
+                  subtitle: "Leads converted",
+                  Icon: ChevronRight,
+                },
+                {
+                  label: "Lost leads",
+                  value: summary.lostLeads,
+                  subtitle: "Lost or not interested",
+                  Icon: AlertTriangle,
+                },
+                {
+                  label: "Pending follow-ups",
+                  value: summary.pendingFollowUps,
+                  subtitle: "Follow-ups awaiting action",
+                  Icon: Clock3,
+                },
+              ] as {
+                label: string;
+                value: string | number;
+                subtitle: string;
+                Icon: LucideIcon;
+              }[]
+            ).map(({ label, value, subtitle, Icon }) => (
+              <SummaryCard
+                key={label}
+                title={label}
+                value={value}
+                subtitle={subtitle}
+                icon={<Icon className="h-5 w-5" />}
+              />
+            ))}
+          </section>
+        )}
 
-      {summary && (
-        <section className="grid gap-3 xl:grid-cols-3">
-          <Card padding="sm">
-            <div className="mb-2 flex items-center justify-between">
-              <h2 className="text-sm font-bold">Lead funnel</h2>
-              <span className="text-xs text-(--ink-muted)">
-                {leads.length} total
-              </span>
+        {showCreate && (
+          <Card>
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="font-bold">Add a lead</h2>
+              <IconButton
+                label="Close add lead form"
+                size="sm"
+                variant="ghost"
+                onClick={() => setShowCreate(false)}
+              >
+                <X className="h-4 w-4" />
+              </IconButton>
             </div>
-            <div className="space-y-1.5">
-              {summary.funnel.map((stage) => (
-                <div
-                  key={stage.status}
-                  className="flex items-center gap-2 text-xs"
-                >
-                  <span className="w-28 truncate text-(--ink-muted)">
-                    {STAGES.find((item) => item.id === stage.status)?.label ||
-                      statusLabel(stage.status)}
-                  </span>
-                  <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-(--line)">
-                    <div
-                      className="h-full rounded-full bg-(--accent)"
-                      style={{
-                        width: `${Math.max(stage.count ? 4 : 0, leads.length ? (stage.count / leads.length) * 100 : 0)}%`,
-                      }}
-                    />
+            <form
+              onSubmit={handleCreateLead}
+              className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6"
+            >
+              <Input
+                name="name"
+                required
+                minLength={2}
+                placeholder="Lead name"
+                aria-label="Lead name"
+              />
+              <Input
+                name="phone"
+                required
+                placeholder="Phone number"
+                aria-label="Phone number"
+              />
+              <Input
+                name="email"
+                type="email"
+                placeholder="Email (optional)"
+                aria-label="Email"
+              />
+              <Input
+                name="source"
+                placeholder="Source (e.g. referral)"
+                aria-label="Source"
+              />
+              <Select
+                name="branch"
+                required
+                aria-label="Branch"
+                className="min-w-0"
+              >
+                <option value="">Select branch</option>
+                {branches.map((branch) => (
+                  <option key={branch._id} value={branch._id}>
+                    {branch.name}
+                  </option>
+                ))}
+              </Select>
+              <Input
+                name="notes"
+                placeholder="Notes (optional)"
+                aria-label="Lead notes"
+              />
+              <Button type="submit" disabled={busy}>
+                Save lead
+              </Button>
+            </form>
+          </Card>
+        )}
+
+        {summary && (
+          <section className="grid gap-3 xl:grid-cols-3">
+            <Card padding="sm">
+              <div className="mb-2 flex items-center justify-between">
+                <h2 className="text-sm font-bold">Lead funnel</h2>
+                <span className="text-xs text-(--ink-muted)">
+                  {leads.length} total
+                </span>
+              </div>
+              <div className="space-y-1.5">
+                {summary.funnel.map((stage) => (
+                  <div
+                    key={stage.status}
+                    className="flex items-center gap-2 text-xs"
+                  >
+                    <span className="w-28 truncate text-(--ink-muted)">
+                      {STAGES.find((item) => item.id === stage.status)?.label ||
+                        statusLabel(stage.status)}
+                    </span>
+                    <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-(--line)">
+                      <div
+                        className="h-full rounded-full bg-(--accent)"
+                        style={{
+                          width: `${Math.max(stage.count ? 4 : 0, leads.length ? (stage.count / leads.length) * 100 : 0)}%`,
+                        }}
+                      />
+                    </div>
+                    <b className="w-7 text-right">{stage.count}</b>
                   </div>
-                  <b className="w-7 text-right">{stage.count}</b>
-                </div>
+                ))}
+              </div>
+            </Card>
+            <Card padding="sm" className="flex h-full flex-col">
+              <h2 className="mb-2 text-sm font-bold">Monthly admissions</h2>
+              <div className="flex min-h-[150px] flex-1 items-end gap-2">
+                {summary.monthlyAdmissions.map((month) => {
+                  const max = Math.max(
+                    1,
+                    ...summary.monthlyAdmissions.map((row) => row.admissions),
+                  );
+                  return (
+                    <div
+                      key={month.month}
+                      className="flex h-full flex-1 flex-col items-center justify-end gap-0.5"
+                    >
+                      <span className="text-[10px]">{month.admissions}</span>
+                      <div
+                        className="w-full max-w-7 rounded-t bg-(--accent)"
+                        style={{
+                          height: `${Math.max(month.admissions ? 10 : 2, (month.admissions / max) * 65)}%`,
+                        }}
+                      />
+                      <span className="text-[10px] text-(--ink-muted)">
+                        {month.month}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </Card>
+            <Card padding="sm">
+              <h2 className="mb-2 text-sm font-bold">Branch conversion</h2>
+              <div className="space-y-2">
+                {summary.branchConversions.length ? (
+                  summary.branchConversions.slice(0, 4).map((row) => (
+                    <div key={row.branch}>
+                      <div className="mb-0.5 flex justify-between gap-2 text-xs">
+                        <span className="truncate">{row.branch}</span>
+                        <span>
+                          {row.conversions}/{row.leads} · {row.conversionRate}%
+                        </span>
+                      </div>
+                      <div className="h-1.5 overflow-hidden rounded-full bg-(--line)">
+                        <div
+                          className="h-full rounded-full bg-emerald-500"
+                          style={{ width: `${row.conversionRate}%` }}
+                        />
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-xs text-(--ink-muted)">
+                    No branch data yet.
+                  </p>
+                )}
+              </div>
+            </Card>
+          </section>
+        )}
+
+        <DataTableSection
+          title="All leads"
+          description="View and manage every prospect in your academy."
+          icon={<Users size={18} />}
+          toolbar={
+            <DataTableToolbar>
+              <div data-toolbar-search className="relative w-full lg:w-[340px]">
+                <Search
+                  size={17}
+                  aria-hidden="true"
+                  className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-(--ink-faint)"
+                />
+                <Input
+                  type="search"
+                  value={query}
+                  onChange={(event) => {
+                    setQuery(event.target.value);
+                    setListPage(1);
+                  }}
+                  placeholder="Search name, phone, email, branch..."
+                  aria-label="Search leads"
+                  className="h-11 pl-10"
+                />
+                {query && (
+                  <IconButton
+                    type="button"
+                    label="Clear search"
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => {
+                      setQuery("");
+                      setListPage(1);
+                    }}
+                    className="absolute right-2.5 top-1/2 h-7 w-7 -translate-y-1/2"
+                  >
+                    <X size={15} />
+                  </IconButton>
+                )}
+              </div>
+              <div className="contents">
+                <DataFilters
+                  activeFilters={activeFilterChips}
+                  onClearAll={clearFilters}
+                  label="Filters"
+                  panelWidth={390}
+                  responsiveToolbar
+                >
+                  <label className="grid gap-1 text-xs font-semibold text-(--ink-muted)">
+                    Status
+                    <Select
+                      aria-label="Filter by status"
+                      value={statusFilter}
+                      onChange={(event) => setStatusFilter(event.target.value)}
+                    >
+                      <option value="ALL">All statuses</option>
+                      {[
+                        ...STAGES.map((stage) => stage.id),
+                        "NOT_INTERESTED",
+                        "LOST",
+                      ].map((value) => (
+                        <option key={value} value={value}>
+                          {statusLabel(value)}
+                        </option>
+                      ))}
+                    </Select>
+                  </label>
+                  <label className="grid gap-1 text-xs font-semibold text-(--ink-muted)">
+                    Branch
+                    <Select
+                      aria-label="Filter by branch"
+                      value={branchFilter}
+                      onChange={(event) => setBranchFilter(event.target.value)}
+                    >
+                      <option value="ALL">All branches</option>
+                      {branches.map((branch) => (
+                        <option key={branch._id} value={branch._id}>
+                          {branch.name}
+                        </option>
+                      ))}
+                    </Select>
+                  </label>
+                  <label className="grid gap-1 text-xs font-semibold text-(--ink-muted)">
+                    Program
+                    <Select
+                      aria-label="Filter by program"
+                      value={programFilter}
+                      onChange={(event) => setProgramFilter(event.target.value)}
+                    >
+                      <option value="ALL">All programs</option>
+                      {programs.map((program) => (
+                        <option key={program._id} value={program._id}>
+                          {program.name}
+                        </option>
+                      ))}
+                    </Select>
+                  </label>
+                  <label className="grid gap-1 text-xs font-semibold text-(--ink-muted)">
+                    Source
+                    <Select
+                      aria-label="Filter by source"
+                      value={sourceFilter}
+                      onChange={(event) => setSourceFilter(event.target.value)}
+                    >
+                      <option value="ALL">All sources</option>
+                      {sources.map((source) => (
+                        <option key={source} value={source}>
+                          {source}
+                        </option>
+                      ))}
+                    </Select>
+                  </label>
+                  <label className="grid gap-1 text-xs font-semibold text-(--ink-muted)">
+                    Assigned staff
+                    <Select
+                      aria-label="Filter by assigned staff"
+                      value={assigneeFilter}
+                      onChange={(event) =>
+                        setAssigneeFilter(event.target.value)
+                      }
+                    >
+                      <option value="ALL">All staff</option>
+                      {employees.map((person) => (
+                        <option key={person._id} value={person._id}>
+                          {person.name}
+                        </option>
+                      ))}
+                    </Select>
+                  </label>
+                  <label className="grid gap-1 text-xs font-semibold text-(--ink-muted)">
+                    Created from
+                    <Input
+                      type="date"
+                      aria-label="Created from"
+                      value={fromDate}
+                      onChange={(event) => setFromDate(event.target.value)}
+                    />
+                  </label>
+                  <label className="grid gap-1 text-xs font-semibold text-(--ink-muted)">
+                    Created to
+                    <Input
+                      type="date"
+                      aria-label="Created to"
+                      value={toDate}
+                      onChange={(event) => setToDate(event.target.value)}
+                    />
+                  </label>
+                </DataFilters>
+                <DataSort
+                  value={sort}
+                  onChange={setSort}
+                  options={[
+                    { value: "newest", label: "Newest first" },
+                    { value: "oldest", label: "Oldest first" },
+                    { value: "followup", label: "Next follow-up" },
+                    { value: "name", label: "Name A–Z" },
+                  ]}
+                />
+              </div>
+            </DataTableToolbar>
+          }
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2 px-5 py-3 sm:px-6">
+            <p className="text-sm text-(--ink-muted)">
+              {hasFilters
+                ? `Showing ${filteredLeads.length} of ${leads.length} leads`
+                : `${leads.length} leads`}{" "}
+              · {trials.length} trials
+            </p>
+            <div
+              className="flex rounded-lg border border-(--line) p-0.5"
+              role="group"
+              aria-label="Lead view"
+            >
+              {viewButtons.map(({ mode, label, Icon }) => (
+                <Button
+                  key={mode}
+                  type="button"
+                  onClick={() => {
+                    setView(mode);
+                    setListPage(1);
+                  }}
+                  aria-pressed={view === mode}
+                  size="sm"
+                  variant={view === mode ? "secondary" : "ghost"}
+                  className="h-8 px-2.5"
+                >
+                  <Icon className="h-3.5 w-3.5" />
+                  {label}
+                </Button>
               ))}
             </div>
-          </Card>
-          <Card padding="sm" className="flex h-full flex-col">
-            <h2 className="mb-2 text-sm font-bold">Monthly admissions</h2>
-            <div className="flex min-h-[150px] flex-1 items-end gap-2">
-              {summary.monthlyAdmissions.map((month) => {
-                const max = Math.max(
-                  1,
-                  ...summary.monthlyAdmissions.map((row) => row.admissions),
-                );
+          </div>
+        </DataTableSection>
+
+        {view === "pipeline" && (
+          <h2 className="mb-3 text-lg font-bold">Pipeline</h2>
+        )}
+
+        {view === "pipeline" && (
+          <section
+            aria-label="Lead pipeline"
+            className="max-w-full overflow-x-auto overflow-y-hidden rounded-xl pb-2 [scrollbar-color:var(--line)_transparent] [scrollbar-width:thin]"
+          >
+            <div className="grid h-[min(66vh,680px)] min-h-[390px] w-max min-w-full grid-flow-col auto-cols-[minmax(248px,290px)] gap-3 2xl:w-full 2xl:auto-cols-fr 2xl:grid-flow-col 2xl:grid-cols-6">
+              {STAGES.map((stage) => {
+                const rows = filteredByStage.get(stage.id) || [];
+                const baseCount = 6;
+                const shownCount = expandedStages[stage.id] || baseCount;
+                const visible = rows.slice(0, shownCount);
                 return (
-                  <div
-                    key={month.month}
-                    className="flex h-full flex-1 flex-col items-center justify-end gap-0.5"
+                  <section
+                    key={stage.id}
+                    aria-label={`${stage.label}: ${rows.length} leads`}
+                    className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-(--line) bg-(--surface-subtle)"
                   >
-                    <span className="text-[10px]">{month.admissions}</span>
-                    <div
-                      className="w-full max-w-7 rounded-t bg-(--accent)"
-                      style={{
-                        height: `${Math.max(month.admissions ? 10 : 2, (month.admissions / max) * 65)}%`,
-                      }}
-                    />
-                    <span className="text-[10px] text-(--ink-muted)">
-                      {month.month}
-                    </span>
-                  </div>
+                    <header className="shrink-0 border-b border-(--line) bg-(--card) px-3 py-2.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <span
+                            className={`h-2 w-2 shrink-0 rounded-full ${stage.color}`}
+                          />
+                          <h3 className="truncate text-sm font-bold">
+                            {stage.label}
+                          </h3>
+                        </div>
+                        <span className="rounded-full bg-(--surface-subtle) px-2 py-0.5 text-xs font-semibold">
+                          {rows.length}
+                        </span>
+                      </div>
+                      {hasFilters && (
+                        <p className="mt-1 text-[10px] text-(--ink-muted)">
+                          {rows.length} matched
+                        </p>
+                      )}
+                    </header>
+                    <div className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain p-2.5 [scrollbar-color:var(--line)_transparent] [scrollbar-width:thin]">
+                      {visible.map((lead) => (
+                        <LeadCard
+                          key={lead._id}
+                          lead={lead}
+                          trialsCount={trialsByLead.get(lead._id)?.length || 0}
+                          onOpen={() => setModal({ kind: "details", lead })}
+                        />
+                      ))}
+                      {rows.length === 0 && (
+                        <p className="rounded-lg border border-dashed border-(--line) px-3 py-5 text-center text-xs text-(--ink-muted)">
+                          {hasFilters
+                            ? "No matching leads"
+                            : "No leads in this stage"}
+                        </p>
+                      )}
+                      {rows.length > visible.length && (
+                        <button
+                          onClick={() =>
+                            setExpandedStages((current) => ({
+                              ...current,
+                              [stage.id]: shownCount + 10,
+                            }))
+                          }
+                          className="w-full rounded-lg border border-dashed border-(--line) px-3 py-2 text-xs font-medium text-(--ink-muted) hover:bg-(--card)"
+                        >
+                          Show next {Math.min(10, rows.length - visible.length)}{" "}
+                          · {rows.length - visible.length} remaining
+                        </button>
+                      )}
+                    </div>
+                  </section>
                 );
               })}
             </div>
-          </Card>
-          <Card padding="sm">
-            <h2 className="mb-2 text-sm font-bold">Branch conversion</h2>
-            <div className="space-y-2">
-              {summary.branchConversions.length ? (
-                summary.branchConversions.slice(0, 4).map((row) => (
-                  <div key={row.branch}>
-                    <div className="mb-0.5 flex justify-between gap-2 text-xs">
-                      <span className="truncate">{row.branch}</span>
-                      <span>
-                        {row.conversions}/{row.leads} · {row.conversionRate}%
-                      </span>
-                    </div>
-                    <div className="h-1.5 overflow-hidden rounded-full bg-(--line)">
-                      <div
-                        className="h-full rounded-full bg-emerald-500"
-                        style={{ width: `${row.conversionRate}%` }}
-                      />
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <p className="text-xs text-(--ink-muted)">
-                  No branch data yet.
-                </p>
-              )}
-            </div>
-          </Card>
-        </section>
-      )}
+          </section>
+        )}
 
-      <DataTableSection title="All leads" description="View and manage every prospect in your academy." icon={<Users size={18} />} toolbar={
-          <div className="flex w-full flex-col gap-2 lg:w-auto lg:flex-row lg:items-start">
-            <div className="relative w-full lg:w-[340px]">
-              <Search size={17} aria-hidden="true" className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-(--ink-faint)" />
-              <Input type="search" value={query} onChange={(event) => { setQuery(event.target.value); setListPage(1); }} placeholder="Search name, phone, email, branch..." aria-label="Search leads" className="h-11 pl-10" />
-              {query && <IconButton type="button" label="Clear search" size="sm" variant="ghost" onClick={() => { setQuery(""); setListPage(1); }} className="absolute right-2.5 top-1/2 h-7 w-7 -translate-y-1/2"><X size={15} /></IconButton>}
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-            <DataFilters activeFilters={activeFilterChips} onClearAll={clearFilters} label="Filters" panelWidth={390}>
-              <label className="grid gap-1 text-xs font-semibold text-(--ink-muted)">Status<Select aria-label="Filter by status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="ALL">All statuses</option>{[...STAGES.map((stage) => stage.id), "NOT_INTERESTED", "LOST"].map((value) => <option key={value} value={value}>{statusLabel(value)}</option>)}</Select></label>
-              <label className="grid gap-1 text-xs font-semibold text-(--ink-muted)">Branch<Select aria-label="Filter by branch" value={branchFilter} onChange={(event) => setBranchFilter(event.target.value)}><option value="ALL">All branches</option>{branches.map((branch) => <option key={branch._id} value={branch._id}>{branch.name}</option>)}</Select></label>
-              <label className="grid gap-1 text-xs font-semibold text-(--ink-muted)">Program<Select aria-label="Filter by program" value={programFilter} onChange={(event) => setProgramFilter(event.target.value)}><option value="ALL">All programs</option>{programs.map((program) => <option key={program._id} value={program._id}>{program.name}</option>)}</Select></label>
-              <label className="grid gap-1 text-xs font-semibold text-(--ink-muted)">Source<Select aria-label="Filter by source" value={sourceFilter} onChange={(event) => setSourceFilter(event.target.value)}><option value="ALL">All sources</option>{sources.map((source) => <option key={source} value={source}>{source}</option>)}</Select></label>
-              <label className="grid gap-1 text-xs font-semibold text-(--ink-muted)">Assigned staff<Select aria-label="Filter by assigned staff" value={assigneeFilter} onChange={(event) => setAssigneeFilter(event.target.value)}><option value="ALL">All staff</option>{employees.map((person) => <option key={person._id} value={person._id}>{person.name}</option>)}</Select></label>
-              <label className="grid gap-1 text-xs font-semibold text-(--ink-muted)">Created from<Input type="date" aria-label="Created from" value={fromDate} onChange={(event) => setFromDate(event.target.value)} /></label>
-              <label className="grid gap-1 text-xs font-semibold text-(--ink-muted)">Created to<Input type="date" aria-label="Created to" value={toDate} onChange={(event) => setToDate(event.target.value)} /></label>
-            </DataFilters>
-            <DataSort value={sort} onChange={setSort} options={[{ value: "newest", label: "Newest first" }, { value: "oldest", label: "Oldest first" }, { value: "followup", label: "Next follow-up" }, { value: "name", label: "Name A–Z" }]} />
-          </div>
-          </div>
-      }>
-        <div className="flex flex-wrap items-center justify-between gap-2 px-5 py-3 sm:px-6">
-          <p className="text-sm text-(--ink-muted)">
-            {hasFilters
-              ? `Showing ${filteredLeads.length} of ${leads.length} leads`
-              : `${leads.length} leads`}{" "}
-            · {trials.length} trials
-          </p>
-          <div
-            className="flex rounded-lg border border-(--line) p-0.5"
-            role="group"
-            aria-label="Lead view"
-          >
-            {viewButtons.map(({ mode, label, Icon }) => (
-              <Button
-                key={mode}
-                type="button"
-                onClick={() => {
-                  setView(mode);
-                  setListPage(1);
-                }}
-                aria-pressed={view === mode}
-                size="sm"
-                variant={view === mode ? "secondary" : "ghost"}
-                className="h-8 px-2.5"
-              >
-                <Icon className="h-3.5 w-3.5" />
-                {label}
-              </Button>
+        {view === "list" && (
+          <section className="space-y-2">
+            {visibleList.map((lead) => (
+              <LeadRow
+                key={lead._id}
+                lead={lead}
+                trialsCount={trialsByLead.get(lead._id)?.length || 0}
+                onOpen={() => setModal({ kind: "details", lead })}
+              />
             ))}
-          </div>
-        </div>
-      </DataTableSection>
-
-      {view === "pipeline" && <h2 className="mb-3 text-lg font-bold">Pipeline</h2>}
-
-      {view === "pipeline" && (
-        <section
-          aria-label="Lead pipeline"
-          className="max-w-full overflow-x-auto overflow-y-hidden rounded-xl pb-2 [scrollbar-color:var(--line)_transparent] [scrollbar-width:thin]"
-        >
-          <div className="grid h-[min(66vh,680px)] min-h-[390px] w-max min-w-full grid-flow-col auto-cols-[minmax(248px,290px)] gap-3 2xl:w-full 2xl:auto-cols-fr 2xl:grid-flow-col 2xl:grid-cols-6">
-            {STAGES.map((stage) => {
-              const rows = filteredByStage.get(stage.id) || [];
-              const baseCount = 6;
-              const shownCount = expandedStages[stage.id] || baseCount;
-              const visible = rows.slice(0, shownCount);
-              return (
-                <section
-                  key={stage.id}
-                  aria-label={`${stage.label}: ${rows.length} leads`}
-                  className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-(--line) bg-(--surface-subtle)"
-                >
-                  <header className="shrink-0 border-b border-(--line) bg-(--card) px-3 py-2.5">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex min-w-0 items-center gap-2">
-                        <span
-                          className={`h-2 w-2 shrink-0 rounded-full ${stage.color}`}
-                        />
-                        <h3 className="truncate text-sm font-bold">
-                          {stage.label}
-                        </h3>
-                      </div>
-                      <span className="rounded-full bg-(--surface-subtle) px-2 py-0.5 text-xs font-semibold">
-                        {rows.length}
-                      </span>
-                    </div>
-                    {hasFilters && (
-                      <p className="mt-1 text-[10px] text-(--ink-muted)">
-                        {rows.length} matched
-                      </p>
-                    )}
-                  </header>
-                  <div className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain p-2.5 [scrollbar-color:var(--line)_transparent] [scrollbar-width:thin]">
-                    {visible.map((lead) => (
-                      <LeadCard
-                        key={lead._id}
-                        lead={lead}
-                        trialsCount={trialsByLead.get(lead._id)?.length || 0}
-                        onOpen={() => setModal({ kind: "details", lead })}
-                      />
-                    ))}
-                    {rows.length === 0 && (
-                      <p className="rounded-lg border border-dashed border-(--line) px-3 py-5 text-center text-xs text-(--ink-muted)">
-                        {hasFilters
-                          ? "No matching leads"
-                          : "No leads in this stage"}
-                      </p>
-                    )}
-                    {rows.length > visible.length && (
-                      <button
-                        onClick={() =>
-                          setExpandedStages((current) => ({
-                            ...current,
-                            [stage.id]: shownCount + 10,
-                          }))
-                        }
-                        className="w-full rounded-lg border border-dashed border-(--line) px-3 py-2 text-xs font-medium text-(--ink-muted) hover:bg-(--card)"
-                      >
-                        Show next {Math.min(10, rows.length - visible.length)} ·{" "}
-                        {rows.length - visible.length} remaining
-                      </button>
-                    )}
-                  </div>
-                </section>
-              );
-            })}
-          </div>
-        </section>
-      )}
-
-      {view === "list" && (
-        <section className="space-y-2">
-          {visibleList.map((lead) => (
-            <LeadRow
-              key={lead._id}
-              lead={lead}
-              trialsCount={trialsByLead.get(lead._id)?.length || 0}
-              onOpen={() => setModal({ kind: "details", lead })}
-            />
-          ))}
-          {visibleList.length === 0 && <EmptyState title="No leads found" description="Try changing your search or filters." />}
-        </section>
-      )}
-      {view === "table" && (
-        <Card padding="none" className="overflow-hidden">
-          <div className="hidden overflow-x-auto md:block">
-            <table className="w-full min-w-[1080px]">
-              <thead className="border-b border-(--line) bg-(--surface)">
-                <tr>
-                  <TableHeading>Lead</TableHeading>
-                  <TableHeading>Contact</TableHeading>
-                  <TableHeading>Program / Branch</TableHeading>
-                  <TableHeading>Assigned</TableHeading>
-                  <TableHeading>Status</TableHeading>
-                  <TableHeading>Follow-up</TableHeading>
-                  <TableHeading>Created</TableHeading>
-                  <TableHeading align="right">Action</TableHeading>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-(--line)">
-                {visibleList.map((lead) => (
-                  <tr key={lead._id} className="group transition-colors duration-200 hover:bg-(--surface)">
-                    <td className="px-6 py-5">
-                      <button
-                        onClick={() => setModal({ kind: "details", lead })}
-                        className="flex items-center gap-3 text-left"
-                      >
-                        <LeadAvatar name={lead.fullName} />
-                        <span className="min-w-0">
-                          <span className="block truncate text-[15px] font-semibold leading-5 text-(--foreground-soft) transition-colors group-hover:text-(--accent)">{lead.fullName}</span>
-                          <span className="mt-1 block text-sm leading-5 text-(--ink-muted)">{lead.source || "Lead"}</span>
-                        </span>
-                      </button>
-                    </td>
-                    <td className="px-6 py-5"><p className="text-[15px] font-medium leading-5 text-(--foreground-soft)">{lead.phone}</p><p className="mt-1 max-w-[220px] truncate text-sm leading-5 text-(--ink-muted)">{lead.email || "No email"}</p></td>
-                    <td className="px-6 py-5"><p className="text-[15px] font-medium leading-5 text-(--foreground-soft)">{lead.programName || "No program"}</p><p className="mt-1 text-sm leading-5 text-(--ink-muted)">{branchName(lead)}</p></td>
-                    <td className="px-6 py-5 text-[15px] leading-5 text-(--foreground-soft)">{lead.assignedTo?.name || "Unassigned"}</td>
-                    <td className="px-6 py-5"><Badge variant={statusBadgeVariant(leadStage(lead.status))}>{statusLabel(leadStage(lead.status))}</Badge></td>
-                    <td className={`px-6 py-5 text-[15px] leading-5 ${overdue(lead) ? "text-(--danger)" : "text-(--foreground-soft)"}`}>
-                      {lead.nextFollowUpAt ? dateLabel(lead.nextFollowUpAt) : "No follow-up"}
-                      {overdue(lead) && <AlertTriangle className="ml-1 inline h-3.5 w-3.5" />}
-                    </td>
-                    <td className="whitespace-nowrap px-6 py-5 text-[15px] leading-5 text-(--foreground-soft)">{dateLabel(lead.createdAt)}</td>
-                    <td className="px-6 py-5 text-right"><IconButton label={`View ${lead.fullName}`} title={`View ${lead.fullName}`} onClick={() => setModal({ kind: "details", lead })}><ArrowUpRight size={16} /></IconButton></td>
+            {visibleList.length === 0 && (
+              <EmptyState
+                title="No leads found"
+                description="Try changing your search or filters."
+              />
+            )}
+          </section>
+        )}
+        {view === "table" && (
+          <Card padding="none" className="overflow-hidden">
+            <div className="hidden overflow-x-auto md:block">
+              <table className="w-full min-w-[1080px]">
+                <thead className="border-b border-(--line) bg-(--surface)">
+                  <tr>
+                    <TableHeading>Lead</TableHeading>
+                    <TableHeading>Contact</TableHeading>
+                    <TableHeading>Program / Branch</TableHeading>
+                    <TableHeading>Assigned</TableHeading>
+                    <TableHeading>Status</TableHeading>
+                    <TableHeading>Follow-up</TableHeading>
+                    <TableHeading>Created</TableHeading>
+                    <TableHeading align="right">Action</TableHeading>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <div className="space-y-3 p-4 md:hidden">{visibleList.map((lead) => <LeadRow key={lead._id} lead={lead} trialsCount={trialsByLead.get(lead._id)?.length || 0} onOpen={() => setModal({ kind: "details", lead })} />)}</div>
-          {visibleList.length === 0 && <div className="p-5"><EmptyState title="No leads found" description="Try changing your search or filters." icon={<Users size={22} />} /></div>}
-        </Card>
-      )}
+                </thead>
+                <tbody className="divide-y divide-(--line)">
+                  {visibleList.map((lead) => (
+                    <tr
+                      key={lead._id}
+                      className="group transition-colors duration-200 hover:bg-(--surface)"
+                    >
+                      <td className="px-6 py-5">
+                        <button
+                          onClick={() => setModal({ kind: "details", lead })}
+                          className="flex items-center gap-3 text-left"
+                        >
+                          <LeadAvatar name={lead.fullName} />
+                          <span className="min-w-0">
+                            <span className="block truncate text-[15px] font-semibold leading-5 text-(--foreground-soft) transition-colors group-hover:text-(--accent)">
+                              {lead.fullName}
+                            </span>
+                            <span className="mt-1 block text-sm leading-5 text-(--ink-muted)">
+                              {lead.source || "Lead"}
+                            </span>
+                          </span>
+                        </button>
+                      </td>
+                      <td className="px-6 py-5">
+                        <p className="text-[15px] font-medium leading-5 text-(--foreground-soft)">
+                          {lead.phone}
+                        </p>
+                        <p className="mt-1 max-w-[220px] truncate text-sm leading-5 text-(--ink-muted)">
+                          {lead.email || "No email"}
+                        </p>
+                      </td>
+                      <td className="px-6 py-5">
+                        <p className="text-[15px] font-medium leading-5 text-(--foreground-soft)">
+                          {lead.programName || "No program"}
+                        </p>
+                        <p className="mt-1 text-sm leading-5 text-(--ink-muted)">
+                          {branchName(lead)}
+                        </p>
+                      </td>
+                      <td className="px-6 py-5 text-[15px] leading-5 text-(--foreground-soft)">
+                        {lead.assignedTo?.name || "Unassigned"}
+                      </td>
+                      <td className="px-6 py-5">
+                        <Badge
+                          variant={statusBadgeVariant(leadStage(lead.status))}
+                        >
+                          {statusLabel(leadStage(lead.status))}
+                        </Badge>
+                      </td>
+                      <td
+                        className={`px-6 py-5 text-[15px] leading-5 ${overdue(lead) ? "text-(--danger)" : "text-(--foreground-soft)"}`}
+                      >
+                        {lead.nextFollowUpAt
+                          ? dateLabel(lead.nextFollowUpAt)
+                          : "No follow-up"}
+                        {overdue(lead) && (
+                          <AlertTriangle className="ml-1 inline h-3.5 w-3.5" />
+                        )}
+                      </td>
+                      <td className="whitespace-nowrap px-6 py-5 text-[15px] leading-5 text-(--foreground-soft)">
+                        {dateLabel(lead.createdAt)}
+                      </td>
+                      <td className="px-6 py-5 text-right">
+                        <IconButton
+                          label={`View ${lead.fullName}`}
+                          title={`View ${lead.fullName}`}
+                          onClick={() => setModal({ kind: "details", lead })}
+                        >
+                          <ArrowUpRight size={16} />
+                        </IconButton>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="space-y-3 p-4 md:hidden">
+              {visibleList.map((lead) => (
+                <LeadRow
+                  key={lead._id}
+                  lead={lead}
+                  trialsCount={trialsByLead.get(lead._id)?.length || 0}
+                  onOpen={() => setModal({ kind: "details", lead })}
+                />
+              ))}
+            </div>
+            {visibleList.length === 0 && (
+              <div className="p-5">
+                <EmptyState
+                  title="No leads found"
+                  description="Try changing your search or filters."
+                  icon={<Users size={22} />}
+                />
+              </div>
+            )}
+          </Card>
+        )}
 
-      {view !== "pipeline" && filteredLeads.length > 0 && (
-        <TablePagination
-          currentPage={listPage}
-          totalPages={maxPages}
-          totalItems={filteredLeads.length}
-          visibleItems={visibleList.length}
-          pageSize={PAGE_SIZE}
-          entityLabel="leads"
-          onPrevious={() => setListPage((page) => Math.max(1, page - 1))}
-          onNext={() => setListPage((page) => Math.min(maxPages, page + 1))}
-        />
-      )}
-      {summary && summary.overdueFollowUps > 0 && (
-        <p className="flex items-center gap-2 text-sm text-red-700">
-          <AlertTriangle className="h-4 w-4" />
-          {summary.overdueFollowUps} overdue follow-up
-          {summary.overdueFollowUps === 1 ? "" : "s"} · assigned staff will be
-          notified.
-        </p>
-      )}
+        {view !== "pipeline" && filteredLeads.length > 0 && (
+          <TablePagination
+            currentPage={listPage}
+            totalPages={maxPages}
+            totalItems={filteredLeads.length}
+            visibleItems={visibleList.length}
+            pageSize={PAGE_SIZE}
+            entityLabel="leads"
+            onPrevious={() => setListPage((page) => Math.max(1, page - 1))}
+            onNext={() => setListPage((page) => Math.min(maxPages, page + 1))}
+          />
+        )}
+        {summary && summary.overdueFollowUps > 0 && (
+          <p className="flex items-center gap-2 text-sm text-red-700">
+            <AlertTriangle className="h-4 w-4" />
+            {summary.overdueFollowUps} overdue follow-up
+            {summary.overdueFollowUps === 1 ? "" : "s"} · assigned staff will be
+            notified.
+          </p>
+        )}
 
-      {modal && (
-        <Modal
-          open
-          onClose={closeModal}
-          size="lg"
-          title={modal.lead.fullName}
-          description={modal.kind === "details" ? "Lead details" : modal.kind === "trial" ? "Schedule trial" : "Admission"}
-        >
+        {modal && (
+          <Modal
+            open
+            onClose={closeModal}
+            size="lg"
+            title={modal.lead.fullName}
+            description={
+              modal.kind === "details"
+                ? "Lead details"
+                : modal.kind === "trial"
+                  ? "Schedule trial"
+                  : "Admission"
+            }
+          >
             {modal.kind === "details" ? (
               <LeadDetails
                 lead={modal.lead}
                 trials={trialsByLead.get(modal.lead._id) || []}
                 employees={employees}
                 onTrial={() => setModal({ kind: "trial", lead: modal.lead })}
-                onConvert={() =>
-                  setModal({ kind: "convert", lead: modal.lead })
-                }
+                onConvert={() => {
+                  const leadPlan = modal.lead.plan || "";
+                  setConvertPlan(leadPlan);
+                  setConvertBranch(branchId(modal.lead) || branches[0]?._id || "");
+                  setConvertDate(new Date().toISOString().slice(0, 10));
+                  setConvertFeeTerm("");
+                  const preferredBatchIds = [...new Set((modal.lead.preferredWeeklySessions || []).map((item) => item.batchId).filter((id): id is string => Boolean(id)))];
+                  setConvertBatch(preferredBatchIds.length === 1 ? preferredBatchIds[0] : "");
+                  setModal({ kind: "convert", lead: modal.lead });
+                }}
                 onStatus={(status) => changeStatus(modal.lead, status)}
                 onFollowUp={(event) => void handleFollowUp(event, modal.lead)}
                 onNotes={(event) => void handleLeadNotes(event, modal.lead)}
@@ -1003,11 +1328,7 @@ export default function CrmPage() {
                 </label>
                 <label className="block text-sm">
                   Coach (optional)
-                  <Select
-                    name="coach"
-                    defaultValue=""
-                    className="mt-1"
-                  >
+                  <Select name="coach" defaultValue="" className="mt-1">
                     <option value="">Unassigned</option>
                     {coaches
                       .filter(
@@ -1050,7 +1371,8 @@ export default function CrmPage() {
                   <Select
                     name="plan"
                     required
-                    defaultValue={String(modal.lead.plan || "")}
+                    value={convertPlan}
+                    onChange={(event) => { setConvertPlan(event.target.value); setConvertFeeTerm(""); setConvertBatch(""); }}
                     className="mt-1"
                   >
                     {!modal.lead.plan && (
@@ -1065,12 +1387,21 @@ export default function CrmPage() {
                     ))}
                   </Select>
                 </label>
+                <label className="block text-sm">
+                  Branch
+                  <Select value={convertBranch} onChange={(event) => { setConvertBranch(event.target.value); setConvertFeeTerm(""); setConvertBatch(""); }} className="mt-1" required>
+                    {branches.map((branch) => <option key={branch._id} value={branch._id}>{branch.name}</option>)}
+                  </Select>
+                </label>
+                {batches.some((batch) => String(typeof batch.branch === "string" ? batch.branch : batch.branch?._id) === convertBranch && String(typeof batch.plan === "string" ? batch.plan : batch.plan?._id) === convertPlan && batch.status === "ACTIVE") && <label className="block text-sm">Batch<Select value={convertBatch} onChange={(event) => setConvertBatch(event.target.value)} className="mt-1" required><option value="">Select an available Batch</option>{batches.filter((batch) => String(typeof batch.branch === "string" ? batch.branch : batch.branch?._id) === convertBranch && String(typeof batch.plan === "string" ? batch.plan : batch.plan?._id) === convertPlan && batch.status === "ACTIVE" && (batch.availableSeats ?? batch.capacity) > 0).map((batch) => <option key={batch._id} value={batch._id}>{batch.name} · {batch.availableSeats ?? batch.capacity} seats available</option>)}</Select></label>}
+                <label className="block text-sm">Admission start date<Input type="date" value={convertDate} onChange={(event) => { setConvertDate(event.target.value); setConvertFeeTerm(""); }} required /></label>
+                <EnrollmentFeeTermSelect planId={convertPlan} branchId={convertBranch} startDate={convertDate} value={convertFeeTerm} onChange={setConvertFeeTerm} />
                 <label className="flex items-center gap-2 text-sm">
                   <Checkbox name="createInvoice" />
                   Create admission invoice (requires finance permission)
                 </label>
                 <div className="flex flex-wrap items-center gap-3">
-                  <Button type="submit" disabled={busy || !plans.length}>
+                  <Button type="submit" disabled={busy || !plans.length || !convertFeeTerm || !convertBranch || !convertDate || (batches.some((batch) => String(typeof batch.branch === "string" ? batch.branch : batch.branch?._id) === convertBranch && String(typeof batch.plan === "string" ? batch.plan : batch.plan?._id) === convertPlan && batch.status === "ACTIVE") && !convertBatch)}>
                     Create admission
                   </Button>
                   {!plans.length && (
@@ -1081,8 +1412,8 @@ export default function CrmPage() {
                 </div>
               </form>
             )}
-        </Modal>
-      )}
+          </Modal>
+        )}
       </div>
     </main>
   );
@@ -1098,7 +1429,10 @@ function LeadCard({
   onOpen: () => void;
 }) {
   return (
-    <Card padding="none" className="rounded-lg p-3 shadow-sm transition-shadow hover:shadow-md">
+    <Card
+      padding="none"
+      className="rounded-lg p-3 shadow-sm transition-shadow hover:shadow-md"
+    >
       <div className="flex items-start justify-between gap-2">
         <button onClick={onOpen} className="min-w-0 text-left">
           <h4 className="truncate text-sm font-semibold hover:text-(--accent)">
@@ -1171,7 +1505,10 @@ function LeadRow({
           )}
         </span>
         <span className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-(--ink-muted)">
-          {lead.phone} · {branchName(lead)} <Badge variant={statusBadgeVariant(leadStage(lead.status))}>{statusLabel(leadStage(lead.status))}</Badge>
+          {lead.phone} · {branchName(lead)}{" "}
+          <Badge variant={statusBadgeVariant(leadStage(lead.status))}>
+            {statusLabel(leadStage(lead.status))}
+          </Badge>
         </span>
       </button>
       <span className="text-xs text-(--ink-muted)">
@@ -1236,13 +1573,21 @@ function LeadDetails({
   return (
     <div className="space-y-4">
       <section className="grid gap-3 rounded-xl bg-(--surface-subtle) p-3 sm:grid-cols-2">
-        <div><p className="text-[10px] font-semibold uppercase tracking-wide text-(--ink-muted)">Status</p><Badge variant={statusBadgeVariant(leadStage(lead.status))}>{statusLabel(leadStage(lead.status))}</Badge></div>
+        <div>
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-(--ink-muted)">
+            Status
+          </p>
+          <Badge variant={statusBadgeVariant(leadStage(lead.status))}>
+            {statusLabel(leadStage(lead.status))}
+          </Badge>
+        </div>
         <Info label="Branch" value={branchName(lead)} />
-        <Info label="Phone" value={lead.phone} href={`tel:${lead.phone}`} />
+        <Info label="Phone" value={lead.phone} href={`tel:${lead.phone}`} copyable />
         <Info
           label="Email"
           value={lead.email || "—"}
           href={lead.email ? `mailto:${lead.email}` : undefined}
+          copyable={Boolean(lead.email)}
         />
         <Info label="Program" value={lead.programName || "—"} />
         <Info label="Source" value={lead.source || "—"} />
@@ -1332,7 +1677,9 @@ function LeadDetails({
                       lead.programName ||
                       "Program not set"}{" "}
                     · {trial.coach?.name || "Coach unassigned"} ·{" "}
-                    <Badge variant={statusBadgeVariant(trial.status)}>{statusLabel(trial.status)}</Badge>
+                    <Badge variant={statusBadgeVariant(trial.status)}>
+                      {statusLabel(trial.status)}
+                    </Badge>
                     {trial.attendance
                       ? ` · ${trial.attendance.toLowerCase()}`
                       : ""}
@@ -1505,16 +1852,19 @@ function Info({
   label,
   value,
   href,
+  copyable = false,
 }: {
   label: string;
   value: string;
   href?: string;
+  copyable?: boolean;
 }) {
   return (
     <div className="min-w-0">
       <p className="text-[10px] font-semibold uppercase tracking-wide text-(--ink-muted)">
         {label}
       </p>
+      <div className="flex items-start gap-1.5">
       {href ? (
         <a className="break-words text-sm hover:text-(--accent)" href={href}>
           {value}
@@ -1522,6 +1872,8 @@ function Info({
       ) : (
         <p className="break-words text-sm">{value}</p>
       )}
+      {copyable && <CopyButton value={value} label={label} />}
+      </div>
     </div>
   );
 }

@@ -58,7 +58,7 @@ const ROUTE_LABELS: Record<string, { section: string; page: string }> = {
   inquiries: { section: "Operations", page: "Inquiries" },
   makeups: { section: "Operations", page: "Makeups" },
   holidays: { section: "Operations", page: "Holidays" },
-  "branch-schedules": { section: "Operations", page: "Branch Schedule" },
+  "branch-schedules": { section: "Operations", page: "Training Availability" },
   branches: { section: "Branch Management", page: "Branches" },
   roles: { section: "Administration", page: "Roles" },
   modules: { section: "Administration", page: "Modules" },
@@ -489,7 +489,7 @@ export default function Header({ onMenuClick, onProfileClick }: HeaderProps) {
             hover:bg-(--hover-bg)
             hover:text-(--foreground)
             active:scale-95
-            md:hidden
+            lg:hidden
           "
         >
           <Menu size={19} strokeWidth={2} />
@@ -639,7 +639,7 @@ export default function Header({ onMenuClick, onProfileClick }: HeaderProps) {
             <section
               role="dialog"
               aria-label="Notifications"
-              className="absolute right-0 top-[calc(100%+12px)] z-50 w-[min(92vw,400px)] overflow-hidden rounded-2xl border border-(--line) bg-(--card) shadow-[0_18px_50px_var(--shadow-color)]"
+              className="fixed right-3 top-[84px] z-50 w-[calc(100vw-24px)] max-w-[360px] overflow-hidden rounded-2xl border border-(--line) bg-(--card) shadow-[0_18px_50px_var(--shadow-color)] sm:absolute sm:right-0 sm:top-[calc(100%+12px)] sm:w-[min(400px,calc(100vw-48px))] sm:max-w-none"
             >
               <div className="flex items-center justify-between gap-3 border-b border-(--line) px-4 py-3.5">
                 <div>
@@ -656,7 +656,7 @@ export default function Header({ onMenuClick, onProfileClick }: HeaderProps) {
                 </button>
               </div>
 
-              <div className="max-h-[min(65vh,440px)] overflow-y-auto">
+              <div className="max-h-[min(calc(100dvh-220px),440px)] overflow-y-auto sm:max-h-[min(65vh,440px)]">
                 {notificationsLoading ? (
                   <div className="space-y-3 p-4" aria-label="Loading notifications">
                     {[0, 1, 2].map((item) => <div key={item} className="h-[70px] animate-pulse rounded-xl bg-(--hover-bg)" />)}

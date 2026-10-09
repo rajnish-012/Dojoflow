@@ -15,6 +15,7 @@ import {
   Button,
   Checkbox,
   DataTableSection,
+  DataTableToolbar,
   DataFilters,
   DataSort,
   EmptyState,
@@ -30,6 +31,7 @@ import {
   type ActiveFilter,
 } from "@/components/ui";
 import { getBranches, getPlans } from "@/lib/api";
+import { getBatches, type BatchRecord } from "@/lib/batchApi";
 import {
   createEnrollment,
   Enrollment,
@@ -41,13 +43,13 @@ import {
 } from "@/lib/enrollmentApi";
 import { useCan } from "@/lib/permissions";
 import { useAcademyBrand } from "@/components/settings/AcademyBrandProvider";
+import EnrollmentFeeTermSelect from "@/components/finance/EnrollmentFeeTermSelect";
 
 type Branch = { _id: string; name: string; isActive?: boolean };
 type Plan = {
   _id: string;
   name: string;
   isActive?: boolean;
-  price?: number;
   duration?: number;
   durationUnit?: string;
 };
@@ -86,6 +88,7 @@ export default function MembershipsPage() {
   const [data, setData] = useState<MembershipDashboard | null>(null);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [plans, setPlans] = useState<Plan[]>([]);
+  const [batches, setBatches] = useState<BatchRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
@@ -101,6 +104,8 @@ export default function MembershipsPage() {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [plan, setPlan] = useState("");
+  const [batch, setBatch] = useState("");
+  const [feeTerm, setFeeTerm] = useState("");
   const [startDate, setStartDate] = useState(today());
   const [createInvoice, setCreateInvoice] = useState(false);
 
@@ -136,11 +141,12 @@ export default function MembershipsPage() {
         if (active) setLoading(false);
       });
     if (canManage)
-      void Promise.all([getBranches(), getPlans()])
-        .then(([branchResult, planResult]) => {
+      void Promise.all([getBranches(), getPlans(), getBatches().catch(() => [])])
+        .then(([branchResult, planResult, batchResult]) => {
           if (!active) return;
           setBranches(branchResult.branches as Branch[]);
           setPlans((planResult.plans || []) as Plan[]);
+          setBatches(batchResult);
         })
         .catch(() => undefined);
     return () => {
@@ -213,18 +219,23 @@ export default function MembershipsPage() {
     setPlan(
       typeof row.plan === "object" ? row.plan?._id || "" : row.plan || "",
     );
+    setFeeTerm("");
+    const rowBatch = typeof row.batch === "object" && row.batch ? row.batch._id : row.batch;
+    setBatch(rowBatch || "");
     setStartDate(today());
     setCreateInvoice(false);
   };
   const submitEnrollment = async () => {
-    if (!canManage || !selected || !plan) return;
+    if (!canManage || !selected || !plan || !feeTerm || !renewalBranch || !startDate) return;
     setSubmitting(true);
     try {
       const payload = {
         plan,
-        branch: renewalBranch || undefined,
+        branch: renewalBranch,
+        feeTerm,
         startDate,
         createInvoice: createInvoice && canInvoice,
+        ...(batch ? { batch } : {}),
       };
       const result = renewalMode
         ? await renewEnrollment(selected.student._id, payload)
@@ -246,6 +257,7 @@ export default function MembershipsPage() {
       setSubmitting(false);
     }
   };
+  const availableBatches = batches.filter((item) => item.status === "ACTIVE" && String(typeof item.plan === "object" ? item.plan._id : item.plan) === plan && String(typeof item.branch === "object" ? item.branch._id : item.branch) === renewalBranch);
   const openHistory = async (row: Enrollment) => {
     if (!canView) return;
     try {
@@ -347,11 +359,12 @@ export default function MembershipsPage() {
         description="Review enrollments, renewal dates, and lifecycle status."
         icon={<Users size={18} />}
         toolbar={
-          <div className="flex w-full flex-col gap-2 lg:w-auto lg:flex-row lg:items-start">
-            <div className="relative w-full lg:w-[340px]">
+          <DataTableToolbar>
+            <div data-toolbar-search className="relative w-full lg:w-[340px]">
               <Input
                 aria-label="Search memberships"
                 placeholder="Search name, phone, email, plan, branch…"
+                className="min-h-11"
                 value={search}
                 onChange={(event) => {
                   setSearch(event.target.value);
@@ -366,6 +379,7 @@ export default function MembershipsPage() {
                 setBranch("");
                 setPage(1);
               }}
+              responsiveToolbar
             >
               <label className="grid gap-1 text-xs font-semibold">
                 Lifecycle status
@@ -421,7 +435,7 @@ export default function MembershipsPage() {
                 { value: "name-desc", label: "Student: Z to A" },
               ]}
             />
-          </div>
+          </DataTableToolbar>
         }
       >
         {error && (
@@ -583,7 +597,7 @@ export default function MembershipsPage() {
             </Button>
             <Button
               loading={submitting}
-              disabled={!canManage || !plan || submitting}
+              disabled={!canManage || !plan || !feeTerm || !renewalBranch || (availableBatches.length > 0 && !batch) || submitting}
               aria-disabled={!canManage}
               onClick={() => void submitEnrollment()}
             >
@@ -593,11 +607,23 @@ export default function MembershipsPage() {
         }
       >
         <div className="space-y-4">
+          {renewalMode && selected && (
+            <section className="rounded-xl border border-(--line) bg-(--surface-muted) p-4" aria-label="Current enrollment agreement">
+              <p className="text-xs font-bold uppercase tracking-wide text-(--ink-muted)">Current agreement</p>
+              <p className="mt-1 font-semibold">{selected.planName} · {selected.branchName}</p>
+              <p className="mt-1 text-sm text-(--ink-muted)">
+                {selected.billingSnapshot?.billingFrequency?.replaceAll("_", " ") || "Billing terms not recorded"}
+                {selected.billingSnapshot?.amount !== undefined ? ` · ${money(selected.billingSnapshot.amount, currency)}` : ""}
+                {selected.billingSnapshot?.registrationFee ? ` · ${money(selected.billingSnapshot.registrationFee, currency)} registration` : ""}
+              </p>
+              <p className="mt-2 text-xs text-(--ink-muted)">The new selection below creates a separate agreement. Previous invoices and receipts stay as issued.</p>
+            </section>
+          )}
           <label className="block space-y-1.5 text-sm font-medium">
             Training and fee plan
             <Select
               value={plan}
-              onChange={(event) => setPlan(event.target.value)}
+              onChange={(event) => { setPlan(event.target.value); setBatch(""); setFeeTerm(""); }}
             >
               <option value="">Choose a plan</option>
               {plans
@@ -605,9 +631,6 @@ export default function MembershipsPage() {
                 .map((item) => (
                   <option key={item._id} value={item._id}>
                     {item.name}
-                    {item.price !== undefined
-                      ? ` · ${money(item.price, currency)}`
-                      : ""}
                   </option>
                 ))}
             </Select>
@@ -618,14 +641,14 @@ export default function MembershipsPage() {
               type="date"
               min={today()}
               value={startDate}
-              onChange={(event) => setStartDate(event.target.value)}
+              onChange={(event) => { setStartDate(event.target.value); setFeeTerm(""); }}
             />
           </label>
           <label className="block space-y-1.5 text-sm font-medium">
             Branch
             <Select
               value={renewalBranch}
-              onChange={(event) => setRenewalBranch(event.target.value)}
+              onChange={(event) => { setRenewalBranch(event.target.value); setBatch(""); setFeeTerm(""); }}
             >
               {branches.map((item) => (
                 <option key={item._id} value={item._id}>
@@ -634,6 +657,27 @@ export default function MembershipsPage() {
               ))}
             </Select>
           </label>
+          {availableBatches.length > 0 && (
+            <label className="block space-y-1.5 text-sm font-medium">
+              Batch
+              <Select value={batch} onChange={(event) => setBatch(event.target.value)}>
+                <option value="">Choose a Batch</option>
+                {availableBatches.map((item) => (
+                  <option key={item._id} value={item._id} disabled={item.availableSeats !== undefined && item.availableSeats <= 0}>
+                    {item.name} ({item.code}) · {item.availableSeats ?? "capacity unknown"} seats available
+                  </option>
+                ))}
+              </Select>
+            </label>
+          )}
+          <EnrollmentFeeTermSelect
+            planId={plan}
+            branchId={renewalBranch}
+            startDate={startDate}
+            value={feeTerm}
+            currency={currency}
+            onChange={setFeeTerm}
+          />
           {canInvoice && (
             <label className="flex items-center gap-2 text-sm">
               <Checkbox

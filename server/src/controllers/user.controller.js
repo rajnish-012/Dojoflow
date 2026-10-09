@@ -7,6 +7,7 @@ const { validatePassword, sessionInvalidationTime } = require("../utils/password
 const { normalizePhone } = require("../utils/phone");
 const auditService = require("../services/audit.service");
 const { AUDIT_ACTIONS } = require("../config/auditActions");
+const { sendAccountActivation, createBootstrapPassword } = require("../services/accountActivation.service");
 
 const SUPER_ADMIN_ROLE = "SUPER_ADMIN";
 
@@ -234,17 +235,14 @@ const getStaffUsers = async (req, res) => {
  */
 const createStaffUser = async (req, res) => {
   try {
-    const { name, email, phone, password, role, branch } = req.body;
+    const { name, email, phone, role, branch } = req.body;
 
-    if (!name || !email || !phone || !password || !role) {
-      return sendError(res, 400, "Name, email, phone, password and role are required");
+    if (!name || !email || !phone || !role) {
+      return sendError(res, 400, "Name, email, phone and role are required");
     }
 
     const normalizedPhone = normalizePhone(phone);
     if (!normalizedPhone) return sendError(res, 400, "Enter a valid phone number with its country code.");
-
-    const passwordError = validatePassword(password);
-    if (passwordError) return sendError(res, 400, passwordError);
 
     const roleResult = await validateStaffRole(role);
 
@@ -280,17 +278,24 @@ const createStaffUser = async (req, res) => {
       return sendError(res, 409, "A user with this email already exists");
     }
 
-    const hashedPassword = String(password);
+    const bootstrapPassword = createBootstrapPassword();
 
     const user = await User.create({
       name: String(name).trim(),
       email: normalizedEmail,
       phone: normalizedPhone,
-      password: hashedPassword,
+      password: bootstrapPassword,
       role: selectedRole.key,
       branch: branchResult.branch ? branchResult.branch._id : null,
     });
     await auditService.record({ req, action: AUDIT_ACTIONS.USER_ROLE_CHANGED, entityType: "USER", entityId: user._id, branchId: user.branch, before: { role: null, branchId: null }, after: { role: user.role, branchId: user.branch }, metadata: { operation: "USER_CREATED" } });
+
+    let activationEmailSent = false;
+    try {
+      activationEmailSent = await sendAccountActivation(user);
+    } catch (activationError) {
+      console.error("Staff account activation email could not be sent.", { name: activationError?.name || "Error" });
+    }
 
     const populatedUser = await User.findById(user._id)
       .populate("branch", "name address phone")
@@ -300,6 +305,7 @@ const createStaffUser = async (req, res) => {
       success: true,
       message: "Staff user created successfully",
       user: populatedUser,
+      activationEmailSent,
     });
   } catch (error) {
     console.error("Create staff user error:", error);

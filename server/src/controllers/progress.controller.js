@@ -8,6 +8,7 @@ const Plan = require("../models/Plan");
 const Attendance = require("../models/Attendance");
 const Performance = require("../models/Performance");
 const Makeup = require("../models/Makeup");
+const StudentCurriculumMilestone = require("../models/StudentCurriculumMilestone");
 const CoachStudentAssignment = require("../models/CoachStudentAssignment");
 const { getProgramLearningProgress } = require("../services/programProgress.service");
 const { resolveProgramCurriculum } = require("../services/curriculumResolver.service");
@@ -78,7 +79,7 @@ const getStudents = async (req, res) => {
 
     const students = await Student.find(filter)
       .populate("branch", "name address")
-      .populate("plan", "name price duration durationUnit startingBelt")
+      .populate("plan", "name duration durationUnit startingBelt")
       .populate("user", "name email role")
       .sort({ createdAt: -1 });
 
@@ -113,7 +114,7 @@ const getStudentById = async (req, res) => {
 
     const student = await Student.findById(id)
       .populate("branch", "name address")
-      .populate("plan", "name price duration durationUnit startingBelt")
+      .populate("plan", "name duration durationUnit startingBelt")
       .populate("user", "name email role");
 
     if (!student) {
@@ -154,7 +155,7 @@ const getMyStudentProfile = async (req, res) => {
       user: req.user._id,
     })
       .populate("branch", "name address")
-      .populate("plan", "name price duration durationUnit startingBelt")
+      .populate("plan", "name duration durationUnit startingBelt")
       .populate("user", "name email role");
 
     if (!student) {
@@ -314,7 +315,7 @@ const createStudent = async (req, res) => {
 
       const populatedStudent = await Student.findById(student._id)
         .populate("branch", "name address")
-        .populate("plan", "name price duration durationUnit startingBelt")
+        .populate("plan", "name duration durationUnit startingBelt")
         .populate("user", "name email role");
 
       return res.status(201).json({
@@ -543,7 +544,7 @@ const updateStudent = async (req, res) => {
     const updatedStudent = await Student.findById(id)
       .populate("user", "name email role")
       .populate("branch", "name address")
-      .populate("plan", "name price duration durationUnit startingBelt");
+      .populate("plan", "name duration durationUnit startingBelt");
 
     return res.status(200).json({
       success: true,
@@ -697,7 +698,6 @@ const getStudentProgress = async (req, res) => {
       const programId = String(entitlement.program?._id || entitlement.program);
       const configuredPlanProgram = (student.plan.programs || []).find((item) => String(item.program?._id || item.program) === programId);
       const curriculum = resolveProgramCurriculum(entitlement, configuredPlanProgram, student.plan.curriculum);
-      const milestones = student.plan.milestones || [];
       const [learning, attendance, performance, makeups] = await Promise.all([
         getProgramLearningProgress({ studentId, programId, enrollmentId: currentEnrollment?._id, enrollmentStartDate: currentEnrollment?.startDate, enrollmentEndDate: currentEnrollment?.endDate, curriculum, asOfDate: today }),
         Attendance.find({ student: studentId, sessionTypeId: programId, ...(currentEnrollment?._id ? { $or: [{ enrollment: currentEnrollment._id }, { enrollment: null, date: { $gte: currentEnrollment.startDate, ...(currentEnrollment.endDate ? { $lt: currentEnrollment.endDate } : {}), $lte: new Date() } }] } : { date: { $lte: new Date() } }) }).sort({ date: 1, createdAt: 1, _id: 1 }).lean(),
@@ -719,8 +719,15 @@ const getStudentProgress = async (req, res) => {
         regularAttendance,
         student.branch?._id || student.branch,
       );
-      const nextMilestone = milestones.filter((item) => Number(item.day) > currentTrainingDay).sort((a, b) => a.day - b.day)[0] || null;
-      const achievedMilestone = milestones.filter((item) => Number(item.day) <= currentTrainingDay).sort((a, b) => b.day - a.day)[0] || null;
+      const curriculumVersionId = entitlement.curriculumVersion?._id || entitlement.curriculumVersion;
+      const curriculumMilestones = currentEnrollment?._id && curriculumVersionId
+        ? await StudentCurriculumMilestone.find({ student: studentId, enrollment: currentEnrollment._id, program: programId, curriculum: curriculumVersionId }).sort({ criteriaMetAt: -1, createdAt: -1 }).lean()
+        : [];
+      const achievedRecord = curriculumMilestones.find((item) => item.status === "EARNED") || null;
+      const nextRecord = curriculumMilestones.find((item) => item.status === "PENDING_APPROVAL") || curriculumMilestones.find((item) => item.status === "EARNED" && (item.rewards || []).some((reward) => ["AWAITING_GRADING", "AWAITING_PROMOTION_APPROVAL"].includes(reward.status))) || null;
+      const toMilestoneSummary = (item) => item ? { belt: (item.rewards || []).find((reward) => reward.type === "BELT_PROGRESSION")?.targetBelt || "", skill: item.milestoneName || "", description: item.milestoneDescription || item.milestoneCriteria || "", status: item.status === "PENDING_APPROVAL" ? "AWAITING_APPROVAL" : ((item.rewards || []).find((reward) => reward.type === "BELT_PROGRESSION")?.status || item.status) } : null;
+      const nextMilestone = toMilestoneSummary(nextRecord);
+      const achievedMilestone = toMilestoneSummary(achievedRecord);
       const averageRating = performance.length ? Number((performance.reduce((sum, item) => sum + Number(item.rating), 0) / performance.length).toFixed(2)) : null;
       return {
         program: entitlement.program,

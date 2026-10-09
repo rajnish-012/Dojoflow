@@ -16,6 +16,10 @@ const dateTimeSlotSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "TrainingSessionType",
     },
+    batchId: { type: mongoose.Schema.Types.ObjectId, ref: "Batch", default: null, index: true },
+    roomId: { type: mongoose.Schema.Types.ObjectId, ref: "Room", default: null, index: true },
+    coach: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+    room: { type: String, trim: true, maxlength: 100, default: "" },
 
     sessionType: { type: String, trim: true },
 

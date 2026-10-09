@@ -8,6 +8,7 @@ import {
   DataFilters,
   DataSort,
   DataTableSection,
+  DataTableToolbar,
   EmptyState,
   ErrorState,
   Input,
@@ -43,7 +44,6 @@ const ACTIONS = [
   "PAYMENT_REFUNDED",
   "INVOICE_CREATED",
   "INVOICE_CANCELLED",
-  "FEE_PLAN_UPDATED",
   "PROMOTION_CREATED",
   "PROMOTION_REVERSED",
   "ROLE_CREATED",
@@ -248,8 +248,8 @@ export default function AuditLogsPage() {
         description="Historical records are immutable and read only."
         icon={<ClipboardList size={18} />}
         toolbar={
-          <div className="flex w-full flex-col gap-2 lg:w-auto lg:flex-row lg:items-start">
-            <div className="relative w-full lg:w-[340px]">
+          <DataTableToolbar>
+            <div data-toolbar-search className="relative w-full lg:w-[340px]">
               <Search
                   size={17}
                   aria-hidden="true"
@@ -273,6 +273,7 @@ export default function AuditLogsPage() {
             contentClassName="grid gap-3 sm:grid-cols-2"
             activeFilters={activeFilters}
             onClearAll={clear}
+            responsiveToolbar
           >
             <label className="grid gap-1.5 text-xs font-bold text-(--foreground-soft)">
               From
@@ -355,7 +356,7 @@ export default function AuditLogsPage() {
                 { value: "createdAt-asc", label: "Oldest first" },
               ]}
             />
-          </div>
+          </DataTableToolbar>
         }
       >
         {error ? (

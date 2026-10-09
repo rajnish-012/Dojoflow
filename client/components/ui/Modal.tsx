@@ -20,6 +20,7 @@ type ModalProps = {
   onClose: () => void;
   title: string;
   description?: string;
+  eyebrow?: string;
   children: ReactNode;
   footer?: ReactNode;
   size?: ModalSize;
@@ -37,6 +38,7 @@ export default function Modal({
   onClose,
   title,
   description,
+  eyebrow = "New admission",
   children,
   footer,
   size = "md",
@@ -102,10 +104,10 @@ export default function Modal({
         aria-modal="true"
         aria-labelledby="modal-title"
         className={`
+          df-modal-panel
           flex
           w-full
           ${sizes[size]}
-          max-h-[calc(100vh-32px)]
           flex-col
           overflow-hidden
           rounded-2xl
@@ -115,7 +117,6 @@ export default function Modal({
           text-(--foreground)
           shadow-[0_30px_90px_rgba(0,0,0,0.28)]
           animate-[df-modal-in_220ms_ease-out]
-          sm:max-h-[calc(100vh-48px)]
           dark:shadow-[0_30px_90px_rgba(0,0,0,0.55)]
         `}
       >
@@ -137,7 +138,7 @@ export default function Modal({
           "
         >
           <div className="min-w-0">
-            <p
+            {eyebrow && <p
               className="
                 mb-1
                 text-[10px]
@@ -147,8 +148,8 @@ export default function Modal({
                 text-(--accent)
               "
             >
-              New admission
-            </p>
+              {eyebrow}
+            </p>}
 
             <h2
               id="modal-title"

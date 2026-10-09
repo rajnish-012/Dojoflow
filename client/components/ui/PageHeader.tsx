@@ -20,15 +20,16 @@ export default function PageHeader({
       className={`
         mb-6
         flex
+        min-w-0
         flex-col
         gap-4
-        sm:flex-row
-        sm:items-center
-        sm:justify-between
+        lg:flex-row
+        lg:items-center
+        lg:justify-between
         ${className}
       `}
     >
-      <div className="min-w-0">
+      <div className="w-full min-w-0 lg:flex-1">
         {eyebrow && (
           <p
             className="
@@ -49,22 +50,23 @@ export default function PageHeader({
             text-[26px]
             font-extrabold
             tracking-tight
+            break-words
             text-(--foreground)
-            sm:text-3xl
+            lg:text-3xl
           "
         >
           {title}
         </h1>
 
         {description && (
-          <p className="mt-1.5 max-w-2xl text-sm text-(--ink-muted)">
+          <p className="mt-1.5 w-full min-w-0 text-sm text-(--ink-muted) lg:max-w-2xl">
             {description}
           </p>
         )}
       </div>
 
       {actions && (
-        <div className="flex shrink-0 flex-wrap items-center gap-2">
+        <div className="flex w-full min-w-0 max-w-full flex-wrap items-center gap-2 [&>*]:min-w-0 [&>*]:max-w-full lg:w-auto lg:shrink-0 lg:justify-end">
           {actions}
         </div>
       )}

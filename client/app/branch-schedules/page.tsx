@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 
 import {
   CalendarDays,
@@ -127,7 +128,7 @@ function getStatus(day: BranchCalendarDay) {
   if (day.isClosed) {
     return {
       key: "closed",
-      label: "Closed",
+      label: day.reason === "SESSION_CLOSED" ? "Session Closed" : "Closed",
     };
   }
 
@@ -140,7 +141,7 @@ function getStatus(day: BranchCalendarDay) {
 
   return {
     key: "no-training",
-    label: "No Session",
+    label: day.reason === "BATCH_NOT_ACTIVE" ? "Batch Inactive" : "No Session",
   };
 }
 
@@ -256,6 +257,7 @@ export default function BranchSchedulesPage() {
       .catch(() => setTrainingTypes([]));
   }, []);
   const canManageSchedule = useCan(PERMISSIONS.BRANCH_SCHEDULE_MANAGE);
+  const canViewAcademyCalendar = useCan(PERMISSIONS.CALENDAR_VIEW);
 
   const today = useMemo(() => {
     const now = new Date();
@@ -536,9 +538,10 @@ export default function BranchSchedulesPage() {
         <PageHeader
           eyebrow="Branch Management"
           title="Training Availability"
-          description="View complete monthly training availability, holidays, and schedules."
+          description="Operational Branch view of recurring Batch schedules and date-specific availability. Academy-wide events and holidays are also shown in the Academy Calendar."
           actions={
             <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+              {canViewAcademyCalendar && <Link href="/calendar"><Button type="button" variant="outline"><CalendarDays size={16} />Academy Calendar</Button></Link>}
               <Button
                 type="button"
                 variant="outline"
@@ -1050,12 +1053,11 @@ function SelectedDatePanel({
         {!day.isHoliday && day.isClosed && (
           <div className="rounded-xl border border-red-200 bg-red-50 p-4 dark:border-red-500/30 dark:bg-red-500/10">
             <p className="text-sm font-bold text-red-700 dark:text-red-300">
-              Branch Closed
+              {day.reason === "SESSION_CLOSED" ? "Session Closed" : "Branch Closed"}
             </p>
 
             <p className="mt-1 text-sm leading-6 text-red-600 dark:text-red-400">
-              This branch does not have regular training scheduled on{" "}
-              {day.dayName}.
+              {day.reason === "SESSION_CLOSED" ? day.closureReason || "A scheduled training Session was explicitly closed." : `This branch does not have regular training scheduled on ${day.dayName}.`}
             </p>
           </div>
         )}
@@ -1069,8 +1071,7 @@ function SelectedDatePanel({
             </p>
 
             <p className="mt-1 text-sm leading-6 text-(--ink-muted)">
-              The branch is not closed, but no active training session is
-              configured for this date.
+              {day.reason === "BATCH_OUTSIDE_DATE_RANGE" ? "No Batch is eligible to train on this date because its actual training period has ended or not started yet." : day.reason === "BATCH_NOT_ACTIVE" ? "This date has configured Batch sessions, but the Batch is still Draft, Paused, or Inactive. Activate it after its Plan, Curriculum, and weekly schedule pass validation to show its sessions here." : "The branch is not closed, but no active training session is configured for this date."}
             </p>
           </div>
         )}

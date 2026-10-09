@@ -17,6 +17,7 @@ import {
   Badge,
   Button,
   DataTableSection,
+  DataTableToolbar,
   DataFilters,
   DataSort,
   EmptyState,
@@ -393,8 +394,8 @@ export default function PerformancePage() {
         />
       </div>
       <DataTableSection className="mt-6" title="Performance History" description="View and manage student performance evaluations." icon={<Users size={18} />} toolbar={
-          <div className="flex w-full flex-col gap-2 lg:w-auto lg:flex-row">
-            <div className="relative w-full lg:w-80">
+          <DataTableToolbar>
+            <div data-toolbar-search className="relative w-full lg:w-80">
               <Search
                 size={16}
                 className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-(--ink-faint)"
@@ -406,7 +407,7 @@ export default function PerformancePage() {
                 className="pl-10"
               />
             </div>
-            <DataFilters activeFilters={chips} onClearAll={clear}>
+            <DataFilters activeFilters={chips} onClearAll={clear} responsiveToolbar>
               <label>
                 Student
                 <Select
@@ -501,7 +502,7 @@ export default function PerformancePage() {
                 { value: "day-desc", label: "Training day: high to low" },
               ]}
             />
-          </div>
+          </DataTableToolbar>
       }>
         {loading ? (
           <LoadingSpinner fullPage text="Loading performance data..." />

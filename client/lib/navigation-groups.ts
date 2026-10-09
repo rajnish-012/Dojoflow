@@ -15,10 +15,12 @@ export const NAVIGATION_GROUPS = [
     keys: [
       "students",
       "plans",
+      "batches",
       "curriculum",
       "attendance",
       "performance",
       "promotions",
+      "grading",
       "progress",
     ],
   },
@@ -27,11 +29,13 @@ export const NAVIGATION_GROUPS = [
     label: "Operations",
     icon: Layers,
     keys: [
+      "calendar",
       "makeups",
       "inquiries",
       "coach-assignments",
       "holidays",
       "branch-schedules",
+      "inventory",
     ],
   },
   {
@@ -88,7 +92,9 @@ export function getNavigationGroupId(item: {
   if (explicitGroup) {
     if (explicitGroup.toLowerCase() === "ungrouped") return undefined;
     const knownGroup = NAVIGATION_GROUPS.find(
-      (group) => group.id === explicitGroup.toLowerCase() || group.label.toLowerCase() === explicitGroup.toLowerCase(),
+      (group) =>
+        group.id === explicitGroup.toLowerCase() ||
+        group.label.toLowerCase() === explicitGroup.toLowerCase(),
     );
     return knownGroup?.id || `custom:${explicitGroup.toLocaleLowerCase()}`;
   }
@@ -113,10 +119,17 @@ export function getNavigationSectionLabel(item: {
   const explicitGroup = item.group?.trim();
   if (explicitGroup) {
     if (explicitGroup.toLowerCase() === "ungrouped") return "Other links";
-    return NAVIGATION_GROUPS.find(
-      (group) => group.id === explicitGroup.toLowerCase() || group.label.toLowerCase() === explicitGroup.toLowerCase(),
-    )?.label || explicitGroup;
+    return (
+      NAVIGATION_GROUPS.find(
+        (group) =>
+          group.id === explicitGroup.toLowerCase() ||
+          group.label.toLowerCase() === explicitGroup.toLowerCase(),
+      )?.label || explicitGroup
+    );
   }
   const groupId = getNavigationGroupId({ ...item, group: null });
-  return NAVIGATION_GROUPS.find((group) => group.id === groupId)?.label || "Other links";
+  return (
+    NAVIGATION_GROUPS.find((group) => group.id === groupId)?.label ||
+    "Other links"
+  );
 }

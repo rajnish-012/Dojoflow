@@ -37,6 +37,11 @@ router.get("/public/:branchId/calendar", getPublicBranchMonthCalendar);
 
 router.use(protect);
 
+router.get("/rooms", authorizePermission("branch_schedule.view"), require("../controllers/branchSchedule.controller").listRooms);
+router.post("/rooms", authorizePermission("branch_schedule.manage"), require("../controllers/branchSchedule.controller").createRoom);
+router.patch("/rooms/:id", authorizePermission("branch_schedule.manage"), require("../controllers/branchSchedule.controller").setRoomStatus);
+router.patch("/sessions/:sessionId/status", authorizePermission("branch_schedule.manage"), require("../controllers/branchSchedule.controller").setTrainingSessionStatus);
+
 /* Date-specific overrides belong to the schedule resource. */
 router.get(
   "/:branchId/date/:date",

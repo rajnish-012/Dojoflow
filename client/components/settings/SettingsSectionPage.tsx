@@ -21,6 +21,7 @@ import {
   Badge,
   Button,
   Card,
+  CopyButton,
   DataTableSection,
   EmptyState,
   ErrorState,
@@ -598,8 +599,6 @@ export default function SettingsSectionPage({
 
     const email = form.email.trim();
 
-    const password = form.password;
-
     const branch = form.branch;
 
     if (!name) {
@@ -619,16 +618,6 @@ export default function SettingsSectionPage({
 
     if (!isValidPhoneNumber(form.phone, "IN")) {
       setFormError("Enter a valid phone number with its country code.");
-      return;
-    }
-
-    if (!password) {
-      setFormError("Please enter a password.");
-      return;
-    }
-
-    if (password.length < 12) {
-      setFormError("Password must contain at least 12 characters.");
       return;
     }
 
@@ -654,7 +643,6 @@ export default function SettingsSectionPage({
           name,
           email,
           phone: form.phone,
-          password,
           role: form.role,
           branch,
         }),
@@ -681,7 +669,7 @@ export default function SettingsSectionPage({
       }
 
       setShowModal(false);
-      toast.success("Staff user saved successfully.");
+      toast.success(data.activationEmailSent === false ? "Staff user saved. Activation email could not be sent." : "Staff user saved and activation email sent.");
 
       setForm({
         ...emptyForm,
@@ -1184,18 +1172,8 @@ export default function SettingsSectionPage({
                                   {user.name}
                                 </p>
 
-                                <p
-                                  className="
-                                      mt-0.5 truncate
-                                      text-xs
-                                      text-(--ink-muted)
-                                    "
-                                >
-                                  {user.email}
-                                </p>
-                                <p className="mt-0.5 truncate text-xs text-(--ink-muted)">
-                                  {user.phone || "No phone number"}
-                                </p>
+                                <div className="mt-0.5 flex items-center gap-1.5"><p className="truncate text-xs text-(--ink-muted)">{user.email}</p><CopyButton value={user.email} label={`${user.name}'s email address`} /></div>
+                                {user.phone ? <div className="mt-0.5 flex items-center gap-1.5"><p className="truncate text-xs text-(--ink-muted)">{user.phone}</p><CopyButton value={user.phone} label={`${user.name}'s phone number`} /></div> : <p className="mt-0.5 truncate text-xs text-(--ink-muted)">No phone number</p>}
                               </div>
                             </div>
                           </td>
@@ -1311,7 +1289,7 @@ export default function SettingsSectionPage({
         open={showModal}
         onClose={closeModal}
         title="Add Staff User"
-        description="Create a login account for academy staff."
+        description="Create a staff account. The staff member will receive an email to set their own password."
         size="xl"
         footer={
           <>
@@ -1356,8 +1334,7 @@ export default function SettingsSectionPage({
             onPhoneChange={(phone) =>
               setForm((current) => ({ ...current, phone }))
             }
-            passwordLabel="Temporary Password"
-            passwordPlaceholder="Minimum 12 characters"
+            showPassword={false}
           />
         </form>
       </Modal>
@@ -1419,6 +1396,7 @@ export default function SettingsSectionPage({
             }
             passwordLabel="New Password (Optional)"
             passwordPlaceholder="Leave blank to keep current password"
+            showPassword
           />
         </form>
       </Modal>
@@ -1471,8 +1449,9 @@ function StaffFormFields({
   onEmailBlur,
   emailError,
   onPhoneChange,
-  passwordLabel,
-  passwordPlaceholder,
+  passwordLabel = "",
+  passwordPlaceholder = "",
+  showPassword = true,
 }: {
   form: FormData;
   branches: Branch[];
@@ -1483,8 +1462,9 @@ function StaffFormFields({
   onEmailBlur: (event: React.FocusEvent<HTMLInputElement>) => void;
   emailError: string;
   onPhoneChange: (phone: string) => void;
-  passwordLabel: string;
-  passwordPlaceholder: string;
+  passwordLabel?: string;
+  passwordPlaceholder?: string;
+  showPassword?: boolean;
 }) {
   const selectedRole = roles.find((role) => role.key === form.role);
 
@@ -1601,7 +1581,7 @@ function StaffFormFields({
         />
       </div>
 
-      <div>
+      {showPassword ? <div>
         <label
           htmlFor="staff-password"
           className="
@@ -1622,7 +1602,7 @@ function StaffFormFields({
           placeholder={passwordPlaceholder}
           required={passwordLabel === "Temporary Password"}
         />
-      </div>
+      </div> : null}
 
       <div>
         <label

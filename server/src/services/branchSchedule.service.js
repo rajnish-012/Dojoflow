@@ -3,6 +3,8 @@ const mongoose = require("mongoose");
 const BranchSchedule = require("../models/BranchSchedule");
 const Holiday = require("../models/Holiday");
 const BranchDateSchedule = require("../models/BranchDateSchedule");
+const Batch = require("../models/Batch");
+const Session = require("../models/Session");
 
 /* =========================================================
    DATE HELPERS
@@ -292,7 +294,7 @@ const getDaySchedule = (schedule, dayOfWeek) => {
  *
  * Holiday always wins.
  */
-const getBranchDateAvailability = async (branchId, date) => {
+const getBranchDateAvailabilityRaw = async (branchId, date) => {
   if (!validateBranchId(branchId)) {
     throw new Error("Invalid branch ID");
   }
@@ -517,7 +519,7 @@ const getBranchDateAvailability = async (branchId, date) => {
 
       isClosed: false,
 
-      isTrainingDay: true,
+      isTrainingDay: false,
 
       slots: [],
 
@@ -693,6 +695,57 @@ const getBranchDateAvailability = async (branchId, date) => {
 
     reason: "TRAINING_AVAILABLE",
   };
+};
+
+async function applyBatchDateBoundaries(branchId, days) {
+  if (!days.length) return days;
+  const batches = await Batch.find({ branch: branchId }).select("_id status startDate calculatedEndDate effectiveFrom effectiveUntil").lean();
+  const first = days[0].date;
+  const last = days[days.length - 1].date;
+  const sessions = await Session.find({ branch: branchId, date: { $gte: first, $lte: last } }).select("date scheduleSlotId status cancellationSource closureReason").lean();
+  return filterBatchAvailability(days, batches, sessions);
+}
+
+function filterBatchAvailability(days, batches, sessions) {
+  const batchById = new Map(batches.map((batch) => [String(batch._id), batch]));
+  const sessionByOccurrence = new Map(sessions.map((session) => [`${session.date}:${String(session.scheduleSlotId)}`, session]));
+  return days.map((day) => {
+    if (!day.slots?.length || day.isHoliday || day.isClosed) return day;
+    let closedOccurrence = false;
+    let outsideBatchRange = false;
+    let inactiveBatch = false;
+    let closedReason = "";
+    const slots = day.slots.filter((slot) => {
+      const batchId = String(slot.batchId?._id || slot.batchId || "");
+      if (!batchId) return true;
+      const batch = batchById.get(batchId);
+      if (!batch || batch.status !== "ACTIVE") {
+        inactiveBatch = inactiveBatch || Boolean(batch);
+        return false;
+      }
+      const start = batch.startDate;
+      const end = batch.calculatedEndDate;
+      if (!start || !end || day.date < start || day.date > end) { outsideBatchRange = true; return false; }
+      const persisted = sessionByOccurrence.get(`${day.date}:${String(slot._id)}`);
+      if (persisted?.status === "CLOSED" || (persisted?.status === "CANCELLED" && persisted.cancellationSource === "MANUAL")) {
+        closedOccurrence = closedOccurrence || persisted.status === "CLOSED";
+        if (persisted.status === "CLOSED") closedReason = persisted.closureReason || "";
+        return false;
+      }
+      return true;
+    });
+    if (slots.length) return { ...day, slots, isTrainingDay: true, isClosed: false, reason: day.reason };
+    if (closedOccurrence) return { ...day, slots: [], isTrainingDay: false, isClosed: true, closureReason: closedReason, reason: "SESSION_CLOSED" };
+    if (outsideBatchRange) return { ...day, slots: [], isTrainingDay: false, isClosed: false, reason: "BATCH_OUTSIDE_DATE_RANGE" };
+    if (inactiveBatch) return { ...day, slots: [], isTrainingDay: false, isClosed: false, reason: "BATCH_NOT_ACTIVE" };
+    return { ...day, slots: [], isTrainingDay: false, isClosed: false, reason: "NO_ACTIVE_SLOTS" };
+  });
+}
+
+const getBranchDateAvailability = async (branchId, date) => {
+  const availability = await getBranchDateAvailabilityRaw(branchId, date);
+  const [resolved] = await applyBatchDateBoundaries(branchId, [availability]);
+  return resolved;
 };
 
 /* =========================================================
@@ -943,12 +996,12 @@ const getBranchMonthAvailability = async (branchId, year, month) => {
 
     const dateString = formatDate(date);
 
-    const availability = await getBranchDateAvailability(branchId, dateString);
+    const availability = await getBranchDateAvailabilityRaw(branchId, dateString);
 
     results.push(availability);
   }
 
-  return results;
+  return applyBatchDateBoundaries(branchId, results);
 };
 
 /* =========================================================
@@ -977,6 +1030,7 @@ module.exports = {
   getDaySchedule,
 
   getBranchDateAvailability,
+  filterBatchAvailability,
 
   validateAttendanceDate,
 

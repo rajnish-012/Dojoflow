@@ -8,7 +8,11 @@ import { getMyNavigation, type NavigationModule } from "@/lib/api";
 
 import { useAuth } from "@/hooks/userAuth";
 
-import { hasPermission, NAVIGATION_PERMISSIONS } from "@/lib/permissions";
+import {
+  hasPermission,
+  NAVIGATION_PERMISSIONS,
+  PERMISSIONS,
+} from "@/lib/permissions";
 
 /* =========================================================
    TYPES
@@ -250,6 +254,14 @@ export default function RouteGuard({
     return allowedModules.map((module) => module.href);
   }, [allowedModules]);
 
+  const isCertificateRoute =
+    pathname === "/certificates" || pathname.startsWith("/certificates/");
+  const canOpenCertificates =
+    allowedModules.some((module) => module.key === "grading") &&
+    (hasPermission(user, PERMISSIONS.CERTIFICATE_VIEW) ||
+      hasPermission(user, PERMISSIONS.CERTIFICATE_GENERATE) ||
+      hasPermission(user, PERMISSIONS.CERTIFICATE_DOWNLOAD));
+
   /*
    * A route is allowed if:
    *
@@ -266,9 +278,10 @@ export default function RouteGuard({
     systemRoute ||
     (state.status === "ready" &&
       state.key === navigationKey &&
-      allowedHrefs.some(
+      (allowedHrefs.some(
         (href) => pathname === href || pathname.startsWith(`${href}/`),
-      ));
+      ) ||
+        (isCertificateRoute && canOpenCertificates)));
 
   /* =======================================================
      UNAUTHORIZED REDIRECTION

@@ -23,6 +23,7 @@ const beltHistorySchema = new mongoose.Schema(
       index: true,
     },
     sessionTypeId: { type: mongoose.Schema.Types.ObjectId, ref: "TrainingSessionType", default: null, index: true },
+    gradingEvent: { type: mongoose.Schema.Types.ObjectId, ref: "GradingEvent", default: null, index: true },
 
     fromBelt: {
       type: String,
@@ -38,9 +39,12 @@ const beltHistorySchema = new mongoose.Schema(
 
     milestoneDay: {
       type: Number,
-      required: true,
       min: 1,
+      default: null,
     },
+    curriculumMilestone: { type: mongoose.Schema.Types.ObjectId, ref: "StudentCurriculumMilestone", default: null, index: true },
+    curriculum: { type: mongoose.Schema.Types.ObjectId, ref: "Curriculum", default: null },
+    curriculumStepId: { type: String, trim: true, default: "" },
 
     skill: {
       type: String,
@@ -53,6 +57,7 @@ const beltHistorySchema = new mongoose.Schema(
       trim: true,
       default: "",
     },
+    reason: { type: String, trim: true, maxlength: 300, default: "" },
 
     promotedAt: {
       type: Date,
@@ -96,5 +101,16 @@ beltHistorySchema.index({
   student: 1,
   promotedAt: -1,
 });
+
+const immutableHistoryWrite = function rejectBeltHistoryMutation() {
+  throw new Error("Belt history is immutable.");
+};
+beltHistorySchema.pre("save", function rejectHistorySave() {
+  if (!this.isNew) throw new Error("Belt history is immutable.");
+});
+for (const operation of ["updateOne", "updateMany", "findOneAndUpdate", "replaceOne", "findOneAndReplace", "deleteOne", "deleteMany", "findOneAndDelete"]) {
+  beltHistorySchema.pre(operation, immutableHistoryWrite);
+}
+beltHistorySchema.pre("bulkWrite", immutableHistoryWrite);
 
 module.exports = mongoose.model("BeltHistory", beltHistorySchema);

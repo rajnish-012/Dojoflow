@@ -14,6 +14,7 @@ export interface NavigationModule {
   href: string;
   icon: string;
   order: number;
+  sectionOrder?: number | null;
   allowedRoles?: string[];
   requiredPermission?: string | null;
   group?: string | null;
@@ -25,6 +26,7 @@ export interface ManagedModule extends NavigationModule {
   isSystem: boolean;
   requiredPermission?: string | null;
   group?: string | null;
+  sectionOrder?: number | null;
 }
 
 export interface ModulePayload {
@@ -134,10 +136,13 @@ export async function deleteModule(id: string) {
   });
 }
 
-export async function reorderModules(items: { id: string; order: number }[]) {
+export async function reorderModules(payload: {
+  items?: { id: string; order: number }[];
+  sections?: { id: string; order: number }[];
+}) {
   return moduleRequest("/reorder", {
     method: "PUT",
-    body: { items },
+    body: payload,
   });
 }
 
@@ -472,9 +477,12 @@ export async function createStudent(student: {
   email?: string;
   branch: string;
   plan: string;
+  batch?: string;
+  feeTerm: string;
   joinDate: string;
   loginEmail: string;
-  loginPassword: string;
+  createInvoice?: boolean;
+  invoiceDueDate?: string;
 }) {
   const normalizedJoinDate = student.joinDate.trim();
   const [year, month, day] = normalizedJoinDate.split("-").map(Number);
@@ -557,7 +565,6 @@ export interface CurriculumApiItem {
 export interface CurriculumApiPlan {
   _id: string;
   name: string;
-  price?: number;
   duration?: number;
   durationUnit?: "MONTHS" | "DAYS";
   classesPerWeek?: number;
@@ -565,12 +572,6 @@ export interface CurriculumApiPlan {
   progressReports?: string;
   curriculum?: CurriculumApiItem[];
   programs?: { program: string | { _id: string; name: string; isActive?: boolean }; curriculum?: CurriculumApiItem[]; weeklyLimit?: number | null }[];
-  milestones?: {
-    day: number;
-    belt: string;
-    skill: string;
-    description?: string;
-  }[];
   isActive?: boolean;
 }
 
@@ -804,6 +805,7 @@ export async function updateStudent(
     email?: string;
     branch?: string;
     plan?: string;
+    feeTerm?: string;
     joinDate?: string;
     currentBelt?: string;
     status?: "ACTIVE" | "INACTIVE" | "COMPLETED";
@@ -876,7 +878,6 @@ export async function getPlanById(id: string) {
 
 export async function createPlan(plan: {
   name: string;
-  price: number;
   duration: number;
   durationUnit: "MONTHS" | "DAYS";
   classesPerWeek: number;
@@ -884,19 +885,6 @@ export async function createPlan(plan: {
   startingBelt: string;
   progressReports: string;
 
-  milestones: {
-    day: number;
-    belt: string;
-    skill: string;
-    description?: string;
-  }[];
-
-  curriculum: {
-    day: number;
-    title: string;
-    description?: string;
-    skill?: string;
-  }[];
 }) {
   const response = await fetchWithSession(`${API_URL}/plans`, {
     method: "POST",
@@ -919,27 +907,12 @@ export async function updatePlan(
   id: string,
   plan: Partial<{
     name: string;
-    price: number;
     duration: number;
     durationUnit: "MONTHS" | "DAYS";
     classesPerWeek: number;
     programs: { program: string; weeklyLimit?: number | null }[];
     startingBelt: string;
     progressReports: string;
-
-    milestones: {
-      day: number;
-      belt: string;
-      skill: string;
-      description?: string;
-    }[];
-
-    curriculum: {
-      day: number;
-      title: string;
-      description?: string;
-      skill?: string;
-    }[];
 
     isActive: boolean;
   }>,
@@ -1150,17 +1123,18 @@ export async function getBranches(): Promise<BranchesApiResponse> {
      *
      * branchData.branches
      */
-    if (branches.length > 0) {
-      const uniqueBranches = Array.from(
-        new Map(branches.map((branch) => [branch._id, branch])).values(),
-      );
-      return {
-        ...result,
-        success: result?.success !== false,
-        count: uniqueBranches.length,
-        branches: uniqueBranches,
-      };
-    }
+    const uniqueBranches = Array.from(
+      new Map(branches.map((branch) => [branch._id, branch])).values(),
+    );
+    // A successful empty response is valid: it means this database has no
+    // branches configured. Do not turn that into a fetch failure or query a
+    // second endpoint that may also return an empty list.
+    return {
+      ...result,
+      success: result?.success !== false,
+      count: uniqueBranches.length,
+      branches: uniqueBranches,
+    };
   }
 
   /*
@@ -1475,6 +1449,55 @@ export interface CurrentUserRecord {
   dataScope?: DataScope;
   permissions?: string[];
 }
+
+export type CurriculumRewardDefinitionApi = { _id?: string; rewardId: string; type: "CERTIFICATE" | "MERCHANDISE" | "POINTS" | "RECOGNITION" | "CUSTOM" | "BELT_PROGRESSION"; name: string; description?: string; quantity?: number; product?: string | null; targetBelt?: string; targetMilestoneDay?: number | null; requiresFormalGrading?: boolean; active?: boolean };
+export type LearningStepApi = { _id: string; title: string; description?: string; objectives?: string[]; activities?: string[]; estimatedMinutes?: number | null; materials?: string[]; completionCriteria?: string; coachApprovalRequired?: boolean; attendanceRequired?: boolean; assessmentRequired?: boolean; assessmentPassRequired?: boolean; assessmentPassingValue?: string; milestoneDay?: number | null; legacyTrainingDay?: number | null; isMilestone?: boolean; milestoneName?: string; milestoneDescription?: string; milestoneCriteria?: string; milestoneRequiredStepIds?: string[]; requiresCoachApproval?: boolean; rewards?: CurriculumRewardDefinitionApi[]; prerequisites?: string[]; progress?: { status: "IN_PROGRESS" | "COMPLETED"; completedAt?: string | null; assessmentResult?: string; assessmentPassed?: boolean; notes?: string } | null };
+export type CurriculumModuleApi = { _id: string; name: string; description?: string; order: number; objectives?: string[]; expectedSessions?: number | null; prerequisites?: string[]; steps: LearningStepApi[] };
+export type CurriculumVersionApi = { _id: string; plan: string; program: string; version: number; name: string; description?: string; status: "DRAFT" | "PUBLISHED" | "ARCHIVED"; modules: CurriculumModuleApi[]; publishedAt?: string | null };
+export type AdmissionPreviewApi = {
+  curricula: Array<{ programId: string; programName: string; curriculumId: string; version: number; name: string; modules: CurriculumModuleApi[] }>;
+  moduleCount: number;
+  requiredLearningSteps: number;
+  startingBelt: string;
+  eligibilityError: string;
+  timelineMessage: string;
+  programCapacity?: Array<{ programId: string; programName: string; requiredSteps: number; eligibleOccurrences: number; assignedSteps: number; shortage: number }>;
+  steps: Array<{ stepId: string; programId: string; programName: string; moduleName: string; title: string; description: string; order: number; date: string | null; startTime: string; endTime: string; unavailableReason?: string }>;
+};
+export type CurriculumPlanCapacityApi = { planId: string; duration: number; durationUnit: "MONTHS" | "DAYS"; classesPerWeek: number; maximumSessions: number; stepsByProgram: Array<{ programId: string; programName: string; curriculumId: string | null; curriculumStatus: string; version: number | null; requiredSteps: number }>; combinedSteps: number; remainingSessions: number; excessSteps: number; valid: boolean };
+export type PlannedCurriculumSessionApi = { _id: string; date: string; startTime: string; endTime: string; sessionName: string; branch?: { name?: string }; batch?: { name?: string; code?: string }; coach?: { name?: string }; curriculum?: { _id: string; version: number; name: string } | string | null; plannedStepIds?: string[]; plannedModuleIds?: string[]; attendanceId?: string };
+export type CurriculumMilestoneApi = { _id: string; milestoneStepId: string; milestoneName: string; milestoneDescription?: string; milestoneCriteria?: string; requiredStepIds: string[]; status: "PENDING_APPROVAL" | "EARNED" | "CORRECTED"; criteriaMetAt: string; earnedAt?: string | null; approvedBy?: { name?: string } | null; rewards: Array<{ _id: string; rewardId: string; type: CurriculumRewardDefinitionApi["type"]; name: string; description?: string; quantity: number; targetBelt?: string; targetMilestoneDay?: number | null; requiresFormalGrading?: boolean; status: "PENDING_APPROVAL" | "AWAITING_GRADING" | "AWAITING_PROMOTION_APPROVAL" | "EARNED" | "ISSUED" | "FULFILLED"; issuedAt?: string | null; issuedBy?: { name?: string } | null; fulfilledAt?: string | null; fulfilledBy?: { name?: string } | null; fulfillmentNote?: string; certificate?: string | null; beltHistory?: string | null }> };
+
+async function curriculumRequest<T>(path: string, method = "GET", body?: unknown): Promise<T> {
+  const response = await fetchWithSession(`${API_URL}/curricula${path}`, { method, headers: { "Content-Type": "application/json" }, ...(body === undefined ? {} : { body: JSON.stringify(body) }), cache: "no-store" });
+  const data = await response.json().catch(() => ({}));
+  if (response.status === 401 && typeof window !== "undefined") window.location.href = "/login";
+  if (!response.ok) throw new Error(data?.message || "Curriculum request failed.");
+  return data as T;
+}
+
+export const getCurriculumVersions = (planId: string, programId: string) => curriculumRequest<{ versions: CurriculumVersionApi[] }>(`/versions?planId=${encodeURIComponent(planId)}&programId=${encodeURIComponent(programId)}`);
+export async function getAdmissionPreview(input: { branchId: string; planId: string; batchId: string; joinDate: string }): Promise<AdmissionPreviewApi> {
+  const query = new URLSearchParams({ branchId: input.branchId, planId: input.planId, joinDate: input.joinDate });
+  if (input.batchId) query.set("batchId", input.batchId);
+  const response = await fetchWithSession(`${API_URL}/students/admission-preview?${query}`, { method: "GET", headers: { "Content-Type": "application/json" }, cache: "no-store" });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data?.message || "Unable to calculate the admission preview.");
+  return data as AdmissionPreviewApi;
+}
+export const getCurriculumCapacity = (planId: string, programId?: string, publishedOnly = false) => curriculumRequest<{ capacity: CurriculumPlanCapacityApi }>(`/capacity?planId=${encodeURIComponent(planId)}${programId ? `&programId=${encodeURIComponent(programId)}` : ""}${publishedOnly ? "&publishedOnly=true" : ""}`);
+export const createCurriculumDraft = (planId: string, programId: string) => curriculumRequest<{ curriculum: CurriculumVersionApi }>(`/plans/${planId}/programs/${programId}/drafts`, "POST", {});
+export const updateCurriculumDraft = (id: string, value: Pick<CurriculumVersionApi, "name" | "description" | "modules">) => curriculumRequest<{ curriculum: CurriculumVersionApi }>(`/versions/${id}`, "PUT", value);
+export const appendPublishedCurriculumModule = (id: string, module: CurriculumModuleApi) => curriculumRequest<{ curriculum: CurriculumVersionApi; capacity: CurriculumPlanCapacityApi; batchCapacityIssues: Array<{ batchId: string; name: string; code: string; message: string }> }>(`/versions/${id}/modules`, "POST", { module });
+export const publishCurriculum = (id: string) => curriculumRequest<{ curriculum: CurriculumVersionApi }>(`/versions/${id}/publish`, "POST", {});
+export const archiveCurriculum = (id: string) => curriculumRequest<{ curriculum: CurriculumVersionApi }>(`/versions/${id}/archive`, "PATCH", {});
+export const getPlannedCurriculumSessions = (planId: string, programId: string) => curriculumRequest<{ sessions: PlannedCurriculumSessionApi[] }>(`/sessions?planId=${encodeURIComponent(planId)}&programId=${encodeURIComponent(programId)}`);
+export const updatePlannedSessionContent = (sessionId: string, curriculumId: string, moduleIds: string[], stepIds: string[]) => curriculumRequest(`/sessions/${sessionId}/content`, "PUT", { curriculumId, moduleIds, stepIds });
+export const getStudentCurriculumProgress = (studentId: string, enrollmentId: string, programId: string) => curriculumRequest<{ curriculum: CurriculumVersionApi | null; progress: Array<{ stepId: string; status: "IN_PROGRESS" | "COMPLETED"; completedAt?: string | null; assessmentResult?: string; assessmentPassed?: boolean; notes?: string }>; sessions?: PlannedCurriculumSessionApi[]; milestones?: CurriculumMilestoneApi[]; legacyCurriculum?: CurriculumApiItem[] }>(`/students/${studentId}/progress?enrollmentId=${encodeURIComponent(enrollmentId)}&programId=${encodeURIComponent(programId)}`);
+export const recordStudentCurriculumProgress = (studentId: string, stepId: string, value: { enrollmentId: string; programId: string; status: "IN_PROGRESS" | "COMPLETED"; sessionId?: string; attendanceId?: string; assessmentResult?: string; assessmentPassed?: boolean; notes?: string }) => curriculumRequest(`/students/${studentId}/steps/${stepId}/progress`, "PUT", value);
+export const approveStudentCurriculumMilestone = (studentId: string, achievementId: string) => curriculumRequest(`/students/${studentId}/milestones/${achievementId}/approve`, "POST");
+export const issueStudentCurriculumReward = (studentId: string, achievementId: string, rewardId: string) => curriculumRequest(`/students/${studentId}/milestones/${achievementId}/rewards/${rewardId}/issue`, "POST");
+export const fulfillStudentCurriculumReward = (studentId: string, achievementId: string, rewardId: string, fulfillmentNote: string) => curriculumRequest(`/students/${studentId}/milestones/${achievementId}/rewards/${rewardId}/fulfill`, "POST", { fulfillmentNote });
 
 /** Exchange a recognized pre-migration ForceStrike JWT for the HttpOnly cookie once. */
 export async function migrateLegacySession(): Promise<void> {

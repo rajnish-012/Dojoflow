@@ -13,6 +13,9 @@ export interface TrainingSlot {
   sessionName: string;
   sessionTypeId?: string;
   sessionType?: string;
+  batchId?: string | null;
+  room?: string;
+  roomId?: string | { _id: string; name?: string; isActive?: boolean } | null;
   startTime: string;
   endTime: string;
   isActive: boolean;
@@ -69,6 +72,8 @@ export interface BranchScheduleResponse {
   coaches?: { _id: string; name: string }[];
 }
 
+export interface BranchRoom { _id: string; branch: string; name: string; isActive: boolean }
+
 export interface BranchCalendarHoliday {
   _id: string;
   name: string;
@@ -91,6 +96,7 @@ export interface BranchCalendarDay {
 
   isClosed: boolean;
   isTrainingDay: boolean;
+  closureReason?: string;
 
   slots: TrainingSlot[];
 
@@ -103,6 +109,9 @@ export interface BranchCalendarDay {
     | "NO_DAY_SCHEDULE"
     | "BRANCH_CLOSED"
     | "NO_ACTIVE_SLOTS"
+    | "SESSION_CLOSED"
+    | "BATCH_OUTSIDE_DATE_RANGE"
+    | "BATCH_NOT_ACTIVE"
     | "TRAINING_AVAILABLE";
 }
 
@@ -273,4 +282,19 @@ export async function getBranchMonthCalendar(
   return branchScheduleRequest(
     `/${branchId}/calendar?${params.toString()}`,
   );
+}
+
+export async function getBranchRooms(branchId: string): Promise<BranchRoom[]> {
+  const data = await branchScheduleRequest(`/rooms?branchId=${encodeURIComponent(branchId)}`);
+  return Array.isArray(data.rooms) ? data.rooms : [];
+}
+
+export async function createBranchRoom(branchId: string, name: string): Promise<BranchRoom> {
+  const data = await branchScheduleRequest("/rooms", { method: "POST", body: { branchId, name } });
+  return data.room as BranchRoom;
+}
+
+export async function updateBranchRoomStatus(roomId: string, isActive: boolean): Promise<BranchRoom> {
+  const data = await branchScheduleRequest(`/rooms/${encodeURIComponent(roomId)}`, { method: "PATCH", body: { isActive } });
+  return data.room as BranchRoom;
 }

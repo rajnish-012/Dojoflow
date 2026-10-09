@@ -18,6 +18,8 @@ const preferredWeeklySessionSchema = new mongoose.Schema(
     dayName: { type: String, default: "", trim: true },
     sessionName: { type: String, default: "", trim: true },
     sessionTypeId: { type: mongoose.Schema.Types.ObjectId, ref: "TrainingSessionType", required: true },
+    scheduleSlotId: { type: mongoose.Schema.Types.ObjectId, default: null },
+    batchId: { type: mongoose.Schema.Types.ObjectId, ref: "Batch", default: null },
     sessionTypeName: { type: String, default: "", trim: true },
     startTime: { type: String, default: "", trim: true },
     endTime: { type: String, default: "", trim: true },

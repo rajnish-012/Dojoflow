@@ -63,6 +63,7 @@ export interface TimelineStudent {
   name: string;
   currentBelt: string;
   joinDate: string;
+  firstAttendedClassDate: string | null;
   status: string;
 
   branch: {
@@ -82,10 +83,10 @@ export interface TimelineStudent {
 }
 
 export interface TimelineCurrentMilestone {
-  day: number;
   belt: string;
   skill: string;
   description: string;
+  status?: string;
 }
 
 export interface TimelineNextMilestone

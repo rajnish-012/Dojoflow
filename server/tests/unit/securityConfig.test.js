@@ -4,6 +4,10 @@ const { validateServerEnv } = require("../../src/config/env");
 const { validatePassword, sessionInvalidationTime } = require("../../src/utils/passwordPolicy");
 const bcrypt = require("bcryptjs");
 const User = require("../../src/models/User");
+const {
+  DEFAULT_MODULES,
+  REQUIRED_MODULE_KEYS,
+} = require("../../src/config/defaultModules");
 
 const validProductionEnv = () => ({
   NODE_ENV: "production",
@@ -62,4 +66,31 @@ test("User model hashes raw passwords in its save middleware", async () => {
   await saveHook.call(user);
   assert.match(user.password, /^\$2[aby]\$12\$/);
   assert.equal(await bcrypt.compare(rawPassword, user.password), true);
+});
+
+test("bootstrap admin fields validate with a null optional phone", async () => {
+  const bootstrapUser = new User({
+    name: "Bootstrap Admin",
+    email: "bootstrap-admin@example.invalid",
+    phone: null,
+    password: "a-long-test-passphrase",
+    role: "SUPER_ADMIN",
+    branch: null,
+  });
+
+  await bootstrapUser.validate();
+  assert.equal(bootstrapUser.role, "SUPER_ADMIN");
+  assert.equal(bootstrapUser.branch, null);
+});
+
+test("default sidebar modules register each key and route exactly once", () => {
+  const keys = DEFAULT_MODULES.map((module) => module.key);
+  const routes = DEFAULT_MODULES.map((module) => module.href);
+
+  assert.equal(new Set(keys).size, keys.length, "module keys must be unique");
+  assert.equal(new Set(routes).size, routes.length, "module routes must be unique");
+  assert.equal(keys.filter((key) => key === "memberships").length, 1);
+  assert.ok(REQUIRED_MODULE_KEYS.includes("grading"));
+  assert.ok(REQUIRED_MODULE_KEYS.includes("promotions"));
+  assert.ok(REQUIRED_MODULE_KEYS.includes("progress"));
 });

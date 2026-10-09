@@ -23,6 +23,7 @@ export default function DataSort({ value, options, onChange }: DataSortProps) {
       panelClassName="p-3"
       contentClassName="block"
       headerClassName="mb-2"
+      responsiveToolbar
     >
       <label className="grid gap-1 text-xs font-bold text-(--foreground-soft)">
         Sort records by

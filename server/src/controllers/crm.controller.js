@@ -5,10 +5,13 @@ const Trial = require("../models/Trial");
 const Student = require("../models/Student");
 const Branch = require("../models/Branch");
 const Plan = require("../models/Plan");
+const Batch = require("../models/Batch");
+const BranchSchedule = require("../models/BranchSchedule");
 const Invoice = require("../models/Invoice");
 const FinanceSequence = require("../models/FinanceSequence");
 const auditService = require("../services/audit.service");
 const { AUDIT_ACTIONS } = require("../config/auditActions");
+const { selectEnrollmentFeeTerm } = require("../services/enrollmentFeeTerm.service");
 const AcademySettings = require("../models/AcademySettings");
 const TrainingSessionType = require("../models/TrainingSessionType");
 const User = require("../models/User");
@@ -17,6 +20,9 @@ const { isBranchScoped } = require("../utils/access");
 const { safelyNotify } = require("../services/notification.service");
 const { academyDateKey } = require("../utils/financeDates");
 const { normalizePhone } = require("../utils/phone");
+const { sendEmailToRecipients } = require("../services/studentEmail.service");
+const { validateBillingSnapshot } = require("../services/billingSnapshot.service");
+const { reserveBatchSeat } = require("../services/batchEnrollment.service");
 
 const LEAD_STATUSES = [
   "NEW",
@@ -541,6 +547,7 @@ async function createTrial(req, res) {
       lead.status = "TRIAL_SCHEDULED";
       await lead.save();
     }
+    await sendEmailToRecipients({ recipients: [lead.email], eventKey: `trial:${trial._id}:scheduled`, category: "TRIAL_SCHEDULED", subject: "Your trial session is scheduled", text: [`Your trial session is scheduled for ${trialDate}.`, `Time: ${startTime}–${end}`, "", "Please contact the academy if you need to reschedule."].join("\n") }).catch(() => {});
     return res.status(201).json({ success: true, trial });
   } catch (error) {
     if (error.code === 11000)
@@ -623,44 +630,20 @@ async function updateTrial(req, res) {
         }
       }
     }
+    if (status === "CANCELLED" && previousStatus !== "CANCELLED") {
+      const lead = await Inquiry.findById(trial.lead).select("email").lean();
+      await sendEmailToRecipients({ recipients: [lead?.email], eventKey: `trial:${trial._id}:cancelled`, category: "TRIAL_CANCELLED", subject: "Your trial session has been cancelled", text: ["Your trial session has been cancelled.", "", "Please contact the academy to arrange another time."].join("\n") }).catch(() => {});
+    }
     return res.json({ success: true, trial });
   } catch (error) {
     return errorResponse(res, error);
   }
 }
 
-function enrollmentSnapshot(plan, branchId) {
-  const override = (plan.branchFeeOverrides || []).find(
-    (row) => String(row.branch) === String(branchId),
-  );
-  const terms = override || plan;
+function enrollmentSnapshot(plan) {
   return {
     classesPerWeek: Number(plan.classesPerWeek || 0),
     startingBelt: plan.startingBelt || "White",
-    billingSnapshot: {
-      feeName: terms.feeName || plan.name,
-      active: terms.active !== false && plan.feeActive !== false,
-      amount: Number(terms.amount ?? plan.price ?? 0),
-      billingFrequency:
-        terms.billingFrequency || plan.billingFrequency || "ONE_TIME",
-      registrationFee: Number(
-        terms.registrationFee ?? plan.registrationFee ?? 0,
-      ),
-      taxRate: Number(terms.taxRate ?? plan.taxRate ?? 0),
-      discountRules: (terms.discountRules || plan.discountRules || []).map(
-        (rule) => ({
-          _id: rule._id,
-          name: rule.name,
-          type: rule.type,
-          amount: Number(rule.amount || 0),
-          active: rule.active !== false,
-          effectiveFrom: rule.effectiveFrom || null,
-          effectiveUntil: rule.effectiveUntil || null,
-        }),
-      ),
-      effectiveFrom: terms.effectiveFrom || plan.effectiveFrom || null,
-      effectiveUntil: terms.effectiveUntil || plan.effectiveUntil || null,
-    },
     programs: (plan.programs || []).map((item) => ({
       program: item.program?._id || item.program,
       weeklyLimit: item.weeklyLimit ?? null,
@@ -707,6 +690,13 @@ async function createAdmissionInvoice({
   try {
     await session.withTransaction(async () => {
       const terms = enrollment.billingSnapshot || {};
+      const agreement = validateBillingSnapshot(enrollment);
+      if (!agreement.valid) {
+        throw Object.assign(
+          new Error(`This enrollment has no valid FeeTerm billing agreement. Missing: ${agreement.missing.join(", ")}.`),
+          { status: 409 },
+        );
+      }
       const frequency = terms.billingFrequency || "ONE_TIME";
       const cycleKey = frequency === "ONE_TIME" ? "ONE_TIME" : `${frequency}:${academyDateKey(enrollment.startDate)}`;
       const existing = await Invoice.findOne({
@@ -718,11 +708,6 @@ async function createAdmissionInvoice({
         created = existing;
         return;
       }
-      if (terms.active === false || plan.feeActive === false)
-        throw Object.assign(
-          new Error("This plan has no active fee structure."),
-          { status: 400 },
-        );
       const base = Number(terms.amount || 0);
       const registration = Number(terms.registrationFee || 0);
       const taxRate = Number(terms.taxRate || 0);
@@ -734,7 +719,7 @@ async function createAdmissionInvoice({
       const items = [];
       if (base > 0)
         items.push({
-          description: terms.feeName || plan.name,
+          description: terms.planName,
           quantity: 1,
           unitAmount: base,
           amount: base,
@@ -764,8 +749,9 @@ async function createAdmissionInvoice({
             invoiceNumber: `INV-${new Date().getFullYear()}-${String(sequence.value).padStart(6, "0")}`,
             student: student._id,
             enrollment: enrollment._id,
-            plan: plan._id,
-            branch: student.branch,
+            plan: plan?._id || enrollment.plan,
+            feeTerm: enrollment.feeTerm || terms.feeTerm || null,
+            branch: enrollment.branch || terms.branch || student.branch,
             items,
             subtotal,
             discount: 0,
@@ -786,7 +772,7 @@ async function createAdmissionInvoice({
         ],
         { session },
       );
-      await auditService.record({ req, session, action: AUDIT_ACTIONS.INVOICE_CREATED, entityType: "INVOICE", entityId: created._id, branchId: student.branch, after: { invoiceNumber: created.invoiceNumber, total: created.total, status: created.status }, metadata: { source: "LEAD_CONVERSION" }, legacy: { student: student._id, invoice: created._id } });
+      await auditService.record({ req, session, action: AUDIT_ACTIONS.INVOICE_CREATED, entityType: "INVOICE", entityId: created._id, branchId: enrollment.branch || terms.branch || student.branch, after: { invoiceNumber: created.invoiceNumber, total: created.total, status: created.status }, metadata: { source: "LEAD_CONVERSION" }, legacy: { student: student._id, invoice: created._id } });
     });
     return created;
   } finally {
@@ -849,11 +835,32 @@ async function convertLead(req, res) {
         success: false,
         message: "Selected branch or plan is unavailable.",
       });
-    if (plan.feeBranch && String(plan.feeBranch) !== String(branch._id))
-      return res.status(400).json({
-        success: false,
-        message: "Selected plan is not available to this branch.",
-      });
+    if (req.user?.role !== "SUPER_ADMIN" && !req.user?.permissions?.includes("membership.manage"))
+      return res.status(403).json({ success: false, message: "Membership management permission is required to create an enrollment." });
+    const selectedTerms = await selectEnrollmentFeeTerm({
+      feeTermId: req.body?.feeTerm,
+      plan,
+      branch,
+      startDate: joinDate,
+    });
+    const activeBatches = await Batch.find({ plan: plan._id, branch: branch._id, status: "ACTIVE" }).select("_id").lean();
+    let selectedBatchId = req.body?.batch || null;
+    const preferenceBatchIds = [...new Set((lead.preferredWeeklySessions || []).map((item) => String(item.batchId || "")).filter(Boolean))];
+    if (!selectedBatchId && preferenceBatchIds.length === 1) selectedBatchId = preferenceBatchIds[0];
+    if (!selectedBatchId && activeBatches.length === 1) selectedBatchId = activeBatches[0]._id;
+    if (activeBatches.length && !selectedBatchId) return res.status(400).json({ success: false, message: "Select a Batch for this Plan and Branch." });
+    if (selectedBatchId && !activeBatches.some((item) => String(item._id) === String(selectedBatchId))) return res.status(400).json({ success: false, message: "Choose an active Batch under the selected Plan and Branch." });
+    if (selectedBatchId && lead.preferredWeeklySessions?.length) {
+      const schedule = await BranchSchedule.findOne({ branch: branch._id }).lean();
+      const actual = (schedule?.weeklySchedule || []).flatMap((day) => (day.slots || []).filter((slot) => slot.isActive !== false && String(slot.batchId || "") === String(selectedBatchId)).map((slot) => ({ dayOfWeek: day.dayOfWeek, slot })));
+      const compatible = lead.preferredWeeklySessions.every((preference) => actual.some(({ dayOfWeek, slot }) =>
+        Number(dayOfWeek) === Number(preference.dayOfWeek) &&
+        (!preference.scheduleSlotId || String(slot._id) === String(preference.scheduleSlotId)) &&
+        String(slot.sessionTypeId) === String(preference.sessionTypeId) &&
+        String(slot.startTime) === String(preference.startTime) && String(slot.endTime) === String(preference.endTime),
+      ));
+      if (!compatible) return res.status(409).json({ success: false, message: "The selected Batch does not match the schedule preferences on this inquiry. Choose a compatible Batch or confirm a new schedule with the student." });
+    }
     const normalizedPhone = normalizePhone(lead.phone);
     const identityMatches = await Student.find({
       $or: [
@@ -900,8 +907,12 @@ async function convertLead(req, res) {
       if (latest?.convertedStudent) return res.json({ success: true, alreadyConverted: true, student: latest.convertedStudent, enrollment: latest.convertedEnrollment, invoice: latest.convertedInvoice });
       return res.status(409).json({ success: false, message: "This lead is already being converted. Refresh and retry shortly." });
     }
-    if (!student) {
-      student = await Student.create({
+    const enrollmentSession = await mongoose.startSession();
+    try {
+      await enrollmentSession.withTransaction(async () => {
+        if (selectedBatchId) await reserveBatchSeat({ batchId: selectedBatchId, planId: plan._id, branchId: branch._id, studentId: student?._id || null, startDate: joinDate, session: enrollmentSession });
+        if (!student) {
+          [student] = await Student.create([{
         name: lead.fullName,
         age: Number(req.body?.age ?? lead.age),
         phone: normalizedPhone,
@@ -914,7 +925,8 @@ async function convertLead(req, res) {
         planEnrollments: [
           {
             plan: plan._id,
-            feePlan: plan._id,
+            batch: selectedBatchId || null,
+            feeTerm: selectedTerms.term._id,
             branch: branch._id,
             program: plan.programs?.[0]?.program?._id || plan.programs?.[0]?.program || null,
             startDate: joinDate,
@@ -923,11 +935,12 @@ async function convertLead(req, res) {
             enrollmentSource: "CRM_CONVERSION",
             createdBy: req.user._id,
             statusHistory: [{ from: null, to: "ACTIVE", changedBy: req.user._id, note: "CRM admission" }],
-            ...enrollmentSnapshot(plan, branch._id),
+            ...enrollmentSnapshot(plan),
+            billingSnapshot: selectedTerms.billingSnapshot,
           },
         ],
-      });
-    } else {
+          }], { session: enrollmentSession });
+        } else {
       student.status = "ACTIVE";
       let enrollment = (student.planEnrollments || []).find(
         (item) =>
@@ -939,7 +952,8 @@ async function convertLead(req, res) {
         student.plan = plan._id;
         student.planEnrollments.push({
           plan: plan._id,
-          feePlan: plan._id,
+          batch: selectedBatchId || null,
+          feeTerm: selectedTerms.term._id,
           branch: branch._id,
           program: plan.programs?.[0]?.program?._id || plan.programs?.[0]?.program || null,
           startDate: joinDate,
@@ -948,11 +962,16 @@ async function convertLead(req, res) {
           enrollmentSource: "CRM_CONVERSION",
           createdBy: req.user._id,
           statusHistory: [{ from: null, to: "ACTIVE", changedBy: req.user._id, note: "CRM admission" }],
-          ...enrollmentSnapshot(plan, branch._id),
+          ...enrollmentSnapshot(plan),
+          billingSnapshot: selectedTerms.billingSnapshot,
         });
-        await student.save();
-      } else if (student.isModified("status")) await student.save();
-    }
+      } else if (selectedBatchId && enrollment.batch && String(enrollment.batch) !== String(selectedBatchId)) {
+        const error = new Error("This student is already assigned to another Batch. Use the Batch transfer workflow to move them."); error.status = 409; throw error;
+      } else if (selectedBatchId && !enrollment.batch) enrollment.batch = selectedBatchId;
+      await student.save({ session: enrollmentSession });
+        }
+      });
+    } finally { await enrollmentSession.endSession(); }
     const enrollment = [...(student.planEnrollments || [])]
       .reverse()
       .find(

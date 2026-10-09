@@ -65,7 +65,7 @@ export function MonthlyAttendanceChart({ data }: { data: AttendanceMonth[] }) {
     TOP + GRAPH_HEIGHT - (count / axisMax) * GRAPH_HEIGHT;
 
   return (
-    <div className="mt-4 w-full">
+    <div className="mt-4 w-full overflow-x-auto pb-2">
       <div className="mb-3 flex flex-wrap gap-x-5 gap-y-2 text-xs text-(--ink-muted)">
         <span className="inline-flex items-center gap-2">
           <span className="h-2.5 w-2.5 rounded-sm bg-(--accent)" />
@@ -79,7 +79,7 @@ export function MonthlyAttendanceChart({ data }: { data: AttendanceMonth[] }) {
       </div>
       <svg
         viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
-        className="block h-auto w-full overflow-visible"
+        className="block h-auto min-w-[680px] w-full overflow-visible 2xl:min-w-0"
         role="img"
         aria-label="Monthly regular attendance grouped bar chart showing present and absent records"
       >
@@ -196,7 +196,7 @@ export function AttendanceRateChart({ data }: { data: AttendanceMonth[] }) {
   });
 
   return (
-    <div className="mt-4 w-full">
+    <div className="mt-4 w-full overflow-x-auto pb-2">
       <div className="mb-3 flex items-center justify-between gap-3 text-xs text-(--ink-muted)">
         <span className="inline-flex items-center gap-2">
           <span className="h-2.5 w-2.5 rounded-full bg-(--accent)" />
@@ -206,7 +206,7 @@ export function AttendanceRateChart({ data }: { data: AttendanceMonth[] }) {
       </div>
       <svg
         viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
-        className="block h-auto w-full overflow-visible"
+        className="block h-auto min-w-[680px] w-full overflow-visible 2xl:min-w-0"
         role="img"
         aria-label="Monthly regular attendance rate trend from zero to one hundred percent"
       >

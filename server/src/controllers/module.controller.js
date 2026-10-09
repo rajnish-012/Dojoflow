@@ -60,7 +60,13 @@ const MODULE_PERMISSIONS = Object.freeze({
 
   makeups: "makeup.view",
 
+  calendar: "calendar.view",
+
   promotions: "promotion.view",
+
+  grading: "grading.view",
+
+  progress: "student.view",
 
   reports: "report.view",
 
@@ -154,6 +160,37 @@ const normalizeGroup = (value) => {
   if (value === null || value === undefined) return null;
   const group = String(value).trim();
   return group || undefined;
+};
+
+const NAVIGATION_SECTION_KEYS = {
+  academy: ["students", "plans", "curriculum", "attendance", "performance", "promotions", "grading", "progress"],
+  operations: ["calendar", "makeups", "inquiries", "coach-assignments", "holidays", "branch-schedules"],
+  content: ["website", "homepage", "gallery", "news", "sponsors"],
+  reports: ["reports", "analytics", "fees"],
+  administration: ["branches", "roles", "modules", "users", "staff", "permissions", "training-session-types"],
+  settings: ["settings", "academy-settings", "branding", "settings-branding", "settings-staff", "settings-maintenance", "settings-email"],
+};
+const NAVIGATION_SECTION_LABELS = {
+  academy: "academy", operations: "operations", content: "content",
+  reports: "reports", administration: "administration", settings: "settings",
+};
+
+const getSidebarSectionId = (moduleDoc) => {
+  const key = String(moduleDoc?.key || "").trim().toLowerCase();
+  if (["dashboard", "student-dashboard"].includes(key)) return "top-level";
+  const explicitGroup = String(moduleDoc?.group || "").trim();
+  if (explicitGroup) {
+    const normalized = explicitGroup.toLowerCase();
+    if (normalized === "ungrouped" || normalized === "other links") return "ungrouped";
+    for (const [id, label] of Object.entries(NAVIGATION_SECTION_LABELS)) {
+      if (normalized === id || normalized === label) return id;
+    }
+    return `custom:${normalized}`;
+  }
+  for (const [id, keys] of Object.entries(NAVIGATION_SECTION_KEYS)) {
+    if (keys.some((candidate) => key === candidate || key.startsWith(`${candidate}-`))) return id;
+  }
+  return "ungrouped";
 };
 
 /*
@@ -343,7 +380,7 @@ const getMyNavigation = async (req, res) => {
         order: 1,
         label: 1,
       })
-      .select("key label href icon order requiredPermission allowedRoles group")
+      .select("key label href icon order sectionOrder requiredPermission allowedRoles group")
       .lean();
 
     const visibleModules = modules.filter((moduleDoc) =>
@@ -628,6 +665,7 @@ const updateModule = async (req, res) => {
       if (!group) {
         return sendError(res, 400, "Sidebar section cannot be empty");
       }
+      if (group !== moduleDoc.group) moduleDoc.sectionOrder = null;
       moduleDoc.group = group;
     }
 
@@ -759,38 +797,81 @@ const deleteModule = async (req, res) => {
 
 const reorderModules = async (req, res) => {
   try {
-    const { items } = req.body;
+    const { items, sections } = req.body;
+    const hasItems = Array.isArray(items) && items.length > 0;
+    const hasSections = Array.isArray(sections) && sections.length > 0;
+    if (!hasItems && !hasSections) return sendError(res, 400, "Items or sections are required");
 
-    if (!Array.isArray(items) || items.length === 0) {
-      return sendError(res, 400, "Items are required");
+    if (hasItems) {
+      const valid = items.every((item) => mongoose.isValidObjectId(item?.id) && Number.isFinite(Number(item?.order)));
+      if (!valid || new Set(items.map((item) => String(item.id))).size !== items.length) {
+        return sendError(res, 400, "Invalid reorder data");
+      }
     }
 
-    const valid = items.every(
-      (item) =>
-        mongoose.isValidObjectId(item?.id) &&
-        Number.isFinite(Number(item?.order)),
-    );
-
-    if (!valid) {
-      return sendError(res, 400, "Invalid reorder data");
+    if (hasSections) {
+      const valid = sections.every((section) => typeof section?.id === "string" && section.id.trim() && Number.isInteger(Number(section.order)) && Number(section.order) >= 10 && Number(section.order) % 10 === 0);
+      if (!valid || new Set(sections.map((section) => section.id)).size !== sections.length || new Set(sections.map((section) => Number(section.order))).size !== sections.length) {
+        return sendError(res, 400, "Invalid section reorder data");
+      }
     }
 
-    const previousModules = await Module.find({ _id: { $in: items.map((item) => item.id) } }).select("_id key order group").lean();
+    const previousModules = hasItems
+      ? await Module.find({ _id: { $in: items.map((item) => item.id) } }).select("_id key order group").lean()
+      : [];
+    if (hasItems && previousModules.length !== items.length) return sendError(res, 404, "One or more modules were not found");
+    if (hasItems && new Set(previousModules.map(getSidebarSectionId)).size !== 1) {
+      return sendError(res, 400, "Modules can only be reordered within the same sidebar section");
+    }
+    const allModules = hasSections ? await Module.find().select("_id key group sectionOrder").lean() : [];
+    const modulesBySection = new Map();
+    for (const moduleDoc of allModules) {
+      const sectionId = getSidebarSectionId(moduleDoc);
+      if (!modulesBySection.has(sectionId)) modulesBySection.set(sectionId, []);
+      modulesBySection.get(sectionId).push(moduleDoc);
+    }
+    if (hasSections && sections.some((section) => !modulesBySection.has(section.id))) {
+      return sendError(res, 404, "One or more sidebar sections were not found");
+    }
+
     const previousById = new Map(previousModules.map((item) => [String(item._id), item]));
     const session = await mongoose.startSession();
     try {
       await session.withTransaction(async () => {
-        await Module.bulkWrite(items.map((item) => ({ updateOne: { filter: { _id: item.id }, update: { $set: { order: Number(item.order) } } } })), { session });
-        for (const item of items) {
+        if (hasItems) await Module.bulkWrite(items.map((item) => ({ updateOne: { filter: { _id: item.id }, update: { $set: { order: Number(item.order) } } } })), { session });
+        if (hasSections) {
+          const sectionUpdates = sections.flatMap((section) => modulesBySection.get(section.id).map((moduleDoc) => ({
+            updateOne: { filter: { _id: moduleDoc._id }, update: { $set: { sectionOrder: Number(section.order) } } },
+          })));
+          if (sectionUpdates.length) await Module.bulkWrite(sectionUpdates, { session });
+          for (const section of sections) {
+            for (const moduleDoc of modulesBySection.get(section.id)) {
+              if (Number(moduleDoc.sectionOrder) !== Number(section.order)) await auditService.record({ req, session, action: AUDIT_ACTIONS.MODULE_UPDATED, entityType: "MODULE", entityId: moduleDoc._id, before: { key: moduleDoc.key, sectionOrder: moduleDoc.sectionOrder ?? null }, after: { key: moduleDoc.key, sectionOrder: Number(section.order) }, metadata: { change: "SIDEBAR_SECTION_ORDER", sectionId: section.id } });
+            }
+          }
+        }
+        for (const item of items || []) {
           const previous = previousById.get(String(item.id));
           if (previous && Number(previous.order) !== Number(item.order)) await auditService.record({ req, session, action: AUDIT_ACTIONS.MODULE_UPDATED, entityType: "MODULE", entityId: item.id, before: { key: previous.key, order: previous.order, group: previous.group }, after: { key: previous.key, order: Number(item.order), group: previous.group }, metadata: { change: "SIDEBAR_ORDER" } });
         }
       });
     } finally { await session.endSession(); }
 
+    const updatedSections = hasSections
+      ? await Module.find().select("key group sectionOrder").lean().then((updatedModules) => {
+        const actualOrders = new Map();
+        for (const section of sections) {
+          const members = updatedModules.filter((moduleDoc) => getSidebarSectionId(moduleDoc) === section.id);
+          if (members.length) actualOrders.set(section.id, Math.min(...members.map((moduleDoc) => Number(moduleDoc.sectionOrder)).filter(Number.isFinite)));
+        }
+        return [...actualOrders.entries()].map(([id, sectionOrder]) => ({ id, sectionOrder })).sort((a, b) => a.sectionOrder - b.sectionOrder);
+      })
+      : undefined;
+
     res.status(200).json({
       success: true,
       message: "Order updated successfully",
+      ...(updatedSections ? { sections: updatedSections } : {}),
     });
   } catch (error) {
     console.error("Reorder modules error:", error);

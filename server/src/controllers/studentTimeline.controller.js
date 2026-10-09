@@ -6,12 +6,14 @@ const Makeup = require("../models/Makeup");
 const CoachStudentAssignment = require("../models/CoachStudentAssignment");
 const { isBranchScoped } = require("../utils/access");
 const { findEnrollmentForDate } = require("../services/enrollmentLifecycle.service");
+const { resolveEnrollmentFirstAttendedClassDate } = require("../services/enrollmentAttendance.service");
 const { getProgramLearningProgress } = require("../services/programProgress.service");
 const { resolveProgramCurriculum } = require("../services/curriculumResolver.service");
 const { withAttendanceSessionDetails } = require("../utils/attendanceSession");
 const Invoice = require("../models/Invoice");
 const Payment = require("../models/Payment");
 const BeltHistory = require("../models/BeltHistory");
+const StudentCurriculumMilestone = require("../models/StudentCurriculumMilestone");
 
 /* ============================================================
    DATE HELPERS
@@ -153,14 +155,6 @@ function getStatusLabel(status) {
     default:
       return "Upcoming";
   }
-}
-
-function getTimelineType(item, milestoneDays) {
-  if (milestoneDays.has(item.day)) {
-    return "MILESTONE";
-  }
-
-  return "TRAINING";
 }
 
 /* ============================================================
@@ -317,10 +311,8 @@ const getStudentTimeline = async (req, res) => {
        Milestones
     -------------------------------------------------------- */
 
-    const milestones = Array.isArray(plan.milestones)
-      ? [...plan.milestones].sort(
-          (a, b) => Number(a.day) - Number(b.day),
-        )
+    const curriculumMilestones = enrollment?._id && selectedEntitlement.curriculumVersion
+      ? await StudentCurriculumMilestone.find({ student: student._id, enrollment: enrollment._id, program: selectedProgramId, curriculum: selectedEntitlement.curriculumVersion }).sort({ criteriaMetAt: -1, createdAt: -1 }).lean()
       : [];
 
     /* --------------------------------------------------------
@@ -423,14 +415,6 @@ const getStudentTimeline = async (req, res) => {
       makeupByDay.set(day, record);
     });
 
-    /* --------------------------------------------------------
-       Milestone days
-    -------------------------------------------------------- */
-
-    const milestoneDays = new Set(
-      milestones.map((milestone) => Number(milestone.day)),
-    );
-
     /* ========================================================
        BUILD TIMELINE
     ======================================================== */
@@ -448,25 +432,16 @@ const getStudentTimeline = async (req, res) => {
         getAttendanceState(attendanceRecord);
 
       /*
-       * Day 1 = join date
-       * Day 2 = join date + 1
-       * Day 3 = join date + 2
+       * The displayed date is the actual attendance or recovery date.
        */
       const date = attendanceRecord?.date || makeupRecord?.makeupDate || makeupRecord?.originalDate || null;
-
-      const milestone = milestones.find(
-        (entry) => Number(entry.day) === day,
-      );
 
       return {
         day,
 
         date: date ? formatDate(date) : null,
 
-        type: getTimelineType(
-          item,
-          milestoneDays,
-        ),
+        type: "TRAINING",
 
         title:
           item.title ||
@@ -536,137 +511,8 @@ const getStudentTimeline = async (req, res) => {
             }
           : null,
 
-        milestone: milestone
-          ? {
-              day: Number(milestone.day),
-
-              belt:
-                milestone.belt || "",
-
-              skill:
-                milestone.skill || "",
-
-              description:
-                milestone.description || "",
-            }
-          : null,
+        milestone: null,
       };
-    });
-
-    /* ========================================================
-       ADD MILESTONES WITHOUT CURRICULUM
-    ======================================================== */
-
-    milestones.forEach((milestone) => {
-      const day = Number(milestone.day);
-
-      const exists = timeline.some(
-        (item) => item.day === day,
-      );
-
-      if (exists) {
-        return;
-      }
-
-      const attendanceRecord =
-        attendanceByDay.get(day) || null;
-
-      const makeupRecord =
-        makeupByDay.get(day) || null;
-
-      const status =
-        getAttendanceState(
-          attendanceRecord,
-        );
-
-      const date = attendanceRecord?.date || makeupRecord?.makeupDate || makeupRecord?.originalDate || null;
-
-      timeline.push({
-        day,
-
-        date: date ? formatDate(date) : null,
-
-        type: "MILESTONE",
-
-        title: milestone.belt
-          ? `${milestone.belt} Belt Milestone`
-          : `Milestone Day ${day}`,
-
-        description:
-          milestone.description || "",
-
-        skill:
-          milestone.skill || "",
-
-        status,
-
-        statusLabel:
-          getStatusLabel(status),
-
-        attendance: attendanceRecord
-          ? {
-              _id: attendanceRecord._id,
-
-              date: formatDate(
-                attendanceRecord.date,
-              ),
-
-              status:
-                attendanceRecord.status,
-
-              sessionName:
-                attendanceRecord.sessionName || "",
-
-              sessionStartTime:
-                attendanceRecord.sessionStartTime || "",
-
-              sessionEndTime:
-                attendanceRecord.sessionEndTime || "",
-
-              makeupRequired:
-                Boolean(
-                  attendanceRecord.makeupRequired,
-                ),
-
-              makeupCompleted:
-                Boolean(
-                  attendanceRecord.makeupCompleted,
-                ),
-            }
-          : null,
-
-        makeup: makeupRecord
-          ? {
-              _id: makeupRecord._id,
-
-              status:
-                makeupRecord.status,
-
-              originalDate:
-                formatDate(
-                  makeupRecord.originalDate,
-                ),
-
-              makeupDate:
-                formatDate(
-                  makeupRecord.makeupDate,
-                ),
-            }
-          : null,
-
-        milestone: {
-          day,
-
-          belt:
-            milestone.belt || "",
-
-          skill:
-            milestone.skill || "",
-
-          description:
-            milestone.description || "",
-        },
-      });
     });
 
     /* --------------------------------------------------------
@@ -695,6 +541,7 @@ const getStudentTimeline = async (req, res) => {
       canViewFinance ? Payment.find({ student: student._id }).select("_id amount kind paymentDate createdAt").sort({ paymentDate: -1 }).limit(100).lean() : [],
     ]);
     const activity = [{ type: "REGISTRATION", title: "Student registered", date: student.registrationDate || student.createdAt, details: student.name }];
+    curriculumMilestones.forEach((item) => activity.push({ type: "CURRICULUM_MILESTONE", title: item.status === "EARNED" ? `Milestone earned: ${item.milestoneName}` : `Milestone awaiting approval: ${item.milestoneName}`, date: item.earnedAt || item.criteriaMetAt, details: item.milestoneCriteria || item.milestoneDescription || "" }));
     (student.planEnrollments || []).forEach((item) => {
       activity.push({ type: item.enrollmentSource === "RENEWAL" ? "RENEWAL" : "ENROLLMENT", title: item.enrollmentSource === "RENEWAL" ? "Enrollment renewed" : "Enrollment started", date: item.startDate || item.createdAt, details: item.plan?.name || item.enrollmentSource || "Plan" });
       (item.statusHistory || []).forEach((change) => activity.push({ type: "STATUS_CHANGE", title: `Enrollment ${String(change.to).toLowerCase()}`, date: change.changedAt, details: change.note || [change.from, change.to].filter(Boolean).join(" → ") }));
@@ -710,39 +557,14 @@ const getStudentTimeline = async (req, res) => {
        Current milestone
     -------------------------------------------------------- */
 
-    const currentMilestone =
-      milestones
-        .filter(
-          (milestone) =>
-            Number(milestone.day) <=
-            currentTrainingDay,
-        )
-        .sort(
-          (a, b) =>
-            Number(b.day) -
-            Number(a.day),
-        )[0] || null;
-
-    /* --------------------------------------------------------
-       Next milestone
-    -------------------------------------------------------- */
-
-    const nextMilestone =
-      milestones.find(
-        (milestone) =>
-          Number(milestone.day) >
-            currentTrainingDay &&
-          String(milestone.belt || "")
-            .trim()
-            .toLowerCase() !==
-            String(currentBelt || "")
-              .trim()
-              .toLowerCase(),
-      ) || null;
-
-    // Milestones are measured in attended program sessions; without
-    // a scheduled class forecast, an exact calendar date is not known.
-    const nextMilestoneDate = null;
+    const currentMilestone = curriculumMilestones.find((item) => item.status === "EARNED") || null;
+    const nextMilestone = curriculumMilestones.find((item) => item.status === "PENDING_APPROVAL") || curriculumMilestones.find((item) => item.status === "EARNED" && (item.rewards || []).some((reward) => ["AWAITING_GRADING", "AWAITING_PROMOTION_APPROVAL"].includes(reward.status))) || null;
+    const milestoneSummary = (item) => item ? {
+      belt: (item.rewards || []).find((reward) => reward.type === "BELT_PROGRESSION")?.targetBelt || "",
+      skill: item.milestoneName || "",
+      description: item.milestoneDescription || item.milestoneCriteria || "",
+      status: item.status === "PENDING_APPROVAL" ? "AWAITING_APPROVAL" : ((item.rewards || []).find((reward) => reward.type === "BELT_PROGRESSION")?.status || item.status),
+    } : null;
 
     /* ========================================================
        RESPONSE
@@ -763,6 +585,10 @@ const getStudentTimeline = async (req, res) => {
           formatDate(
             student.joinDate,
           ),
+
+        firstAttendedClassDate: enrollment
+          ? formatDate(await resolveEnrollmentFirstAttendedClassDate({ studentId: student._id, enrollment }))
+          : null,
 
         status:
           student.status,
@@ -809,7 +635,7 @@ const getStudentTimeline = async (req, res) => {
         program: selectedEntitlement.program,
 
         totalMilestones:
-          milestones.length,
+          curriculumMilestones.length,
 
         completedTrainingDay:
           currentTrainingDay,
@@ -817,54 +643,8 @@ const getStudentTimeline = async (req, res) => {
         currentBelt:
           currentBelt,
 
-        currentMilestone:
-          currentMilestone
-            ? {
-                day: Number(
-                  currentMilestone.day,
-                ),
-
-                belt:
-                  currentMilestone.belt ||
-                  "",
-
-                skill:
-                  currentMilestone.skill ||
-                  "",
-
-                description:
-                  currentMilestone.description ||
-                  "",
-              }
-            : null,
-
-        nextMilestone:
-          nextMilestone
-            ? {
-                day: Number(
-                  nextMilestone.day,
-                ),
-
-                belt:
-                  nextMilestone.belt ||
-                  "",
-
-                skill:
-                  nextMilestone.skill ||
-                  "",
-
-                description:
-                  nextMilestone.description ||
-                  "",
-
-                date:
-                  nextMilestoneDate
-                    ? formatDate(
-                        nextMilestoneDate,
-                      )
-                    : null,
-              }
-            : null,
+        currentMilestone: milestoneSummary(currentMilestone),
+        nextMilestone: nextMilestone ? { ...milestoneSummary(nextMilestone), date: null } : null,
 
         today:
           formatDate(today),

@@ -243,7 +243,7 @@ permissions: ["holiday.view", "holiday.manage"],
 },
 {
 key: "branch-schedules",
-label: "Branch Schedules",
+label: "Training Availability",
 permissions: [
 "branch_schedule.view",
 "branch_schedule.manage",

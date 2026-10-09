@@ -1,5 +1,6 @@
 const Student = require("../models/Student");
 const { safelyNotify } = require("./notification.service");
+const { sendStudentEmail } = require("./studentEmail.service");
 const {
   daysUntil,
   RENEWAL_REMINDERS,
@@ -49,6 +50,7 @@ async function refreshEnrollmentReminders() {
             eventKey: `membership:${enrollment._id}:expiring:${remaining}`,
           }),
         );
+        notifications.push(sendStudentEmail({ studentId: student._id, eventKey: `membership:${enrollment._id}:expiring:${remaining}`, category: "MEMBERSHIP_EXPIRING", subject: "Your membership is expiring soon", text: [`Your membership expires in ${remaining} day${remaining === 1 ? "" : "s"}.`, "", "Please contact the academy to discuss renewal options."].join("\n") }).catch(() => {}));
       } else if (remaining < 0 && enrollment.status === "EXPIRED") {
         notifications.push(
           safelyNotify({
@@ -64,6 +66,7 @@ async function refreshEnrollmentReminders() {
             eventKey: `membership:${enrollment._id}:expired`,
           }),
         );
+        notifications.push(sendStudentEmail({ studentId: student._id, eventKey: `membership:${enrollment._id}:expired`, category: "MEMBERSHIP_EXPIRED", subject: "Your membership has expired", text: ["Your membership has expired.", "", "Please contact the academy to renew your membership."].join("\n") }).catch(() => {}));
       }
     }
     if (changed) await student.save();

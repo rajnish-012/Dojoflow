@@ -4,7 +4,7 @@ import Card from "./Card";
 type DataTableSectionProps = {
   title: string;
   description: string;
-  icon: ReactNode;
+  icon?: ReactNode;
   toolbar?: ReactNode;
   children: ReactNode;
   className?: string;
@@ -27,9 +27,7 @@ export default function DataTableSection({
         className={`flex flex-col justify-between gap-5 border-b border-(--line) px-5 py-5 sm:px-6 lg:flex-row lg:items-center ${headerClassName}`}
       >
         <div className="flex min-w-0 items-center gap-2">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-(--accent-soft) text-(--accent)">
-            {icon}
-          </div>
+          {icon && <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-(--accent-soft) text-(--accent)">{icon}</div>}
           <div className="min-w-0">
             <h2 className="text-xl font-extrabold tracking-tight text-(--foreground)">
               {title}

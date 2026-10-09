@@ -15,6 +15,7 @@ type AttendanceModalProps = {
   onConfirm: () => void;
   sessionSlotId: string;
   onSessionChange: (id: string) => void;
+  date: string;
 };
 
 export default function AttendanceModal({
@@ -28,6 +29,7 @@ export default function AttendanceModal({
   onConfirm,
   sessionSlotId,
   onSessionChange,
+  date,
 }: AttendanceModalProps) {
   if (!row || !status) {
     return null;
@@ -44,7 +46,7 @@ export default function AttendanceModal({
       open={open}
       onClose={onClose}
       title={isAbsent ? "Mark student absent" : "Mark student present"}
-      description="Review the training step before saving this attendance record."
+      description="Attendance is recorded separately from curriculum learning progress."
     >
       <div className="space-y-5">
         {error && (
@@ -143,6 +145,27 @@ export default function AttendanceModal({
             </Select>
           </div>
         )}
+
+        {selectedSlot && (
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--card-soft)] p-4">
+            <p className="text-xs font-bold uppercase tracking-[0.12em] text-[var(--ink-muted)]">Selected session</p>
+            <dl className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
+              <div><dt className="text-xs text-[var(--ink-muted)]">Session</dt><dd className="font-semibold">{selectedSlot.sessionName || "Training Session"}</dd></div>
+              <div><dt className="text-xs text-[var(--ink-muted)]">Date and time</dt><dd className="font-semibold">{date} · {selectedSlot.startTime}–{selectedSlot.endTime}</dd></div>
+              <div><dt className="text-xs text-[var(--ink-muted)]">Branch</dt><dd className="font-semibold">{row.student.branch?.name || "Current branch"}</dd></div>
+              <div><dt className="text-xs text-[var(--ink-muted)]">Batch</dt><dd className="font-semibold">{selectedSlot.batchName || "Legacy / unassigned"}</dd></div>
+              <div><dt className="text-xs text-[var(--ink-muted)]">Program</dt><dd className="font-semibold">{selectedSlot.programName || "—"}</dd></div>
+            </dl>
+          </div>
+        )}
+
+        {selectedSlot?.plannedCurriculum?.length ? (
+          <div className="rounded-xl border border-[var(--accent)]/20 bg-[var(--accent-soft)] p-4">
+            <p className="text-xs font-bold uppercase tracking-[0.12em] text-[var(--accent)]">Planned Session content · v{selectedSlot.plannedCurriculumVersion?.version}</p>
+            <ul className="mt-3 space-y-2 text-sm">{selectedSlot.plannedCurriculum.map((step) => <li key={step._id}><span className="font-semibold">{step.moduleName}: {step.title}</span>{step.description && <span className="block text-xs text-[var(--ink-muted)]">{step.description}</span>}</li>)}</ul>
+            <p className="mt-3 text-xs text-[var(--ink-muted)]">Recording attendance does not mark these learning steps complete.</p>
+          </div>
+        ) : null}
 
         <div className="rounded-xl border border-[var(--border)] p-4">
           <p className="text-xs font-bold uppercase tracking-[0.12em] text-[var(--ink-muted)]">

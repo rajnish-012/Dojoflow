@@ -1,8 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { LayoutGrid, Pencil, Plus, RefreshCw, Search, Trash2 } from "lucide-react";
-import { Badge, Button, DataTableSection, DataFilters, DataSort, ConfirmationDialog, ErrorState, Input, LoadingSpinner, Modal, PageHeader, Select, TableHeading, TablePagination, Textarea, type ActiveFilter } from "@/components/ui";
+import { Eye, EyeOff, LayoutGrid, Pencil, Plus, RefreshCw, Search, Trash2 } from "lucide-react";
+import { Badge, Button, DataTableSection, DataTableToolbar, DataFilters, DataSort, ConfirmationDialog, ErrorState, IconButton, Input, LoadingSpinner, Modal, PageHeader, Select, TableHeading, TablePagination, Textarea, type ActiveFilter } from "@/components/ui";
 import { useCan, PERMISSIONS } from "@/lib/permissions";
 import { createTrainingSessionType, deleteTrainingSessionType, getTrainingSessionTypes, updateTrainingSessionType, type TrainingSessionTypeRecord } from "@/lib/trainingSessionTypeApi";
 import { toast } from "@/lib/toast";
@@ -101,8 +101,8 @@ export default function TrainingSessionTypesPage() {
       description="Programs used by plans and branch schedules."
       icon={<LayoutGrid size={18} />}
       toolbar={
-        <div className="flex w-full flex-col gap-2 lg:w-auto lg:flex-row lg:items-start">
-          <label className="relative w-full lg:w-[340px]">
+        <DataTableToolbar>
+          <label data-toolbar-search className="relative w-full lg:w-[340px]">
             <Search size={17} aria-hidden="true" className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-(--ink-faint)" />
             <Input
               type="search"
@@ -116,6 +116,7 @@ export default function TrainingSessionTypesPage() {
           <DataFilters
             activeFilters={activeFilters}
             onClearAll={() => { setSearch(""); setStatusFilter(""); setCurrentPage(1); }}
+            responsiveToolbar
           >
             <label className="grid gap-1.5 text-xs font-bold text-(--foreground-soft)">
               Status
@@ -137,9 +138,9 @@ export default function TrainingSessionTypesPage() {
               { value: "sessions-asc", label: "Sessions: fewest first" },
             ]}
           />
-        </div>
+        </DataTableToolbar>
       }
-    ><div className="overflow-x-auto"><table className="w-full min-w-[900px] border-collapse"><thead className="border-b border-(--line) bg-(--surface)"><tr><TableHeading>Program</TableHeading><TableHeading>Description</TableHeading><TableHeading>Status</TableHeading><TableHeading>Scheduled sessions</TableHeading><TableHeading align="right">Actions</TableHeading></tr></thead><tbody className="divide-y divide-(--line)">{visibleTypes.map((type) => <tr key={type._id}><td className="px-6 py-5 text-sm font-semibold text-(--foreground)">{type.name}<span className="mt-1 block text-xs font-normal text-(--ink-muted)">{type.slug}</span></td><td className="px-6 py-5 text-sm text-(--ink-muted)">{type.description || "—"}</td><td className="px-6 py-5"><Badge variant={type.isActive ? "success" : "neutral"}>{type.isActive ? "Active" : "Inactive"}</Badge></td><td className="px-6 py-5 text-sm text-(--ink-muted)">{type.sessionsCount || 0}</td><td className="px-6 py-5"><div className="flex justify-end gap-2">{canUpdate && <><Button size="sm" variant="outline" onClick={() => openForm(type)}><Pencil size={14} />Edit</Button><Button size="sm" variant="outline" onClick={() => void toggle(type)}>{type.isActive ? "Deactivate" : "Activate"}</Button></>}{canDelete && !type.sessionsCount && <Button size="sm" variant="danger" onClick={() => setDeleteTarget(type)} aria-label={`Delete ${type.name}`}><Trash2 size={14} /></Button>}</div></td></tr>)}{filteredTypes.length === 0 && <tr><td colSpan={5} className="px-6 py-12 text-center text-sm text-(--ink-muted)">{types.length === 0 ? "No programs yet. Add one to make it available in branch schedules." : "No programs match the current search and filters."}</td></tr>}</tbody></table></div><TablePagination currentPage={page} totalPages={totalPages} totalItems={filteredTypes.length} visibleItems={visibleTypes.length} pageSize={pageSize} entityLabel="programs" onPrevious={() => setCurrentPage((value) => Math.max(1, value - 1))} onNext={() => setCurrentPage((value) => Math.min(totalPages, value + 1))} onPageSizeChange={(value) => { setPageSize(value); setCurrentPage(1); }} /></DataTableSection>}
+    ><div className="overflow-x-auto"><table className="w-full min-w-[900px] border-collapse"><thead className="border-b border-(--line) bg-(--surface)"><tr><TableHeading>Program</TableHeading><TableHeading>Description</TableHeading><TableHeading>Status</TableHeading><TableHeading>Scheduled sessions</TableHeading><TableHeading align="right">Actions</TableHeading></tr></thead><tbody className="divide-y divide-(--line)">{visibleTypes.map((type) => <tr key={type._id}><td className="px-6 py-5 text-sm font-semibold text-(--foreground)">{type.name}<span className="mt-1 block text-xs font-normal text-(--ink-muted)">{type.slug}</span></td><td className="px-6 py-5 text-sm text-(--ink-muted)">{type.description || "—"}</td><td className="px-6 py-5"><Badge variant={type.isActive ? "success" : "neutral"}>{type.isActive ? "Active" : "Inactive"}</Badge></td><td className="px-6 py-5 text-sm text-(--ink-muted)">{type.sessionsCount || 0}</td><td className="px-6 py-5"><div className="flex justify-end gap-2">{canUpdate && <><IconButton label={`Edit ${type.name}`} title="Edit program" onClick={() => openForm(type)}><Pencil size={16} /></IconButton><IconButton label={`${type.isActive ? "Deactivate" : "Activate"} ${type.name}`} title={type.isActive ? "Deactivate program" : "Activate program"} onClick={() => void toggle(type)}>{type.isActive ? <EyeOff size={16} /> : <Eye size={16} />}</IconButton></>}{canDelete && !type.sessionsCount && <IconButton variant="danger" label={`Delete ${type.name}`} title="Delete program" onClick={() => setDeleteTarget(type)}><Trash2 size={16} /></IconButton>}</div></td></tr>)}{filteredTypes.length === 0 && <tr><td colSpan={5} className="px-6 py-12 text-center text-sm text-(--ink-muted)">{types.length === 0 ? "No programs yet. Add one to make it available in branch schedules." : "No programs match the current search and filters."}</td></tr>}</tbody></table></div><TablePagination currentPage={page} totalPages={totalPages} totalItems={filteredTypes.length} visibleItems={visibleTypes.length} pageSize={pageSize} entityLabel="programs" onPrevious={() => setCurrentPage((value) => Math.max(1, value - 1))} onNext={() => setCurrentPage((value) => Math.min(totalPages, value + 1))} onPageSizeChange={(value) => { setPageSize(value); setCurrentPage(1); }} /></DataTableSection>}
     <Modal open={modalOpen} onClose={() => !saving && setModalOpen(false)} title={editing ? "Edit program" : "Add program"} description="Programs are included in plans; scheduled sessions assign a time and branch to a program." footer={<><Button variant="outline" onClick={() => setModalOpen(false)} disabled={saving}>Cancel</Button><Button onClick={() => void save()} loading={saving}>{editing ? "Save changes" : "Create program"}</Button></>}>
       <div className="space-y-4"><label className="block text-sm font-semibold">Name<Input autoFocus value={draft.name} maxLength={80} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="e.g. Yoga" /></label><label className="block text-sm font-semibold">Description<Textarea value={draft.description} maxLength={500} onChange={(e) => setDraft({ ...draft, description: e.target.value })} rows={3} /></label><label className="block text-sm font-semibold">Icon key (optional)<Input value={draft.icon} onChange={(e) => setDraft({ ...draft, icon: e.target.value })} placeholder="e.g. Activity" /></label><label className="block text-sm font-semibold">Display order<Input type="number" value={draft.displayOrder} onChange={(e) => setDraft({ ...draft, displayOrder: e.target.value })} /></label></div>
     </Modal>

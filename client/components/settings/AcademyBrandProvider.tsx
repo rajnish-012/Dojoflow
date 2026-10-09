@@ -93,6 +93,20 @@ const EMPTY_SETTINGS: AcademySettings = {
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api";
 const NORMALIZED_API_URL = API_URL.replace(/\/+$/, "");
+const BRANDING_CACHE_KEY = "forcestrike-academy-branding-v1";
+
+class AcademyBrandingHttpError extends Error {
+  status: number;
+
+  constructor(status: number) {
+    super(`Academy branding request returned HTTP ${status}.`);
+    this.name = "AcademyBrandingHttpError";
+    this.status = status;
+  }
+}
+
+let brandingRequestInFlight: Promise<AcademySettings> | null = null;
+let lastBrandingWarning: { key: string; at: number } | null = null;
 
 /* =========================================================
    CONTEXT
@@ -191,15 +205,142 @@ function addVersionParam(url: string, version: string) {
  * }
  */
 
-function extractSettings(payload: any): AcademySettings {
+function extractSettings(payload: unknown): AcademySettings {
+  const record =
+    payload && typeof payload === "object" && !Array.isArray(payload)
+      ? (payload as Record<string, unknown>)
+      : null;
+  const data =
+    record?.data && typeof record.data === "object" && !Array.isArray(record.data)
+      ? (record.data as Record<string, unknown>)
+      : null;
   const candidate =
-    payload?.settings ??
-    payload?.data?.settings ??
-    payload?.data ??
-    payload?.academySettings ??
+    record?.settings ??
+    data?.settings ??
+    record?.data ??
+    record?.academySettings ??
     null;
 
   return normalizeSettings(candidate);
+}
+
+function requestPublicAcademySettings(): Promise<AcademySettings> {
+  if (brandingRequestInFlight) return brandingRequestInFlight;
+
+  const request = async () => {
+    let response: Response | null = null;
+    let networkError: unknown;
+
+    // The API can start slightly after the client during local/dev startup.
+    // Retry only network failures; HTTP errors won't benefit from another try.
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        response = await fetch(`${NORMALIZED_API_URL}/settings/academy/public`, {
+          method: "GET",
+          // Keep this a simple CORS request. A Content-Type header on a GET
+          // forces a preflight and spends an extra request against /api limits.
+          cache: "no-store",
+        });
+        break;
+      } catch (error) {
+        networkError = error;
+        if (attempt < 2) {
+          await new Promise((resolve) =>
+            window.setTimeout(resolve, 400 * (attempt + 1)),
+          );
+        }
+      }
+    }
+
+    if (!response) {
+      throw networkError instanceof Error
+        ? networkError
+        : new Error("Academy settings API is unreachable.");
+    }
+
+    if (!response.ok) throw new AcademyBrandingHttpError(response.status);
+
+    const payload = await response.json();
+    return extractSettings(payload);
+  };
+
+  brandingRequestInFlight = request().finally(() => {
+    brandingRequestInFlight = null;
+  });
+
+  return brandingRequestInFlight;
+}
+
+function readCachedBranding(): AcademySettings | null {
+  try {
+    const cached = window.localStorage.getItem(BRANDING_CACHE_KEY);
+    if (!cached) return null;
+
+    const settings = normalizeSettings(JSON.parse(cached));
+    const hasBranding = [
+      settings.academyName,
+      settings.tagline,
+      settings.logoUrl,
+      settings.faviconUrl,
+      settings.primaryColor,
+      settings.secondaryColor,
+    ].some((value) => value.trim().length > 0);
+
+    return hasBranding ? settings : null;
+  } catch {
+    return null;
+  }
+}
+
+function describeBrandingFailure(error: unknown) {
+  if (error instanceof AcademyBrandingHttpError) {
+    const status = error.status;
+    const category =
+      status === 401
+        ? "unauthorized"
+        : status === 403
+          ? "forbidden"
+          : status === 404
+            ? "endpoint not found"
+            : status === 429
+              ? "rate limited"
+              : status >= 500
+                ? "backend server error"
+                : "HTTP error";
+
+    return { key: `${category}:${status}`, category, detail: `HTTP ${status}` };
+  }
+
+  if (error instanceof TypeError) {
+    return {
+      key: "network unavailable",
+      category: "network unavailable",
+      detail: error.message,
+    };
+  }
+
+  return {
+    key: "invalid response",
+    category: "invalid response",
+    detail: error instanceof Error ? error.message : "Unknown response error",
+  };
+}
+
+function warnBrandingFailure(error: unknown) {
+  const failure = describeBrandingFailure(error);
+  const now = Date.now();
+  if (
+    lastBrandingWarning?.key === failure.key &&
+    now - lastBrandingWarning.at < 30_000
+  ) {
+    return;
+  }
+
+  lastBrandingWarning = { key: failure.key, at: now };
+  console.warn(
+    `[browser] Academy branding refresh failed (${failure.category}) from ${NORMALIZED_API_URL}. Keeping the last-known branding.`,
+    failure.detail,
+  );
 }
 
 /* =========================================================
@@ -224,59 +365,47 @@ export default function AcademyBrandProvider({
   const loadSettings = useCallback(async () => {
     try {
       setLoading(true);
-
-      let response: Response | null = null;
-      let networkError: unknown;
-
-      // The API can start slightly after the client during local/dev
-      // startup. Retry only fetch/network failures; HTTP errors should be
-      // surfaced immediately and won't benefit from another request.
-      for (let attempt = 0; attempt < 3; attempt += 1) {
-        try {
-          response = await fetch(
-            `${NORMALIZED_API_URL}/settings/academy/public`,
-            {
-              method: "GET",
-              headers: {
-                "Content-Type": "application/json",
-              },
-              cache: "no-store",
-            },
-          );
-          break;
-        } catch (error) {
-          networkError = error;
-          if (attempt < 2) {
-            await new Promise((resolve) =>
-              window.setTimeout(resolve, 400 * (attempt + 1)),
-            );
-          }
-        }
-      }
-
-      if (!response) {
-        throw networkError instanceof Error
-          ? networkError
-          : new Error("Academy settings API is unreachable.");
-      }
-
-      const payload = await response.json();
-
-      if (!response.ok) {
-        throw new Error(payload?.message || "Failed to load academy settings.");
-      }
-
-      const latestSettings = extractSettings(payload);
-
+      const latestSettings = await requestPublicAcademySettings();
       setSettings(latestSettings);
-    } catch (error) {
-      console.warn(
-        `Academy branding could not be refreshed from ${NORMALIZED_API_URL}. The last successfully loaded branding will remain in use.`,
-        error instanceof Error ? error.message : error,
-      );
+      lastBrandingWarning = null;
 
-      // Never substitute hardcoded academy data. On first load the context
-      // stays empty; on refresh, the last successfully loaded values remain.
+      try {
+        const hasBranding = [
+          latestSettings.academyName,
+          latestSettings.tagline,
+          latestSettings.logoUrl,
+          latestSettings.faviconUrl,
+          latestSettings.primaryColor,
+          latestSettings.secondaryColor,
+        ].some((value) => value.trim().length > 0);
+
+        if (hasBranding) {
+          window.localStorage.setItem(
+            BRANDING_CACHE_KEY,
+            JSON.stringify(latestSettings),
+          );
+        } else {
+          window.localStorage.removeItem(BRANDING_CACHE_KEY);
+        }
+      } catch {
+        // Storage can be disabled; in-memory branding still works normally.
+      }
+    } catch (error) {
+      setSettings((currentSettings) => {
+        const hasCurrentBranding = [
+          currentSettings.academyName,
+          currentSettings.tagline,
+          currentSettings.logoUrl,
+          currentSettings.faviconUrl,
+          currentSettings.primaryColor,
+          currentSettings.secondaryColor,
+        ].some((value) => value.trim().length > 0);
+
+        return hasCurrentBranding
+          ? currentSettings
+          : readCachedBranding() || currentSettings;
+      });
+      warnBrandingFailure(error);
     } finally {
       setLoading(false);
       setInitialized(true);
@@ -288,7 +417,15 @@ export default function AcademyBrandProvider({
   ======================================================= */
 
   useEffect(() => {
-    void loadSettings();
+    let active = true;
+    const timer = window.setTimeout(() => {
+      if (active) void loadSettings();
+    }, 0);
+
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
   }, [loadSettings]);
 
   /* Keep browser metadata aligned if Next.js rewrites the document head on navigation. */
